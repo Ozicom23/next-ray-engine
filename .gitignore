@@ -40,3 +40,6 @@ compressor/mod/
 *~
 
 __pycache__/
+
+# NVIDIA DLSS SDK, fetched by CI
+src/3rd party/NVIDIA-DLSS/
