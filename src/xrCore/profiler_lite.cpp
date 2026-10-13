@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "profiler_lite.h"
 #include <algorithm>
+#include <intrin.h>
 
 namespace xr_prof
 {
@@ -8,6 +9,10 @@ namespace xr_prof
 
 	namespace
 	{
+		// The CPU time stamp counter: QueryPerformanceCounter costs far more per call under Wine, and with
+		// ~100k scopes a frame that made the measured frame twice as long
+		IC u64 ticks() { return __rdtsc(); }
+
 		std::atomic<desc*> s_head{ nullptr };
 		thread_local scope* t_current = nullptr;
 		thread_local bool t_main = false;
@@ -56,10 +61,10 @@ namespace xr_prof
 			for (auto& it : by_name)
 				sums.push_back(it.second);
 
-			const double ms = 1000.0 / double(CPU::qpc_freq) / double(s_frames);
+			const double ms = 1000.0 / double(CPU::clk_per_second) / double(s_frames);
 			const double per_frame = 1.0 / double(s_frames);
 			Msg("* [CPU passes] average per frame over %.1f s (%u frames), frame %.2f ms",
-				double(elapsed) / double(CPU::qpc_freq), s_frames, double(elapsed) * ms);
+				double(elapsed) / double(CPU::clk_per_second), s_frames, double(elapsed) * ms);
 
 			std::sort(sums.begin(), sums.end(), [](const sum& a, const sum& b) { return a.main_self > b.main_self; });
 			Msg("*   main thread                                   self ms  incl ms  calls");
@@ -101,12 +106,12 @@ namespace xr_prof
 		child = 0;
 		parent = t_current;
 		t_current = this;
-		t0 = CPU::QPC();
+		t0 = ticks();
 	}
 
 	void scope::end()
 	{
-		const u64 dt = CPU::QPC() - t0;
+		const u64 dt = ticks() - t0;
 		t_current = parent;
 		if (parent)
 			parent->child += dt;
@@ -126,7 +131,7 @@ namespace xr_prof
 	void frame()
 	{
 		t_main = true;
-		const u64 now = CPU::QPC();
+		const u64 now = ticks();
 
 		if (g_active.load(std::memory_order_relaxed))
 		{
@@ -143,7 +148,7 @@ namespace xr_prof
 		{
 			reset();
 			s_start = now;
-			s_end = now + u64(double(s_pending_seconds) * double(CPU::qpc_freq));
+			s_end = now + u64(double(s_pending_seconds) * double(CPU::clk_per_second));
 			s_frames = 0;
 			s_pending_seconds = 0.f;
 			g_active = true;
