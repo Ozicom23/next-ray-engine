@@ -4,6 +4,7 @@
 // The main view's depth after the scene geometry (before HUD) is reduced on the GPU to 8x8 pixel tiles holding their
 // farthest depth and read back two frames later. A static object the main view would draw is culled when, in that
 // frame's view, every tile its box covers (one tile wider on each side) is nearer than the box's nearest point.
+// Dynamic objects are tested the same way with the box around their bounding sphere.
 //   r4_hiz_cull 0/1: culling on or off
 //   stat_hiz <seconds>: counts of tested and culled (or, culling off, would be culled) objects, in the log
 namespace hiz
@@ -15,5 +16,7 @@ namespace hiz
 	void capture(ID3D11DepthStencilView* depth, const Fmatrix& view_proj);
 	// Main view static object about to be drawn: true to cull it
 	bool test_static(const Fbox& box, bool tree);
+	// Main view dynamic object (NPC, item, particles), by its bounding sphere: true to cull it
+	bool test_dynamic(const Fsphere& sphere);
 	void destroy();
 }

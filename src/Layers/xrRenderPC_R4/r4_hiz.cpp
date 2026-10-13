@@ -54,7 +54,8 @@ namespace
 	// Measuring
 	bool s_stats = false;
 	u32 s_end_time = 0, s_frames = 0, s_frames_with_tiles = 0;
-	u64 s_tested[2] = {}, s_occluded[2] = {}; // [0] other static, [1] trees
+	enum { kind_static, kind_tree, kind_dynamic, kinds };
+	u64 s_tested[kinds] = {}, s_occluded[kinds] = {};
 
 	void release_targets()
 	{
@@ -192,10 +193,10 @@ namespace
 	{
 		s_stats = false;
 		const double f = double(_max(1u, s_frames_with_tiles));
-		Msg("* [Hi-Z] per frame over %u frames (%u with depth to test against), culling %s, static objects the main view draws:",
+		Msg("* [Hi-Z] per frame over %u frames (%u with depth to test against), culling %s, objects the main view draws:",
 			s_frames, s_frames_with_tiles, ps_r4_hiz_cull ? "on" : "off");
-		static const char* names[] = { "other", "trees" };
-		for (int i = 0; i < 2; i++)
+		static const char* names[] = { "static", "trees", "dynamic" };
+		for (int i = 0; i < kinds; i++)
 		{
 			Msg("*   %-6s tested %7.1f, %s %7.1f (%.0f%%)", names[i], double(s_tested[i]) / f,
 				ps_r4_hiz_cull ? "culled" : "would be culled", double(s_occluded[i]) / f,
@@ -211,7 +212,7 @@ void start_stats(float seconds)
 	s_end_time = Device.dwTimeGlobal + iFloor(seconds * 1000.f);
 	s_frames = 0;
 	s_frames_with_tiles = 0;
-	for (int i = 0; i < 2; i++)
+	for (int i = 0; i < kinds; i++)
 		s_tested[i] = s_occluded[i] = 0;
 	Msg("* [Hi-Z] measuring for %.0f s...", seconds);
 }
@@ -280,12 +281,14 @@ void capture(ID3D11DepthStencilView* depth, const Fmatrix& view_proj)
 	_RELEASE(tex);
 }
 
-bool test_static(const Fbox& box, bool tree)
+namespace
+{
+bool test_box(const Fbox& box, int kind)
 {
 	if (!s_tiles_valid)
 		return false;
 	if (s_stats)
-		s_tested[tree]++;
+		s_tested[kind]++;
 
 	// Screen rectangle and nearest depth of the box in the depth's frame
 	float min_x = 1.f, max_x = -1.f, min_y = 1.f, max_y = -1.f, min_z = 1.f;
@@ -325,8 +328,23 @@ bool test_static(const Fbox& box, bool tree)
 		}
 	}
 	if (s_stats)
-		s_occluded[tree]++;
+		s_occluded[kind]++;
 	return ps_r4_hiz_cull != 0;
+}
+}
+
+bool test_static(const Fbox& box, bool tree)
+{
+	return test_box(box, tree ? kind_tree : kind_static);
+}
+
+bool test_dynamic(const Fsphere& sphere)
+{
+	if (!s_tiles_valid)
+		return false;
+	Fbox box;
+	box.setb(sphere.P, Fvector().set(sphere.R, sphere.R, sphere.R));
+	return test_box(box, kind_dynamic);
 }
 
 void destroy()

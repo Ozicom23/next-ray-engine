@@ -23,6 +23,10 @@ extern float r_ssaDONTSORT;
 extern float r_ssaHZBvsTEX;
 extern float r_ssaGLOD_start, r_ssaGLOD_end;
 
+#ifdef USE_DX11
+namespace hiz { bool test_dynamic(const Fsphere& sphere); }
+#endif
+
 ICF float calcLOD(float ssa/*fDistSq*/, float R)
 {
 	return _sqrt(clampr((ssa - r_ssaGLOD_end) / (r_ssaGLOD_start - r_ssaGLOD_end), 0.f, 1.f));
@@ -624,6 +628,11 @@ void CDSGraphManager::r_dsgraph_capture_dynamic(CObject* O)
 
 				if (i_mask[CDSGraphManager::fl_normal] && !RImplementation.HOM.visible(spatial->spatial.sphere))
 					continue;
+#ifdef USE_DX11
+				// Hidden in a recent frame's depth (r4_hiz.h)
+				if (i_mask[CDSGraphManager::fl_normal] && hiz::test_dynamic(spatial->spatial.sphere))
+					continue;
+#endif
 
 #if	RENDER==R_R1
 				if ((spatial->spatial.type & STYPE_GLOW))
