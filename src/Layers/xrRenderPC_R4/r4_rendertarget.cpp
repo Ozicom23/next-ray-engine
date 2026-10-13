@@ -756,8 +756,6 @@ CRenderTarget::CRenderTarget()
 
 		u32 size = RImplementation.o.smapsize;
 		rt_smap_depth.create(r2_RT_smap_depth, size, size, depth_format);
-		rt_smap_cascade[0].create("$user$smap_cascade1", size, size, depth_format);
-		rt_smap_cascade[1].create("$user$smap_cascade2", size, size, depth_format);
 
 		if (RImplementation.o.dx10_minmax_sm)
 		{

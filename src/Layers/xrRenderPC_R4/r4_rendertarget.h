@@ -188,9 +188,6 @@ public:
 	ref_rt rt_smap_surf; // 32bit,		color
 	ref_rt rt_smap_depth; // 24(32) bit,	depth
 	ref_rt rt_smap_depth_minmax; //	is used for min/max sm
-	ref_rt rt_smap_cascade[2]; // sun cascades 1 and 2 keep their own map (r4_sun_cascade_cache)
-	ref_rt m_smap_main; // rt_smap_depth while a cascade map stands in for it
-	bool smap_cascade_filled[2] = { false, false }; // drawn since the targets were created (vid_restart)
 	//	TODO: DX10: CHeck if we need old-style SMAP
 	//	IDirect3DSurface9*			rt_smap_ZB;		//
 
@@ -462,9 +459,6 @@ public:
 	void phase_downsamp();
 	void phase_wallmarks();
 	void phase_smap_direct(light* L, u32 sub_phase);
-	// Render and sample sun cascade 1 or 2 through its own map instead of the shared rt_smap_depth
-	void smap_cascade_begin(u32 slot);
-	void smap_cascade_end();
 	void phase_smap_direct_tsh(light* L, u32 sub_phase);
 	void phase_smap_spot_clear();
 	void phase_smap_spot(light* L);
