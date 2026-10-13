@@ -303,7 +303,7 @@ namespace tree_batch_stats
 	{
 		u64 draws = 0, distinct = 0, runs = 0, objects = 0;
 		xr_unordered_set<u64> seen;
-		xr_unordered_set<const void*> seen_objects;
+		xr_unordered_set<u64> seen_objects;
 		u64 last = 0;
 		u32 last_frame = 0;
 	};
@@ -364,7 +364,7 @@ namespace tree_batch_stats
 		const u64 key = (u64(size_t(geom)) * 0x9E3779B97F4A7C15ull) ^ (u64(vbase) << 40) ^ (u64(ibase) << 20) ^ u64(prims);
 		k.draws++;
 		k.seen.insert(key);
-		k.seen_objects.insert(object);
+		k.seen_objects.insert(u64(size_t(object)));
 		if (key != k.last || k.last_frame != Device.dwFrame)
 			k.runs++;
 		k.last = key;
