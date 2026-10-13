@@ -46,6 +46,13 @@ namespace
 	xr_vector<Sum> s_sums;
 	u32 s_frames = 0;
 
+	// Long capture (stat_gpu_passes <seconds>), summed next to the overlay's short interval
+	bool s_capture = false;
+	u32 s_capture_end = 0; // Device.dwTimeGlobal
+	float s_capture_seconds = 0.f;
+	xr_vector<Sum> s_capture_sums;
+	u32 s_capture_frames = 0;
+
 	bool create()
 	{
 		if (s_slots[0].disjoint)
@@ -79,7 +86,7 @@ namespace
 		return true;
 	}
 
-	void add(const Event& e, u32 order, double ms)
+	void add(xr_vector<Sum>& sums, const Event& e, u32 order, double ms)
 	{
 		string64 name;
 		u32 n = 0;
@@ -87,7 +94,7 @@ namespace
 			name[n] = char(e.name[n]); // the scope names are plain ASCII identifiers
 		name[n] = 0;
 
-		for (Sum& s : s_sums)
+		for (Sum& s : sums)
 		{
 			if (s.depth == e.depth && !xr_strcmp(s.name, name))
 			{
@@ -101,7 +108,46 @@ namespace
 		s.depth = e.depth;
 		s.order = order;
 		s.ms = ms;
-		s_sums.push_back(s);
+		sums.push_back(s);
+	}
+
+	// In frame order, averaged over the frames
+	void averages(const xr_vector<Sum>& sums, u32 frames, xr_vector<pass>& out)
+	{
+		out.clear();
+		if (!frames)
+			return;
+		xr_vector<const Sum*> order;
+		for (const Sum& s : sums)
+			if (s.ms > 0.0)
+				order.push_back(&s);
+		std::sort(order.begin(), order.end(), [](const Sum* a, const Sum* b) { return a->order < b->order; });
+		for (const Sum* s : order)
+		{
+			pass p;
+			xr_strcpy(p.name, s->name);
+			p.depth = s->depth;
+			p.ms = float(s->ms / double(frames));
+			out.push_back(p);
+		}
+	}
+
+	void finish_capture()
+	{
+		xr_vector<pass> passes;
+		averages(s_capture_sums, s_capture_frames, passes);
+		float frame = 0.f;
+		for (const pass& p : passes)
+			if (!p.depth)
+				frame += p.ms;
+		Msg("* [GPU passes] average per frame over %.0f s (%u frames), GPU time in passes %.2f ms:", s_capture_seconds,
+		    s_capture_frames, frame);
+		for (const pass& p : passes)
+			Msg("*   %*s%-34s %6.3f", int(p.depth * 2), "", p.name, p.ms);
+		xrLogger::FlushLog();
+		s_capture = false;
+		s_capture_sums.clear();
+		s_capture_frames = 0;
 	}
 
 	// True when the slot's results were read (or thrown away), false when they are not there yet
@@ -123,9 +169,14 @@ namespace
 		for (u32 i = 0; i < s.count; ++i)
 		{
 			const UINT64 t0 = t[i * 2], t1 = t[i * 2 + 1];
-			add(s.events[i], i, t1 > t0 ? double(t1 - t0) * 1000.0 / double(dj.Frequency) : 0.0);
+			const double ms = t1 > t0 ? double(t1 - t0) * 1000.0 / double(dj.Frequency) : 0.0;
+			add(s_sums, s.events[i], i, ms);
+			if (s_capture)
+				add(s_capture_sums, s.events[i], i, ms);
 		}
 		++s_frames;
+		if (s_capture)
+			++s_capture_frames;
 		return true;
 	}
 }
@@ -134,7 +185,9 @@ void frame_begin(bool enabled)
 {
 	s_recording = false;
 	s_depth = 0;
-	if (!enabled || !create())
+	if (s_capture && Device.dwTimeGlobal >= s_capture_end)
+		finish_capture();
+	if (!(enabled || s_capture) || !create())
 		return;
 
 	// Oldest first
@@ -203,26 +256,20 @@ void event_end()
 
 void collect(xr_vector<pass>& out)
 {
-	out.clear();
-	if (s_frames)
-	{
-		xr_vector<const Sum*> order;
-		for (const Sum& s : s_sums)
-			if (s.ms > 0.0)
-				order.push_back(&s);
-		std::sort(order.begin(), order.end(), [](const Sum* a, const Sum* b) { return a->order < b->order; });
-		for (const Sum* s : order)
-		{
-			pass p;
-			xr_strcpy(p.name, s->name);
-			p.depth = s->depth;
-			p.ms = float(s->ms / double(s_frames));
-			out.push_back(p);
-		}
-	}
+	averages(s_sums, s_frames, out);
 	for (Sum& s : s_sums)
 		s.ms = 0.0;
 	s_frames = 0;
+}
+
+void start_capture(float seconds)
+{
+	s_capture = true;
+	s_capture_seconds = seconds;
+	s_capture_end = Device.dwTimeGlobal + u32(seconds * 1000.f);
+	s_capture_sums.clear();
+	s_capture_frames = 0;
+	Msg("* [GPU passes] measuring for %.0f s, keep the view still...", seconds);
 }
 
 void destroy()

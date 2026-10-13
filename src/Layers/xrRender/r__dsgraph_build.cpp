@@ -31,8 +31,19 @@ ICF float CalcSSA(float& distSQ, Fvector& C, dxRender_Visual* V)
     return CalcSSA(distSQ, C, V->vis.sphere.R);
 }
 
+#ifdef USE_DX11
+// r4_dbg_shadow_skip: leave kinds of objects out of all shadow maps to measure their cost with stat_gpu_passes.
+// 1 trees, 2 other static objects, 4 dynamic objects
+extern int ps_r4_dbg_shadow_skip;
+#endif
+
 void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix* xform)
 {
+#ifdef USE_DX11
+	if ((ps_r4_dbg_shadow_skip & 4) && i_mask[fl_shmap])
+		return;
+#endif
+
 	Fvector Center;
 	xform->transform_tiny(Center, pVisual->vis.sphere.P);
 
@@ -220,6 +231,15 @@ extern float ps_r__ssaDISCARD_exp;
 extern float ps_r__ssaDISCARD_fade_k;
 void CDSGraphManager::r_dsgraph_insert_static(dxRender_Visual *pVisual)
 {
+#ifdef USE_DX11
+	if (ps_r4_dbg_shadow_skip && i_mask[fl_shmap])
+	{
+		const bool tree = pVisual->Type == MT_TREE_ST || pVisual->Type == MT_TREE_PM;
+		if (ps_r4_dbg_shadow_skip & (tree ? 1 : 2))
+			return;
+	}
+#endif
+
 	if (m_static_seen.find(pVisual) != m_static_seen.end())
 	{
 		if (PortalTraverseDbg_Enabled())

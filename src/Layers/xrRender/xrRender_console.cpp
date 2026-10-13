@@ -349,6 +349,7 @@ xr_token perf_overlay_token[] = {
 	{ 0, 0 }
 };
 u32 ps_perf_overlay_pos = 1; // screen corner
+int ps_r4_dbg_shadow_skip = 0; // measuring only: 1 trees, 2 other static, 4 dynamic objects left out of shadow maps
 xr_token perf_overlay_pos_token[] = {
 	{ "top_left", 0 },
 	{ "top_right", 1 },
@@ -618,13 +619,31 @@ public:
 #include "../xrRenderPC_R4/r4_gpu_memory.h"
 #include "../xrRenderPC_R4/r4_perf_overlay.h"
 
+// Measuring aid, never saved to user.ltx so it can't stay on by accident
+class CCC_DbgShadowSkip : public CCC_Integer
+{
+public:
+	CCC_DbgShadowSkip(LPCSTR N, int* V, int _min, int _max) : CCC_Integer(N, V, _min, _max) {}
+	virtual void Save(IWriter*) {}
+};
+
 // GPU time per render pass, as measured for the detailed performance overlay
 class CCC_GpuPassStats : public IConsole_Command
 {
 public:
 	CCC_GpuPassStats(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; }
-	virtual void Execute(LPCSTR args) { g_PerfOverlay.DumpPasses(); }
-	virtual void Info(TInfo& I) { xr_strcpy(I, "GPU time per render pass to the log (needs perf_overlay 2)"); }
+	virtual void Execute(LPCSTR args)
+	{
+		const float seconds = (args && args[0]) ? float(atof(args)) : 0.f;
+		if (seconds > 0.f)
+			gpu_profiler::start_capture(_min(seconds, 60.f));
+		else
+			g_PerfOverlay.DumpPasses();
+	}
+	virtual void Info(TInfo& I)
+	{
+		xr_strcpy(I, "GPU time per render pass to the log: the last 250 ms (needs perf_overlay 2), or averaged over [seconds]");
+	}
 };
 
 // GPU memory by kind of resource, then the largest textures, models and render targets (stat_gpu_memory [count]).
@@ -1385,6 +1404,7 @@ void xrRender_initconsole()
 	CMD1(CCC_UpscalerAvailable, "r4_upscaler_available");
 	CMD1(CCC_GpuMemoryStats,    "stat_gpu_memory");
 	CMD1(CCC_GpuPassStats,      "stat_gpu_passes");
+	CMD4(CCC_DbgShadowSkip, "r4_dbg_shadow_skip", &ps_r4_dbg_shadow_skip, 0, 7);
 #endif
     CMD4(CCC_Integer, "r4_hdr10_colorspace",	  &ps_r4_hdr10_colorspace, 		     0, 2);
 

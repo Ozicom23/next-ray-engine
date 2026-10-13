@@ -24,5 +24,9 @@ namespace gpu_profiler
 	// Averages since the last call, in the order the passes first ran; clears the sums
 	void collect(xr_vector<pass>& out);
 
+	// stat_gpu_passes <seconds>: averages over a longer time, written to the log when done. Records even
+	// without the detailed overlay
+	void start_capture(float seconds);
+
 	void destroy();
 }
