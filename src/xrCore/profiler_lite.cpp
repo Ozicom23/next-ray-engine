@@ -78,6 +78,17 @@ namespace xr_prof
 				shown++;
 			}
 
+			std::sort(sums.begin(), sums.end(), [](const sum& a, const sum& b) { return a.main_total > b.main_total; });
+			Msg("*   main thread by inclusive time                 incl ms  calls");
+			shown = 0;
+			for (const sum& s : sums)
+			{
+				if (!s.main_calls || shown >= 40 || double(s.main_total) * ms < 0.1)
+					continue;
+				Msg("*     %-42s %8.3f %6.1f", s.name.c_str(), double(s.main_total) * ms, double(s.main_calls) * per_frame);
+				shown++;
+			}
+
 			std::sort(sums.begin(), sums.end(), [](const sum& a, const sum& b) { return a.other_total > b.other_total; });
 			Msg("*   other threads                                 incl ms  calls");
 			shown = 0;

@@ -7,7 +7,17 @@
 
 #ifdef USE_DX11
 extern Fvector3 ps_r4_sun_smap_scale;
+extern int ps_r4_sun_parallel_cull;
 #endif
+
+// render_sun_cascade in steps, for culling the cascades' static geometry in parallel (r4_sun_parallel_cull)
+enum sun_cascade_step
+{
+	sun_cascade_all,
+	sun_cascade_prepare, // frustum and transforms (each cascade's rays come from the one before)
+	sun_cascade_render, // dynamic objects, shadow map and lighting; static geometry was captured in between
+};
+static sun_cascade_step s_sun_cascade_step = sun_cascade_all;
 
 constexpr float tweak_COP_initial_offs = 1200.f;
 
@@ -75,6 +85,34 @@ void CRender::render_sun_cascades()
 	if (b_need_to_render_sunshafts)
 		m_sun_cascades[m_sun_cascades.size() - 1].reset_chain = true;
 
+#ifdef USE_DX11
+	if (ps_r4_sun_parallel_cull)
+	{
+		const u32 count = u32(m_sun_cascades.size());
+		s_sun_cascade_step = sun_cascade_prepare;
+		for (u32 i = 0; i < count; ++i)
+			render_sun_cascade(i);
+
+		// Static geometry of all cascades at once: each cascade has its own graph, and the traversal only reads
+		// the level (the graphs' shader element choice reads phase, set here before)
+		{
+			PROF_EVENT("Render Cascades: parallel static traverse");
+			phase = PHASE_SMAP;
+			xr_parallel_for(0u, count, [this](u32 i)
+			{
+				sun::cascade& cascade = m_sun_cascades[i];
+				cascade.GMCascade.traverse(pOutdoorSector, cascade.cull_frustum, cascade.cull_COP, cascade.cull_xform);
+				cascade.GMCascade.r_dsgraph_capture_static();
+			});
+		}
+
+		s_sun_cascade_step = sun_cascade_render;
+		for (u32 i = 0; i < count; ++i)
+			render_sun_cascade(i);
+		s_sun_cascade_step = sun_cascade_all;
+	}
+	else
+#endif
 	for (u32 i = 0; i < m_sun_cascades.size(); ++i)
 		render_sun_cascade(i);
 
@@ -93,6 +131,7 @@ void CRender::render_sun_cascade(u32 cascade_ind)
 	Fvector3& cull_COP = cascade.cull_COP;
 	Fmatrix& cull_xform = cascade.cull_xform;
 
+	if (s_sun_cascade_step != sun_cascade_render)
 	{
 		PROF_EVENT("Render Cascade: Prepass");
 
@@ -287,7 +326,17 @@ void CRender::render_sun_cascade(u32 cascade_ind)
 		}
 	}
 
+	if (s_sun_cascade_step == sun_cascade_prepare)
+		return;
+
 	// Begin SMAP-render
+	if (s_sun_cascade_step == sun_cascade_render)
+	{
+		PROF_EVENT("Render Cascade: SMAP traverse dynamic");
+		phase = PHASE_SMAP;
+		cascade.GMCascade.r_dsgraph_capture_dynamic();
+	}
+	else
     {
         PROF_EVENT("Render Cascade: SMAP traverse");
         phase = PHASE_SMAP;
