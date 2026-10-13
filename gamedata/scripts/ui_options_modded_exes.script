@@ -1,5 +1,81 @@
 --- Options menu extension
 
+-- Steam Deck preset: lowers the settings whose loss is hard to see on the Deck's 800p screen. Turning it on
+-- remembers the current values (axr_options, section deck_preset) and turning it off restores them, so the
+-- two can be compared. Each entry only ever lowers a setting: values already lower are left alone.
+--   index: position in a vector setting (1-based), nil for a plain value
+--   value: the preset value; mode "max" keeps the larger of current and preset (resolution divisors),
+--          "min" the smaller (sample counts, distances, quality scales)
+local deck_preset = {
+	{ cmd = "ssfx_ao",              index = 1, value = 2,   mode = "max" }, -- ambient occlusion at half resolution
+	{ cmd = "ssfx_ssr",             index = 1, value = 2,   mode = "max" }, -- screen space reflections at half resolution
+	{ cmd = "ssfx_sss_quality",     index = 1, value = 8,   mode = "min" }, -- screen space sun shadow samples
+	{ cmd = "ssfx_sss_quality",     index = 2, value = 3,   mode = "min" }, -- screen space shadow samples, other lights
+	{ cmd = "ssfx_shadow_cascades", index = 3, value = 140, mode = "min" }, -- far sun shadow cascade, metres
+	{ cmd = "r2_ls_squality",                  value = 0.75, mode = "min" }, -- point and spot light shadow map size
+	{ cmd = "r2_sunshafts_quality", token = { st_opt_high = "st_opt_medium", st_opt_ultra = "st_opt_medium" } }, -- volumetric sun shafts
+}
+local deck_preset_section = "deck_preset"
+
+local function console_numbers(s)
+	local t = {}
+	for n in string.gmatch(s or "", "[-%d%.eE+]+") do
+		t[#t + 1] = tonumber(n)
+	end
+	return t
+end
+
+local function deck_preset_value(e, current)
+	if e.token then
+		return e.token[current] or current
+	end
+	local nums = console_numbers(current)
+	local i = e.index or 1
+	if not nums[i] then
+		return current
+	end
+	nums[i] = (e.mode == "max") and math.max(nums[i], e.value) or math.min(nums[i], e.value)
+	if not e.index then
+		return tostring(nums[1])
+	end
+	return table.concat(nums, ", ")
+end
+
+function apply_deck_preset()
+	local enable = ui_options.get("video/advanced/deck_preset") == true
+	local cfg = axr_main.config
+	local con = get_console()
+
+	if enable then
+		-- Remember each setting once (a setting listed twice keeps its first, unchanged value)
+		for _, e in ipairs(deck_preset) do
+			if not cfg:r_value(deck_preset_section, e.cmd, 0) then
+				local current = con:get_string(e.cmd)
+				if current then
+					cfg:w_value(deck_preset_section, e.cmd, current)
+				end
+			end
+		end
+		for _, e in ipairs(deck_preset) do
+			local current = con:get_string(e.cmd)
+			if current then
+				exec_console_cmd(e.cmd .. " " .. deck_preset_value(e, current))
+			end
+		end
+	else
+		for _, e in ipairs(deck_preset) do
+			local saved = cfg:r_value(deck_preset_section, e.cmd, 0)
+			if saved then
+				exec_console_cmd(e.cmd .. " " .. saved)
+				cfg:w_value(deck_preset_section, e.cmd, nil)
+			end
+		end
+	end
+
+	cfg:save()
+	exec_console_cmd("cfg_save")
+end
+
 -- UI entrypoint
 function on_xml_read()
 	ui_options_base = ui_options.init_opt_base
@@ -204,6 +280,15 @@ function on_xml_read()
 							{"bottom_left", "perf_overlay_bottom_left"},
 							{"bottom_right", "perf_overlay_bottom_right"},
 						},
+						precondition = for_r4,
+					},
+					{
+						id           = "deck_preset",
+						type         = "check",
+						val          = 1,
+						def          = false,
+						functor      = {apply_deck_preset},
+						vid          = true, -- shadow and screen space shadow quality need it
 						precondition = for_r4,
 					},
 				}
