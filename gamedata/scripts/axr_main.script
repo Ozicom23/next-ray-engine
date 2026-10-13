@@ -243,7 +243,25 @@ end
 -- param 1 - name as type<string> (ie. intercepts[name])
 -- param 2 - function to execute as type<function> or userdata with name as function
 -----------------------------------------------------------
+-- Each callback's functions in call order, kept until a function is set or unset: make_callback sorted them
+-- on every call. callback_order_cache = false sorts on every call again (for comparing).
+callback_order_cache = true
+local callback_order = {}
+
+local function ordered_callbacks(name)
+	local list = callback_order_cache and callback_order[name]
+	if not list then
+		list = {}
+		for func_or_userdata in spairs(intercepts[name], sort_func_values_ascend) do
+			list[#list + 1] = func_or_userdata
+		end
+		callback_order[name] = list
+	end
+	return list
+end
+
 function callback_add(name)
+	callback_order[name] = nil
 	if (not intercepts[name]) then
 		intercepts[name] = {}
 		next_index[name] = 1
@@ -259,6 +277,7 @@ function callback_set(name,func_or_userdata)
 		callstack()
 		return
 	end
+	callback_order[name] = nil
 	if (intercepts[name]) then
 		intercepts[name][func_or_userdata] = next_index[name]
 		next_index[name] = next_index[name] + 1
@@ -269,6 +288,7 @@ function callback_set(name,func_or_userdata)
 end
 
 function callback_unset(name,func_or_userdata)
+	callback_order[name] = nil
 	if (intercepts[name]) then
 		intercepts[name][func_or_userdata] = nil
 	else
@@ -277,9 +297,107 @@ function callback_unset(name,func_or_userdata)
 	end
 end
 
+-----------------------------------------------------------
+-- Callback profiler: lua_profile_start(seconds), e.g. "run_string axr_main.lua_profile_start(5)" (needs -dbg).
+-- Times every function make_callback calls, per callback and per function (script file and line), and the
+-- dispatch around them, then writes the per frame averages to the log. Off, it costs one check per callback.
+-----------------------------------------------------------
+local prof = nil
+
+local function prof_timer(tbl, key)
+	local t = tbl[key]
+	if not t then
+		t = { timer = profile_timer(), calls = 0 }
+		tbl[key] = t
+	end
+	t.calls = t.calls + 1
+	return t.timer
+end
+
+local function prof_key(P, name, f)
+	local key = P.keys[f]
+	if not key then
+		local info = debug and debug.getinfo and debug.getinfo(f, "S")
+		key = name .. "  " .. (info and (tostring(info.short_src) .. ":" .. tostring(info.linedefined)) or tostring(f))
+		P.keys[f] = key
+	end
+	return key
+end
+
+local function prof_report()
+	local frames = math.max(1, device().frame - prof.start_frame)
+	local function sorted(tbl)
+		local list = {}
+		for key, t in pairs(tbl) do
+			list[#list + 1] = { key = key, us = t.timer:time(), calls = t.calls }
+		end
+		table.sort(list, function(a, b) return a.us > b.us end)
+		return list
+	end
+	log(string.format("* [Lua callbacks] average per frame over %d frames (ms incl. nested callbacks, calls)", frames))
+	-- Time in the callbacks' functions, per callback: the rest of a callback's time is its dispatch
+	local in_funcs = {}
+	for key, t in pairs(prof.funcs) do
+		local name = string.match(key, "^(%S+)")
+		in_funcs[name] = (in_funcs[name] or 0) + t.timer:time()
+	end
+	log(string.format("*   by callback: total, calls, of it dispatch (sorting, calls)"))
+	for i, e in ipairs(sorted(prof.totals)) do
+		if i > 25 then break end
+		log(string.format("*     %-60s %7.3f %7.1f %7.3f", e.key, e.us / 1000 / frames, e.calls / frames, (e.us - (in_funcs[e.key] or 0)) / 1000 / frames))
+	end
+	log(string.format("*   by function:"))
+	for i, e in ipairs(sorted(prof.funcs)) do
+		if i > 60 or e.us / 1000 / frames < 0.01 then break end
+		log(string.format("*     %-60s %7.3f %7.1f", e.key, e.us / 1000 / frames, e.calls / frames))
+	end
+	prof = nil
+	get_console():execute("flush")
+end
+
+function lua_profile_start(seconds)
+	prof = { totals = {}, funcs = {}, keys = {}, start_frame = device().frame, end_time = time_global() + (seconds or 5) * 1000 }
+	log(string.format("* [Lua callbacks] measuring for %d s...", seconds or 5))
+end
+
+local function make_callback_profiled(name, ...)
+	-- This capture's tables, also when a nested callback ends it
+	local P = prof
+	local total = prof_timer(P.totals, name)
+	total:start()
+	local list = ordered_callbacks(name)
+	for i = 1, #list do
+		local func_or_userdata = list[i]
+		local f = func_or_userdata
+		if (type(func_or_userdata) ~= "function") then
+			f = func_or_userdata[name]
+		end
+		if f then
+			local t = prof_timer(P.funcs, prof_key(P, name, f))
+			t:start()
+			if (f == func_or_userdata) then
+				f(...)
+			else
+				f(func_or_userdata, ...)
+			end
+			t:stop()
+		end
+	end
+	total:stop()
+	if (prof and time_global() >= prof.end_time) then
+		prof_report()
+	end
+end
+
 function make_callback(name,...)
+	if (prof and intercepts[name]) then
+		return make_callback_profiled(name, ...)
+	end
 	if (intercepts[name]) then
-		for func_or_userdata, v in spairs(intercepts[name], sort_func_values_ascend) do 
+		-- The list, not the table: a function set or unset meanwhile doesn't change this call's list (as spairs)
+		local list = ordered_callbacks(name)
+		for i = 1, #list do
+			local func_or_userdata = list[i]
 			if (type(func_or_userdata) == "function") then 
 				func_or_userdata(...)
 			elseif (func_or_userdata[name]) then
