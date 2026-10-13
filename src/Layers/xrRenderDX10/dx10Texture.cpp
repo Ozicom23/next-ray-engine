@@ -29,6 +29,12 @@ void fix_texture_name(LPSTR fn)
 
 int get_texture_load_lod(LPCSTR fn)
 {
+	// Scope reticles are magnified on screen: with fewer mips they come out blurred and pixelated. fn is lowercase
+	static const char* full_detail[] = { "reticle", "crosshair", "bonus_sights", "\\sights\\", "/sights/" };
+	for (const char* part : full_detail)
+		if (strstr(fn, part))
+			return 0;
+
 	CInifile::Sect& sect = pSettings->r_section("reduce_lod_texture_list");
 	CInifile::SectCIt it_ = sect.Data.begin();
 	CInifile::SectCIt it_e_ = sect.Data.end();
@@ -734,6 +740,11 @@ _DDS:
 					return T;
 				}
 			}
+
+			// Not handled above: load it whole. D3DX11 never applied the skip anyway, and asking for one sends it
+			// down its conversion path (CPU resize and re-encode), suspected for GAMMA's load screen freezes with
+			// texture_lod 2+
+			img_loaded_lod = 0;
 #endif
 
 			//	Inited to default by provided default constructor
