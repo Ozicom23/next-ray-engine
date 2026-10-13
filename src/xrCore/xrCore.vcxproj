@@ -561,6 +561,7 @@
     <ClCompile Include="FS.cpp" />
     <ClCompile Include="FTimer.cpp" />
     <ClCompile Include="LocatorAPI.cpp" />
+    <ClCompile Include="profiler_lite.cpp" />
     <ClCompile Include="LocatorAPI_auth.cpp" />
     <ClCompile Include="LocatorAPI_defs.cpp" />
     <ClCompile Include="LocatorAPI_Notifications.cpp">
@@ -708,6 +709,7 @@
     <ClInclude Include="PPMdType.h" />
     <ClInclude Include="ppmd_compressor.h" />
     <ClInclude Include="profiler.h" />
+    <ClInclude Include="profiler_lite.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="rt_compressor.h" />
     <ClInclude Include="rt_config1x.h" />

@@ -5,6 +5,7 @@
 #include "x_ray.h"
 #include "xr_ioconsole.h"
 #include "xr_ioc_cmd.h"
+#include "../xrCore/profiler.h"
 //#include "fbasicvisual.h"
 #include "cameramanager.h"
 #include "environment.h"
@@ -82,6 +83,23 @@ public:
 		Engine.Event.Defer("KERNEL:quit");
 	}
 };
+
+#if XRCORE_PROFILER == PROFILER_NONE
+// CPU time per profiled scope (PROF_EVENT), averaged per frame over the given seconds, written to the log
+class CCC_CpuPassStats : public IConsole_Command
+{
+public:
+	CCC_CpuPassStats(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; };
+
+	virtual void Execute(LPCSTR args)
+	{
+		float seconds = float(atof(args));
+		if (seconds <= 0.f)
+			seconds = 5.f;
+		xr_prof::start_capture(_min(seconds, 60.f));
+	}
+};
+#endif
 
 //-----------------------------------------------------------------------
 #ifdef DEBUG_MEMORY_MANAGER
@@ -1016,6 +1034,9 @@ void CCC_Register()
 	// General
 	CMD1(CCC_Help, "help");
 	CMD1(CCC_Quit, "quit");
+#if XRCORE_PROFILER == PROFILER_NONE
+	CMD1(CCC_CpuPassStats, "stat_cpu_passes");
+#endif
 	CMD1(CCC_Start, "start");
 	CMD1(CCC_Disconnect, "disconnect");
 	CMD1(CCC_SaveCFG, "cfg_save");

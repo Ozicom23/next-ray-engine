@@ -132,6 +132,9 @@
     <ClCompile Include="LocatorAPI.cpp">
       <Filter>FS</Filter>
     </ClCompile>
+    <ClCompile Include="profiler_lite.cpp">
+      <Filter>Profiling</Filter>
+    </ClCompile>
     <ClCompile Include="LocatorAPI_auth.cpp">
       <Filter>FS</Filter>
     </ClCompile>
@@ -604,6 +607,9 @@
       <Filter>shared memory/string library</Filter>
     </ClInclude>
     <ClInclude Include="profiler.h">
+      <Filter>Profiling</Filter>
+    </ClInclude>
+    <ClInclude Include="profiler_lite.h">
       <Filter>Profiling</Filter>
     </ClInclude>
     <ClInclude Include="_thread_types.h">

@@ -25,14 +25,16 @@
 #	define START_PROFILE(a) { PROF_EVENT(a)
 #	define STOP_PROFILE		}
 #else
-#	define START_PROFILE(a) {
+// stat_cpu_passes (profiler_lite.h)
+#	include "profiler_lite.h"
+#	define START_PROFILE(a) { PROF_LITE_EVENT(a);
 #	define STOP_PROFILE		}
 
 #	define PROF_THREAD(Name)
 #	define PROF_START_CAPTURE()
 #	define PROF_STOP_CAPTURE()
 #	define PROF_SAVE_CAPTURE(Name)
-#	define PROF_FRAME(Name)
-#	define PROF_EVENT(Name)
+#	define PROF_FRAME(Name) ::xr_prof::frame()
+#	define PROF_EVENT(...) PROF_LITE_EVENT(__VA_ARGS__)
 #	define PROF_EVENT_DYNAMIC(...) {};
 #endif
