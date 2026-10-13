@@ -293,9 +293,86 @@ void FTreeVisual_ST::Load(const char* N, IReader* data, u32 dwFlags)
 	inherited::Load(N, data, dwFlags);
 }
 
+#ifdef USE_DX11
+// stat_tree_batches <seconds>: how many tree draws could be merged into instanced draws. Per pass kind (main view,
+// shadow maps): draws, distinct geometry (model and detail level) and runs of draws in a row with the same geometry.
+namespace tree_batch_stats
+{
+	struct kind_stats
+	{
+		u64 draws = 0, distinct = 0, runs = 0;
+		xr_unordered_set<u64> seen;
+		u64 last = 0;
+		u32 last_frame = 0;
+	};
+	static kind_stats s_kinds[2];
+	static bool s_active = false;
+	static u32 s_frame_start = 0, s_frames = 0, s_end_time = 0, s_prev_frame = 0;
+
+	void start(float seconds)
+	{
+		for (kind_stats& k : s_kinds)
+			k = kind_stats();
+		s_active = true;
+		s_frame_start = Device.dwFrame;
+		s_prev_frame = Device.dwFrame;
+		s_end_time = Device.dwTimeGlobal + iFloor(seconds * 1000.f);
+		Msg("* [Tree batches] measuring for %.0f s...", seconds);
+	}
+
+	void finish()
+	{
+		s_active = false;
+		const u32 frames = _max(1u, Device.dwFrame - s_frame_start);
+		static const char* names[] = { "main view", "shadow maps" };
+		Msg("* [Tree batches] per frame over %u frames:", frames);
+		for (int i = 0; i < 2; i++)
+		{
+			kind_stats& k = s_kinds[i];
+			k.distinct += k.seen.size();
+			Msg("*   %-12s draws %7.1f, distinct geometry %6.1f, runs of the same geometry %7.1f",
+				names[i], double(k.draws) / frames, double(k.distinct) / frames, double(k.runs) / frames);
+		}
+		xrLogger::FlushLog();
+	}
+
+	void record(const void* geom, u32 vbase, u32 ibase, u32 prims)
+	{
+		if (!s_active)
+			return;
+		if (Device.dwFrame != s_prev_frame)
+		{
+			// New frame: distinct counts are per frame
+			for (kind_stats& k : s_kinds)
+			{
+				k.distinct += k.seen.size();
+				k.seen.clear();
+			}
+			s_prev_frame = Device.dwFrame;
+			if (Device.dwTimeGlobal >= s_end_time)
+			{
+				finish();
+				return;
+			}
+		}
+		kind_stats& k = s_kinds[RImplementation.phase == CRender::PHASE_SMAP ? 1 : 0];
+		const u64 key = (u64(size_t(geom)) * 0x9E3779B97F4A7C15ull) ^ (u64(vbase) << 40) ^ (u64(ibase) << 20) ^ u64(prims);
+		k.draws++;
+		k.seen.insert(key);
+		if (key != k.last || k.last_frame != Device.dwFrame)
+			k.runs++;
+		k.last = key;
+		k.last_frame = Device.dwFrame;
+	}
+}
+#endif
+
 void FTreeVisual_ST::Render(float LOD)
 {
 	inherited::Render(LOD);
+#ifdef USE_DX11
+	tree_batch_stats::record(&*rm_geom, vBase, iBase, dwPrimitives);
+#endif
 	RCache.set_Geometry(rm_geom);
 	RCache.Render(D3DPT_TRIANGLELIST, vBase, 0, vCount, iBase, dwPrimitives);
 	RCache.stat.r.s_flora.add(vCount);
@@ -345,6 +422,9 @@ void FTreeVisual_PM::Render(float LOD)
 	}
 	VERIFY(lod_id>=0 && lod_id<int(pSWI->count));
 	FSlideWindow& SW = pSWI->sw[lod_id];
+#ifdef USE_DX11
+	tree_batch_stats::record(&*rm_geom, vBase, iBase + SW.offset, SW.num_tris);
+#endif
 	RCache.set_Geometry(rm_geom);
 	RCache.Render(D3DPT_TRIANGLELIST, vBase, 0, SW.num_verts, iBase + SW.offset, SW.num_tris);
 	RCache.stat.r.s_flora.add(SW.num_verts);

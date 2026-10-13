@@ -621,6 +621,18 @@ public:
 #include "../xrRenderPC_R4/r4_gpu_memory.h"
 #include "../xrRenderPC_R4/r4_perf_overlay.h"
 
+namespace tree_batch_stats { void start(float seconds); }
+class CCC_TreeBatchStats : public IConsole_Command
+{
+public:
+	CCC_TreeBatchStats(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; }
+	virtual void Execute(LPCSTR args)
+	{
+		const float seconds = float(atof(args));
+		tree_batch_stats::start(seconds > 0.f ? _min(seconds, 60.f) : 5.f);
+	}
+};
+
 // Measuring aid, never saved to user.ltx so it can't stay on by accident
 class CCC_DbgShadowSkip : public CCC_Integer
 {
@@ -1407,6 +1419,7 @@ void xrRender_initconsole()
 	CMD1(CCC_GpuMemoryStats,    "stat_gpu_memory");
 	CMD1(CCC_GpuPassStats,      "stat_gpu_passes");
 	CMD4(CCC_DbgShadowSkip, "r4_dbg_shadow_skip", &ps_r4_dbg_shadow_skip, 0, 7);
+	CMD1(CCC_TreeBatchStats, "stat_tree_batches");
 	CMD4(CCC_Integer, "r4_cbuffer_skip_unchanged", &ps_r4_cbuffer_skip_unchanged, 0, 1);
 	CMD4(CCC_Vector3, "r4_sun_smap_scale", &ps_r4_sun_smap_scale, Fvector3().set(0.25f, 0.25f, 0.25f), Fvector3().set(1.f, 1.f, 1.f));
 #endif
