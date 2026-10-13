@@ -145,6 +145,222 @@ void TW_Save(ID3DTexture2D* T, LPCSTR name, LPCSTR prefix, LPCSTR postfix)
 #endif
 }
 
+#ifdef USE_DX11
+// texture_lod for DDS files: D3DX11 ignores LoadInfo.FirstMipLevel and the reduced size and always creates the
+// full texture, so the mip levels are skipped here instead by creating the texture from the file's own data,
+// starting at a smaller level. Only for layouts that can be uploaded as they are; anything else returns null and
+// goes through D3DX like before.
+namespace dds_skip
+{
+	struct PixelFormat
+	{
+		u32 size, flags, fourcc, bits, r_mask, g_mask, b_mask, a_mask;
+	};
+
+	struct Header
+	{
+		u32 size, flags, height, width, pitch, depth, mips;
+		u32 reserved1[11];
+		PixelFormat pf;
+		u32 caps, caps2, caps3, caps4, reserved2;
+	};
+
+	struct HeaderDX10
+	{
+		u32 format, dimension, misc, array_size, misc2;
+	};
+
+	const u32 kMagic = MAKEFOURCC('D', 'D', 'S', ' ');
+	const u32 kFourCC = 0x4, kRGB = 0x40, kAlphaPixels = 0x1;
+	const u32 kCubemap = 0x200, kAllFaces = 0xFC00, kVolume = 0x200000;
+
+	// Block size in bytes for BC formats, pixel size otherwise; 0 for formats not handled here
+	u32 element_bytes(DXGI_FORMAT f, bool& bc)
+	{
+		bc = true;
+		switch (f)
+		{
+		case DXGI_FORMAT_BC1_TYPELESS: case DXGI_FORMAT_BC1_UNORM: case DXGI_FORMAT_BC1_UNORM_SRGB:
+		case DXGI_FORMAT_BC4_TYPELESS: case DXGI_FORMAT_BC4_UNORM: case DXGI_FORMAT_BC4_SNORM:
+			return 8;
+		case DXGI_FORMAT_BC2_TYPELESS: case DXGI_FORMAT_BC2_UNORM: case DXGI_FORMAT_BC2_UNORM_SRGB:
+		case DXGI_FORMAT_BC3_TYPELESS: case DXGI_FORMAT_BC3_UNORM: case DXGI_FORMAT_BC3_UNORM_SRGB:
+		case DXGI_FORMAT_BC5_TYPELESS: case DXGI_FORMAT_BC5_UNORM: case DXGI_FORMAT_BC5_SNORM:
+		case DXGI_FORMAT_BC6H_TYPELESS: case DXGI_FORMAT_BC6H_UF16: case DXGI_FORMAT_BC6H_SF16:
+		case DXGI_FORMAT_BC7_TYPELESS: case DXGI_FORMAT_BC7_UNORM: case DXGI_FORMAT_BC7_UNORM_SRGB:
+			return 16;
+		}
+		bc = false;
+		switch (f)
+		{
+		case DXGI_FORMAT_R32G32B32A32_FLOAT:
+			return 16;
+		case DXGI_FORMAT_R16G16B16A16_FLOAT: case DXGI_FORMAT_R16G16B16A16_UNORM:
+			return 8;
+		case DXGI_FORMAT_R8G8B8A8_UNORM: case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+		case DXGI_FORMAT_B8G8R8A8_UNORM: case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+		case DXGI_FORMAT_B8G8R8X8_UNORM: case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+		case DXGI_FORMAT_R10G10B10A2_UNORM: case DXGI_FORMAT_R11G11B10_FLOAT:
+		case DXGI_FORMAT_R16G16_FLOAT: case DXGI_FORMAT_R16G16_UNORM: case DXGI_FORMAT_R32_FLOAT:
+			return 4;
+		case DXGI_FORMAT_R8G8_UNORM: case DXGI_FORMAT_R16_FLOAT: case DXGI_FORMAT_R16_UNORM:
+			return 2;
+		case DXGI_FORMAT_R8_UNORM: case DXGI_FORMAT_A8_UNORM:
+			return 1;
+		}
+		return 0;
+	}
+
+	// Format of a file without the DX10 header, from its pixel format block. Uncompressed data is described as
+	// it lies in the file (D3DX would swizzle A8R8G8B8 to RGBA, here it stays BGRA)
+	DXGI_FORMAT legacy_format(const PixelFormat& pf)
+	{
+		if (pf.flags & kFourCC)
+		{
+			switch (pf.fourcc)
+			{
+			case MAKEFOURCC('D', 'X', 'T', '1'): return DXGI_FORMAT_BC1_UNORM;
+			case MAKEFOURCC('D', 'X', 'T', '3'): return DXGI_FORMAT_BC2_UNORM;
+			case MAKEFOURCC('D', 'X', 'T', '5'): return DXGI_FORMAT_BC3_UNORM;
+			case MAKEFOURCC('A', 'T', 'I', '1'): case MAKEFOURCC('B', 'C', '4', 'U'): return DXGI_FORMAT_BC4_UNORM;
+			case MAKEFOURCC('B', 'C', '4', 'S'): return DXGI_FORMAT_BC4_SNORM;
+			case MAKEFOURCC('A', 'T', 'I', '2'): case MAKEFOURCC('B', 'C', '5', 'U'): return DXGI_FORMAT_BC5_UNORM;
+			case MAKEFOURCC('B', 'C', '5', 'S'): return DXGI_FORMAT_BC5_SNORM;
+			}
+			return DXGI_FORMAT_UNKNOWN; // DXT2/DXT4 (premultiplied) and D3DFMT codes stay with D3DX
+		}
+		if ((pf.flags & kRGB) && pf.bits == 32)
+		{
+			const bool alpha = (pf.flags & kAlphaPixels) && pf.a_mask == 0xff000000;
+			if (pf.r_mask == 0x00ff0000 && pf.g_mask == 0x0000ff00 && pf.b_mask == 0x000000ff)
+				return alpha ? DXGI_FORMAT_B8G8R8A8_UNORM : DXGI_FORMAT_B8G8R8X8_UNORM;
+			if (pf.r_mask == 0x000000ff && pf.g_mask == 0x0000ff00 && pf.b_mask == 0x00ff0000 && alpha)
+				return DXGI_FORMAT_R8G8B8A8_UNORM;
+		}
+		return DXGI_FORMAT_UNKNOWN;
+	}
+
+	size_t mip_bytes(u32 w, u32 h, u32 elem, bool bc, u32& row_pitch)
+	{
+		if (bc)
+		{
+			row_pitch = _max(1u, (w + 3) / 4) * elem;
+			return size_t(row_pitch) * _max(1u, (h + 3) / 4);
+		}
+		row_pitch = w * elem;
+		return size_t(row_pitch) * h;
+	}
+
+	// skip: mip levels to drop, at most as many as leave one level. Returns the texture and the levels skipped
+	ID3DBaseTexture* load(const void* data, size_t length, int skip, bool staging, u32& mips_out, int& skipped)
+	{
+		const u8* bytes = static_cast<const u8*>(data);
+		if (skip <= 0 || length < 4 + sizeof(Header) || *reinterpret_cast<const u32*>(bytes) != kMagic)
+			return nullptr;
+
+		const Header& hdr = *reinterpret_cast<const Header*>(bytes + 4);
+		if (hdr.size != sizeof(Header) || hdr.pf.size != sizeof(PixelFormat) || (hdr.caps2 & kVolume))
+			return nullptr;
+
+		size_t offset = 4 + sizeof(Header);
+		DXGI_FORMAT format;
+		u32 layers = 1;
+		bool cube = false;
+		if ((hdr.pf.flags & kFourCC) && hdr.pf.fourcc == MAKEFOURCC('D', 'X', '1', '0'))
+		{
+			if (length < offset + sizeof(HeaderDX10))
+				return nullptr;
+			const HeaderDX10& dx10 = *reinterpret_cast<const HeaderDX10*>(bytes + offset);
+			offset += sizeof(HeaderDX10);
+			if (dx10.dimension != D3D11_RESOURCE_DIMENSION_TEXTURE2D || !dx10.array_size)
+				return nullptr;
+			format = DXGI_FORMAT(dx10.format);
+			cube = (dx10.misc & D3D11_RESOURCE_MISC_TEXTURECUBE) != 0;
+			layers = dx10.array_size * (cube ? 6 : 1);
+		}
+		else
+		{
+			format = legacy_format(hdr.pf);
+			if (hdr.caps2 & kCubemap)
+			{
+				if ((hdr.caps2 & kAllFaces) != kAllFaces)
+					return nullptr;
+				cube = true;
+				layers = 6;
+			}
+		}
+
+		bool bc = false;
+		const u32 elem = element_bytes(format, bc);
+		const u32 width = hdr.width, height = hdr.height, mips = _max(hdr.mips, 1u);
+		if (!elem || !width || !height || mips > 16)
+			return nullptr;
+
+		// The data must be exactly the mip chains of all layers, tightly packed. Anything else (padding,
+		// conversions D3DX would do) means the layout isn't understood here
+		size_t chain = 0;
+		u32 pitch;
+		for (u32 m = 0; m < mips; ++m)
+			chain += mip_bytes(_max(width >> m, 1u), _max(height >> m, 1u), elem, bc, pitch);
+		if (length - offset != chain * layers)
+			return nullptr;
+
+		// Keep at least one level, and block-compressed top levels a multiple of 4 as D3D requires
+		skip = _min(skip, int(mips) - 1);
+		while (skip > 0 && bc && (((width >> skip) & 3) || ((height >> skip) & 3)))
+			--skip;
+		if (skip <= 0)
+			return nullptr;
+
+		const u32 new_mips = mips - u32(skip);
+		xr_vector<D3D11_SUBRESOURCE_DATA> init(size_t(new_mips) * layers);
+		const u8* src = bytes + offset;
+		for (u32 l = 0; l < layers; ++l)
+		{
+			for (u32 m = 0; m < mips; ++m)
+			{
+				const size_t size = mip_bytes(_max(width >> m, 1u), _max(height >> m, 1u), elem, bc, pitch);
+				if (m >= u32(skip))
+				{
+					D3D11_SUBRESOURCE_DATA& sd = init[l * new_mips + (m - skip)];
+					sd.pSysMem = src;
+					sd.SysMemPitch = pitch;
+					sd.SysMemSlicePitch = UINT(size);
+				}
+				src += size;
+			}
+		}
+
+		D3D11_TEXTURE2D_DESC desc = {};
+		desc.Width = _max(width >> skip, 1u);
+		desc.Height = _max(height >> skip, 1u);
+		desc.MipLevels = new_mips;
+		desc.ArraySize = layers;
+		desc.Format = format;
+		desc.SampleDesc.Count = 1;
+		desc.MiscFlags = cube ? D3D11_RESOURCE_MISC_TEXTURECUBE : 0;
+		if (staging)
+		{
+			desc.Usage = D3D11_USAGE_STAGING;
+			desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+		}
+		else
+		{
+			desc.Usage = D3D11_USAGE_IMMUTABLE;
+			desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		}
+
+		ID3D11Texture2D* texture = nullptr;
+		if (FAILED(HW.pDevice->CreateTexture2D(&desc, init.data(), &texture)))
+			return nullptr;
+
+		mips_out = new_mips;
+		skipped = skip;
+		return texture;
+	}
+}
+#endif
+
 /*
 ID3DTexture2D*	TW_LoadTextureFromTexture
 (
@@ -423,6 +639,20 @@ _DDS:
 			//	&pTextureCUBE
 			//	));
 
+#ifdef USE_DX11
+			// Skip mip levels like 2D textures (the D3DX path below never could)
+			{
+				strlwr(fn);
+				int skipped = 0;
+				if (ID3DBaseTexture* T = dds_skip::load(S->pointer(), S->length(), get_texture_load_lod(fn), bStaging, mip_cnt, skipped))
+				{
+					FS.r_close(S);
+					ret_msize = calc_texture_size(skipped, mip_cnt, img_size);
+					return T;
+				}
+			}
+#endif
+
 			//	Inited to default by provided default constructor
 #ifdef USE_DX11
 			D3DX11_IMAGE_LOAD_INFO LoadInfo;
@@ -493,6 +723,18 @@ _DDS:
 			//	), fn);
 
 			img_loaded_lod = get_texture_load_lod(fn);
+
+#ifdef USE_DX11
+			{
+				int skipped = 0;
+				if (ID3DBaseTexture* T = dds_skip::load(S->pointer(), S->length(), img_loaded_lod, bStaging, mip_cnt, skipped))
+				{
+					FS.r_close(S);
+					ret_msize = calc_texture_size(skipped, mip_cnt, img_size);
+					return T;
+				}
+			}
+#endif
 
 			//	Inited to default by provided default constructor
 #ifdef USE_DX11
