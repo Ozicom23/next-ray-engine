@@ -38,6 +38,7 @@
 #include "IGame_Level.h"
 
 #include "Rain.h"
+#include "remote_console.h"
 
 #pragma comment( lib, "d3dx9.lib" )
 
@@ -348,6 +349,8 @@ void CRenderDevice::on_idle()
 		Sleep(100);
 		return;
 	}
+
+	remote_console::update();
 
 	PROF_FRAME("Main Thread");
 
