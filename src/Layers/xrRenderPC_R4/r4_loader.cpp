@@ -117,10 +117,13 @@ void CRender::level_Load(IReader* fs)
 	b_loaded = TRUE;
 }
 
+extern void tree_instancing_reset();
+
 void CRender::level_Unload()
 {
 	if (0 == g_pGameLevel) return;
 	if (!b_loaded) return;
+	tree_instancing_reset();
 
 	GMBase.clear();
 	GMRainWet.clear();

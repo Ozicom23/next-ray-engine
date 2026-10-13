@@ -291,6 +291,9 @@ void CRender::render_sun_cascade(u32 cascade_ind)
     {
         PROF_EVENT("Render Cascade: SMAP traverse");
         phase = PHASE_SMAP;
+#ifdef USE_DX11
+        cascade.GMCascade.i_tree_instancing = true; // r4_tree_instancing
+#endif
         cascade.GMCascade.traverse(pOutdoorSector, cascade.cull_frustum, cascade.cull_COP, cascade.cull_xform);
         cascade.GMCascade.r_dsgraph_capture(false, true);
     }

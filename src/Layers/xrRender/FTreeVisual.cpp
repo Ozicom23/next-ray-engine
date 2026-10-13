@@ -246,6 +246,13 @@ void FTreeVisual::Render(float LOD)
 
 #define PCOPY(a)	a = pFrom->a
 
+#ifdef USE_DX11
+static int tree_pm_lod_id(FSlideWindowItem* pSWI, float LOD, u32 last_lod)
+{
+	return LOD >= 0.f ? iFloor((1.f - LOD) * float(pSWI->count - 1) + 0.5f) : int(last_lod);
+}
+#endif
+
 void FTreeVisual::Copy(dxRender_Visual* pSrc)
 {
 	dxRender_Visual::Copy(pSrc);
@@ -384,6 +391,34 @@ void FTreeVisual_ST::Render(float LOD)
 	RCache.stat.r.s_flora.add(vCount);
 }
 
+#ifdef USE_DX11
+void FTreeVisual::write_instance(Fvector4* rows) const
+{
+	// As R_constant 3x4 matrices are set
+	rows[0].set(xform._11, xform._21, xform._31, xform._41);
+	rows[1].set(xform._12, xform._22, xform._32, xform._42);
+	rows[2].set(xform._13, xform._23, xform._33, xform._43);
+}
+
+static u64 tree_instance_key(const void* geom, u32 vbase, u32 ibase, u32 prims)
+{
+	return ((u64(size_t(geom)) * 0x9E3779B97F4A7C15ull) ^ (u64(vbase) << 40) ^ (u64(ibase) << 20) ^ u64(prims)) | 1;
+}
+
+u64 FTreeVisual_ST::instance_key(float LOD)
+{
+	return tree_instance_key(&*rm_geom, vBase, iBase, dwPrimitives);
+}
+
+void FTreeVisual_ST::render_instances(float LOD, u32 count)
+{
+	FTreeVisual::Render(LOD);
+	RCache.set_Geometry(rm_geom);
+	RCache.RenderInstanced(D3DPT_TRIANGLELIST, vBase, 0, vCount, iBase, dwPrimitives, count);
+	RCache.stat.r.s_flora.add(vCount * count);
+}
+#endif
+
 void FTreeVisual_ST::Copy(dxRender_Visual* pSrc)
 {
 	inherited::Copy(pSrc);
@@ -435,6 +470,25 @@ void FTreeVisual_PM::Render(float LOD)
 	RCache.Render(D3DPT_TRIANGLELIST, vBase, 0, SW.num_verts, iBase + SW.offset, SW.num_tris);
 	RCache.stat.r.s_flora.add(SW.num_verts);
 }
+
+#ifdef USE_DX11
+u64 FTreeVisual_PM::instance_key(float LOD)
+{
+	const FSlideWindow& SW = pSWI->sw[tree_pm_lod_id(pSWI, LOD, last_lod)];
+	return tree_instance_key(&*rm_geom, vBase, iBase + SW.offset, SW.num_tris);
+}
+
+void FTreeVisual_PM::render_instances(float LOD, u32 count)
+{
+	FTreeVisual::Render(LOD);
+	const int lod_id = tree_pm_lod_id(pSWI, LOD, last_lod);
+	last_lod = lod_id;
+	FSlideWindow& SW = pSWI->sw[lod_id];
+	RCache.set_Geometry(rm_geom);
+	RCache.RenderInstanced(D3DPT_TRIANGLELIST, vBase, 0, SW.num_verts, iBase + SW.offset, SW.num_tris, count);
+	RCache.stat.r.s_flora.add(SW.num_verts * count);
+}
+#endif
 
 void FTreeVisual_PM::Copy(dxRender_Visual* pSrc)
 {

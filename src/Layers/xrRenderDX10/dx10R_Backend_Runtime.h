@@ -330,6 +330,27 @@ IC void CBackend::Render(D3DPRIMITIVETYPE T, u32 baseV, u32 startV, u32 countV, 
 	PGO(Msg("PGO:DIP:%dv/%df",countV,PC));
 }
 
+#ifdef USE_DX11
+IC void CBackend::RenderInstanced(D3DPRIMITIVETYPE T, u32 baseV, u32 startV, u32 countV, u32 startI, u32 PC, u32 instances)
+{
+	PROF_EVENT("RCache.Render_instanced");
+	D3D_PRIMITIVE_TOPOLOGY Topology = TranslateTopology(T);
+	u32 iIndexCount = GetIndexCount(T, PC);
+
+	stat.calls++;
+	stat.verts += countV * instances;
+	stat.polys += PC * instances;
+
+	ApplyPrimitieTopology(Topology);
+	SRVSManager.Apply();
+	ApplyRTandZB();
+	ApplyVertexLayout();
+	StateManager.Apply();
+	constants.flush();
+	HW.pContext->DrawIndexedInstanced(iIndexCount, instances, startI, baseV, 0);
+}
+#endif
+
 IC void CBackend::Render(D3DPRIMITIVETYPE T, u32 startV, u32 PC)
 {
 	PROF_EVENT("RCache.Render_vb");

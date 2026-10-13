@@ -17,6 +17,7 @@ public:
 	R_dsgraph::DynamicSceneRgraph RGraph;
 	u32										i_options;		// input:	culling options
 	u32										i_doptions;
+	bool									i_tree_instancing = false; // input:	trees of the same geometry in one draw (sun shadow cascades)
 	Fvector									i_vBase;		// input:	"view" point
 	CFrustum								i_frustum;		// input:	"view" frustum
 	Fmatrix									i_mXFORM;		// input:	4x4 xform
