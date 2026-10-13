@@ -3,6 +3,7 @@
 #   remote_console.sh launch            start the game through Steam, wait for the main menu
 #   remote_console.sh send <cmd>...     queue console commands (one argument per command)
 #   remote_console.sh run <file>        queue the commands in a file
+#   remote_console.sh load <save> [s]   load a save from the main menu or a level, wait until it runs (default 600 s)
 #   remote_console.sh wait <state> [s]  wait until state is menu / level / idle (default 300 s)
 #   remote_console.sh idle [s]          wait until the command queue is empty and no rc_wait is running
 #   remote_console.sh status | log [n] | running | quit
@@ -50,6 +51,13 @@ case "${1:-}" in
 		;;
 	send)  shift; printf '%s\n' "$@" | send_lines ;;
 	run)   send_lines < "$2" ;;
+	load)
+		# The "press any key" prompt after loading would stop the game; off for the load only
+		printf '%s\n' "keypress_on_start 0" "start server($2/single/alife/load) client(localhost)" \
+			"rc_wait_level ${3:-600}" "keypress_on_start 1" | send_lines
+		sleep 5
+		wait_state level "${3:-600}"
+		;;
 	wait)  wait_state "$2" "${3:-300}" ;;
 	idle)
 		timeout="${2:-600}"; start=$(date +%s)
@@ -68,5 +76,5 @@ case "${1:-}" in
 		for i in $(seq 60); do running || exit 0; sleep 1; done
 		echo "still running after 60 s" >&2; exit 1
 		;;
-	*) sed -n '2,8p' "$0"; exit 1 ;;
+	*) sed -n '2,9p' "$0"; exit 1 ;;
 esac

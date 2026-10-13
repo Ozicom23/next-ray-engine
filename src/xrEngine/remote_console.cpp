@@ -22,6 +22,7 @@ namespace remote_console
 		u32 s_next_status = 0;
 		u32 s_wait_until = 0;
 		bool s_wait_level = false;
+		u32 s_wait_level_until = 0;
 
 		u32 s_fps_frame = 0;
 		u32 s_fps_time = 0;
@@ -70,6 +71,15 @@ namespace remote_console
 				line = line.substr(first, last - first + 1);
 				if (line[0] == '#')
 					continue;
+				if (line == "rc_clear")
+				{
+					// Right away, also while a wait is blocking the queue
+					Msg("[remote] rc_clear: dropped %u commands", u32(s_queue.size()));
+					s_queue.clear();
+					s_wait_until = 0;
+					s_wait_level = false;
+					continue;
+				}
 				s_queue.push_back(line);
 			}
 		}
@@ -82,7 +92,11 @@ namespace remote_console
 			if (s_wait_level)
 			{
 				if (xr_strcmp(st, "level"))
-					return;
+				{
+					if (now < s_wait_level_until)
+						return;
+					Msg("! [remote] rc_wait_level: timed out, state %s", st);
+				}
 				s_wait_level = false;
 			}
 			if (!xr_strcmp(st, "loading"))
@@ -96,8 +110,12 @@ namespace remote_console
 
 			if (cmd.compare(0, 8, "rc_wait ") == 0)
 				s_wait_until = now + iFloor(float(atof(cmd.c_str() + 8)) * 1000.f);
-			else if (cmd == "rc_wait_level")
+			else if (cmd.compare(0, 13, "rc_wait_level") == 0)
+			{
+				float timeout = cmd.size() > 13 ? float(atof(cmd.c_str() + 13)) : 0.f;
 				s_wait_level = true;
+				s_wait_level_until = now + iFloor((timeout > 0.f ? timeout : 300.f) * 1000.f);
+			}
 			else
 				Console->Execute(cmd.c_str());
 
