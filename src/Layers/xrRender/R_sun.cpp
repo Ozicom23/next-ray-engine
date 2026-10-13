@@ -5,6 +5,11 @@
 
 #include "R_sun_support.h"
 
+extern float r_ssaDISCARD;
+#ifdef USE_DX11
+extern float ps_r4_sun_tree_shadow_cull;
+#endif
+
 constexpr float tweak_COP_initial_offs = 1200.f;
 
 float OLES_SUN_LIMIT_27_01_07 = 100.f;
@@ -287,6 +292,13 @@ void CRender::render_sun_cascade(u32 cascade_ind)
     {
         PROF_EVENT("Render Cascade: SMAP traverse");
         phase = PHASE_SMAP;
+#ifdef USE_DX11
+        // Trees are most of the sun shadow cost, and the far cascades hold the most of them. There, trees that are
+        // small on screen are thinned out (as small objects are in the main view, with its gradient), the near
+        // cascade keeps all
+        cascade.GMCascade.i_tree_shadow_ssa = (cascade_ind > 0 && ps_r4_sun_tree_shadow_cull > 0.f)
+            ? r_ssaDISCARD * _sqr(ps_r4_sun_tree_shadow_cull) : 0.f;
+#endif
         cascade.GMCascade.traverse(pOutdoorSector, cascade.cull_frustum, cascade.cull_COP, cascade.cull_xform);
         cascade.GMCascade.r_dsgraph_capture(false, true);
     }

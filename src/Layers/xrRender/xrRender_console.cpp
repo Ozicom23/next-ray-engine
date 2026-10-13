@@ -350,6 +350,7 @@ xr_token perf_overlay_token[] = {
 };
 u32 ps_perf_overlay_pos = 1; // screen corner
 int ps_r4_dbg_shadow_skip = 0; // measuring only: 1 trees, 2 other static, 4 dynamic objects left out of shadow maps
+float ps_r4_sun_tree_shadow_cull = 2.f; // far sun cascades: trees under this many times the r__ssa_discard size cast no shadow, 0 off
 xr_token perf_overlay_pos_token[] = {
 	{ "top_left", 0 },
 	{ "top_right", 1 },
@@ -1405,6 +1406,7 @@ void xrRender_initconsole()
 	CMD1(CCC_GpuMemoryStats,    "stat_gpu_memory");
 	CMD1(CCC_GpuPassStats,      "stat_gpu_passes");
 	CMD4(CCC_DbgShadowSkip, "r4_dbg_shadow_skip", &ps_r4_dbg_shadow_skip, 0, 7);
+	CMD4(CCC_Float,   "r4_sun_tree_shadow_cull",  &ps_r4_sun_tree_shadow_cull,       0.f, 8.f);
 #endif
     CMD4(CCC_Integer, "r4_hdr10_colorspace",	  &ps_r4_hdr10_colorspace, 		     0, 2);
 
