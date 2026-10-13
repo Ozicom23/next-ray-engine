@@ -270,24 +270,6 @@ void CDSGraphManager::r_dsgraph_insert_static(dxRender_Visual *pVisual)
 	float SSA = CalcSSA(distSQ, pVisual->vis.sphere.P, pVisual);
     Flags16& flags = pVisual->flags;
     ShaderElement* sh_d = &*pVisual->shader->E[4];
-
-#ifdef USE_DX11
-	// Far sun cascades: small trees thinned out, same gradient and per tree hash as below
-	if (i_tree_shadow_ssa > 0.f && (pVisual->Type == MT_TREE_ST || pVisual->Type == MT_TREE_PM))
-	{
-		if (SSA < i_tree_shadow_ssa)
-			return;
-		const float fade_start = i_tree_shadow_ssa * ps_r__ssaDISCARD_fade_k;
-		if (SSA < fade_start)
-		{
-			const float survival_chance = (SSA - i_tree_shadow_ssa) / (fade_start - i_tree_shadow_ssa);
-			constexpr float hash_to_float = 1.0f / 4294967296.0f;
-			if (GetFvectorHash(pVisual->vis.sphere.P) * hash_to_float > _powf(survival_chance, ps_r__ssaDISCARD_exp))
-				return;
-		}
-	}
-#endif
-
     if (!(flags.test(IRenderVisualFlags::eIgnoreOptimization) || (sh_d && sh_d->flags.bEmissive)))
     {
         if (SSA < r_ssaDISCARD)

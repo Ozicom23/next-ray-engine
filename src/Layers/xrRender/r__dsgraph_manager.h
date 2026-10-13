@@ -17,7 +17,6 @@ public:
 	R_dsgraph::DynamicSceneRgraph RGraph;
 	u32										i_options;		// input:	culling options
 	u32										i_doptions;
-	float									i_tree_shadow_ssa = 0.f;	// input:	sun cascades, trees smaller on screen are thinned out of the shadow map (0 off)
 	Fvector									i_vBase;		// input:	"view" point
 	CFrustum								i_frustum;		// input:	"view" frustum
 	Fmatrix									i_mXFORM;		// input:	4x4 xform
