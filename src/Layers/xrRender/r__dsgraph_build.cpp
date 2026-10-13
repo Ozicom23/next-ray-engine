@@ -36,6 +36,7 @@ ICF float CalcSSA(float& distSQ, Fvector& C, dxRender_Visual* V)
 // 1 trees, 2 other static objects, 4 dynamic objects
 extern int ps_r4_dbg_shadow_skip;
 namespace hiz { bool test_static(const Fbox& box, bool tree); }
+namespace sun_receivers { bool test_caster(const Fbox& box, u32 cascade); }
 #endif
 
 void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix* xform)
@@ -239,6 +240,12 @@ void CDSGraphManager::r_dsgraph_insert_static(dxRender_Visual *pVisual)
 		if (ps_r4_dbg_shadow_skip & (tree ? 1 : 2))
 			return;
 	}
+#endif
+
+#ifdef USE_DX11
+	// Sun cascade: its shadow falls on nothing the view sees (r4_sun_receivers.h)
+	if (i_sun_cascade >= 0 && sun_receivers::test_caster(pVisual->vis.box, u32(i_sun_cascade)))
+		return;
 #endif
 
 	if (m_static_seen.find(pVisual) != m_static_seen.end())

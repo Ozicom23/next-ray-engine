@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "r4_hiz.h"
+#include "r4_sun_receivers.h"
 
 int ps_r4_hiz_cull = 1;
 
@@ -50,6 +51,10 @@ namespace
 	xr_vector<float> s_tiles;
 	Fmatrix s_tiles_view_proj;
 	bool s_tiles_valid = false;
+
+	// This frame's copy
+	u32 s_copy_frame = u32(-1);
+	Fmatrix s_copy_view_proj;
 
 	// Measuring
 	bool s_stats = false;
@@ -185,7 +190,7 @@ namespace
 
 	bool active()
 	{
-		return ps_r4_hiz_cull || s_stats;
+		return ps_r4_hiz_cull || s_stats || sun_receivers::wanted();
 	}
 
 	void finish_stats()
@@ -227,6 +232,7 @@ void frame_begin(bool usable)
 			release_targets();
 		return;
 	}
+	sun_receivers::frame_begin(usable);
 	if (!usable)
 		return;
 	if (s_stats)
@@ -268,6 +274,8 @@ void capture(ID3D11DepthStencilView* depth, const Fmatrix& view_proj)
 		if (s_write - s_read < kSlots)
 		{
 			HW.pContext->CopyResource(s_depth, tex);
+			s_copy_frame = Device.dwFrame;
+			s_copy_view_proj = view_proj;
 			reduce();
 			HW.pContext->CopyResource(s.staging, s_tiles_gpu);
 			s.view_proj = view_proj;
@@ -343,8 +351,20 @@ bool test_dynamic(const Fsphere& sphere)
 	return test_box(box, kind_dynamic);
 }
 
+bool depth_copy(ID3D11ShaderResourceView*& srv, Fmatrix& view_proj, u32& width, u32& height)
+{
+	if (s_copy_frame != Device.dwFrame || !s_depth_srv)
+		return false;
+	srv = s_depth_srv;
+	view_proj = s_copy_view_proj;
+	width = s_width;
+	height = s_height;
+	return true;
+}
+
 void destroy()
 {
+	sun_receivers::destroy();
 	release_targets();
 	_RELEASE(s_reduce);
 	s_reduce_failed = false;

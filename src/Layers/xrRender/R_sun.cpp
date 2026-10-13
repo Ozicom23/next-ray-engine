@@ -6,6 +6,7 @@
 #include "R_sun_support.h"
 
 #ifdef USE_DX11
+#include "../xrRenderPC_R4/r4_sun_receivers.h"
 extern Fvector3 ps_r4_sun_smap_scale;
 extern int ps_r4_sun_parallel_cull;
 #endif
@@ -92,6 +93,18 @@ void CRender::render_sun_cascades()
 		s_sun_cascade_step = sun_cascade_prepare;
 		for (u32 i = 0; i < count; ++i)
 			render_sun_cascade(i);
+
+		// Visible receivers in each cascade, for culling casters of a later frame (r4_sun_receivers.h)
+		{
+			Fmatrix xforms[3];
+			const u32 n = _min(count, 3u);
+			for (u32 i = 0; i < n; ++i)
+			{
+				xforms[i] = m_sun_cascades[i].xform;
+				m_sun_cascades[i].GMCascade.i_sun_cascade = int(i);
+			}
+			sun_receivers::dispatch(xforms, n);
+		}
 
 		// Static geometry of all cascades at once: each cascade has its own graph, and the traversal only reads
 		// the level (the graphs' shader element choice reads phase, set here before)

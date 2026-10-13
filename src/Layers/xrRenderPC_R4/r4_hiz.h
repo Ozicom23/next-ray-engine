@@ -18,5 +18,7 @@ namespace hiz
 	bool test_static(const Fbox& box, bool tree);
 	// Main view dynamic object (NPC, item, particles), by its bounding sphere: true to cull it
 	bool test_dynamic(const Fsphere& sphere);
+	// This frame's depth copy (after the scene geometry), for the sun receiver mask: false without one
+	bool depth_copy(ID3D11ShaderResourceView*& srv, Fmatrix& view_proj, u32& width, u32& height);
 	void destroy();
 }
