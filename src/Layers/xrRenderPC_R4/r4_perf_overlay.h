@@ -1,5 +1,7 @@
 #pragma once
 
+#include "r4_gpu_memory.h"
+
 // In-game performance overlay (console: perf_overlay, perf_overlay_pos, perf_overlay_toggle).
 // Display-only ImGui window: frame and GPU times, VRAM, render/output resolution, engine CPU timers.
 class CPerfOverlay : public pureRender
@@ -83,6 +85,7 @@ private:
 	float m_vram_used_gb = 0.f;
 	float m_vram_budget_gb = 0.f;
 	float m_vram_total_gb = 0.f; // dedicated video memory of the adapter
+	gpu_memory::totals m_gpu = {}; // the engine's own resources by kind
 
 	float m_ram_used_gb = 0.f;  // game process working set
 	float m_ram_avail_gb = 0.f; // system physical memory available

@@ -11,6 +11,7 @@
 #include "../xrRender/dxRenderDeviceRender.h"
 
 #include "../xrRenderDX10/dx10BufferUtils.h"
+#include "r4_gpu_memory.h"
 #include "../xrRenderDX10/3DFluid/dx103DFluidVolume.h"
 
 #include "../xrRender/FHierrarhyVisual.h"
@@ -59,6 +60,9 @@ void CRender::level_Load(IReader* fs)
 
 	if (!g_dedicated_server)
 	{
+		// Buffers created here count as level geometry; models and details set their own scope
+		gpu_memory::scope gpu_scope(gpu_memory::buf_level, "level geometry");
+
 		// VB,IB,SWI
 		//		g_pGamePersistent->LoadTitle("st_loading_geometry");
 		g_pGamePersistent->LoadTitle();

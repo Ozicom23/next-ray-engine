@@ -13,6 +13,9 @@
 #include "../xrRender/dxRenderDeviceRender.h"
 
 #include "StateManager/dx10ShaderResourceStateCache.h"
+#ifdef USE_DX11
+#include "../xrRenderPC_R4/r4_gpu_memory.h"
+#endif
 
 #define		PRIORITY_HIGH	12
 #define		PRIORITY_NORMAL	8
@@ -68,6 +71,9 @@ void CTexture::surface_set(ID3DBaseTexture* surf)
 
 	if (pSurface)
 	{
+#ifdef USE_DX11
+		gpu_memory::track(pSurface, *cName);
+#endif
 		desc_update();
 
 		D3D_RESOURCE_DIMENSION type;
@@ -572,6 +578,9 @@ void CTexture::Load()
 				pSurface = ::RImplementation.texture_load(buffer, mem);
 				if (pSurface)
 				{
+#ifdef USE_DX11
+					gpu_memory::track(pSurface, buffer);
+#endif
 					// pSurface->SetPriority	(PRIORITY_LOW);
 					seqDATA.push_back(pSurface);
 					m_seqSRView.push_back(0);
@@ -601,6 +610,9 @@ void CTexture::Load()
 		{
 			// pSurface->SetPriority	(PRIORITY_NORMAL);
 			flags.MemoryUsage = mem;
+#ifdef USE_DX11
+			gpu_memory::track(pSurface, *cName);
+#endif
 		}
 		
 		if (pSurface && bCreateView)

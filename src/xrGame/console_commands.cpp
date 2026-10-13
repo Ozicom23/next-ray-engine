@@ -364,6 +364,11 @@ static void full_memory_stats(bool assert = true)
 
 	Msg("* [ D3D ]: textures[%d K]", (m_base + m_lmaps) / 1024);
 
+	// GPU memory by kind (DX11 renderer only, other renderers don't have the command). Called directly, not
+	// through Console->Execute: stat_memory_async runs this on a worker thread
+	if (IConsole_Command* gpu_stats = Console->GetCommand("stat_gpu_memory"))
+		gpu_stats->Execute("0");
+
 #ifndef SEVERAL_ALLOCATORS
 	Msg("* [x-ray]: process heap[%u K]", _process_heap / 1024);
 #else // SEVERAL_ALLOCATORS

@@ -12,6 +12,9 @@
 #endif
 
 #include "../xrRenderDX10/dx10BufferUtils.h"
+#ifdef USE_DX11
+#include "../xrRenderPC_R4/r4_gpu_memory.h"
+#endif
 
 const int quant = 16384;
 const int c_hdr = 10;
@@ -47,6 +50,10 @@ void CDetailManager::hw_Load()
 
 void CDetailManager::hw_Load_Geom()
 {
+#ifdef USE_DX11
+	gpu_memory::scope gpu_scope(gpu_memory::buf_grass, "grass");
+#endif
+
 	// Analyze batch-size
 	hw_BatchSize = (u32(HW.Caps.geometry.dwRegisters) - c_hdr) / c_size;
 	clamp(hw_BatchSize, (u32)0, (u32)64);

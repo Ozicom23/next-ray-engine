@@ -5,6 +5,9 @@
 #include "R_DStreams.h"
 
 #include "../xrRender/dxRenderDeviceRender.h"
+#ifdef USE_DX11
+#include "../xrRenderPC_R4/r4_gpu_memory.h"
+#endif
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
@@ -28,6 +31,9 @@ void _VertexStream::Create()
 
 	R_CHK(HW.pDevice->CreateBuffer ( &bufferDesc, 0, &pVB ));
 	HW.stats_manager.increment_stats_vb(pVB);
+#ifdef USE_DX11
+	gpu_memory::track(pVB, "dynamic vertex stream", gpu_memory::buf_dynamic);
+#endif
 #else	//	USE_DX10
 	R_CHK(HW.pDevice->CreateVertexBuffer ( mSize, D3DUSAGE_WRITEONLY|D3DUSAGE_DYNAMIC, 0, D3DPOOL_DEFAULT, &pVB, NULL));
 	HW.stats_manager.increment_stats_vb(pVB);
@@ -187,6 +193,9 @@ void _IndexStream::Create()
 
 	R_CHK(HW.pDevice->CreateBuffer( &bufferDesc, 0, &pIB ));
 	HW.stats_manager.increment_stats_ib(pIB);
+#ifdef USE_DX11
+	gpu_memory::track(pIB, "dynamic index stream", gpu_memory::buf_dynamic);
+#endif
 #else	//	USE_DX10
 	R_CHK(HW.pDevice->CreateIndexBuffer( mSize, D3DUSAGE_WRITEONLY|D3DUSAGE_DYNAMIC, D3DFMT_INDEX16, D3DPOOL_DEFAULT, &
 		pIB, NULL));

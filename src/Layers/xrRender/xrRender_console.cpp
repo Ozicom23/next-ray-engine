@@ -614,6 +614,26 @@ public:
 	virtual void Save(IWriter*) {}
 };
 
+#ifdef USE_DX11
+#include "../xrRenderPC_R4/r4_gpu_memory.h"
+
+// GPU memory by kind of resource, then the largest textures, models and render targets (stat_gpu_memory [count]).
+// stat_memory runs it with 0 for the summary only
+class CCC_GpuMemoryStats : public IConsole_Command
+{
+public:
+	CCC_GpuMemoryStats(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; }
+	virtual void Execute(LPCSTR args)
+	{
+		int top_n = 30;
+		if (args && args[0])
+			top_n = atoi(args);
+		gpu_memory::dump(u32(_max(top_n, 0)));
+	}
+	virtual void Info(TInfo& I) { xr_strcpy(I, "GPU memory by kind, then the largest resources [count, default 30]"); }
+};
+#endif
+
 #if defined(USE_DX10) || defined(USE_DX11)
 #include "../xrRenderDX10/StateManager/dx10SamplerStateCache.h"
 #endif	//	USE_DX10
@@ -1353,6 +1373,7 @@ void xrRender_initconsole()
 	CMD3(CCC_Token,   "perf_overlay_pos",         &ps_perf_overlay_pos,              perf_overlay_pos_token);
 	CMD1(CCC_PerfOverlayToggle, "perf_overlay_toggle");
 	CMD1(CCC_UpscalerAvailable, "r4_upscaler_available");
+	CMD1(CCC_GpuMemoryStats,    "stat_gpu_memory");
 #endif
     CMD4(CCC_Integer, "r4_hdr10_colorspace",	  &ps_r4_hdr10_colorspace, 		     0, 2);
 

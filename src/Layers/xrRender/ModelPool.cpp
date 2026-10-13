@@ -2,6 +2,9 @@
 #pragma hdrstop
 
 #include "ModelPool.h"
+#ifdef USE_DX11
+#include "../xrRenderPC_R4/r4_gpu_memory.h"
+#endif
 
 #ifndef _EDITOR
 #include "../../xrEngine/IGame_Persistent.h"
@@ -140,7 +143,12 @@ dxRender_Visual* CModelPool::Instance_Load(const char* N, BOOL allow_register, b
 	ogf_header H;
 	data->r_chunk_safe(OGF_HEADER, &H, sizeof(H));
 	V = Instance_Create(H.type);
-	V->Load(N, data, 0);
+	{
+#ifdef USE_DX11
+		gpu_memory::scope gpu_scope(gpu_memory::buf_model, N);
+#endif
+		V->Load(N, data, 0);
+	}
 	FS.r_close(data);
 	g_pGamePersistent->RegisterModel(V);
 
@@ -158,7 +166,12 @@ dxRender_Visual* CModelPool::Instance_Load(LPCSTR name, IReader* data, BOOL allo
 	ogf_header H;
 	data->r_chunk_safe(OGF_HEADER, &H, sizeof(H));
 	V = Instance_Create(H.type);
-	V->Load(name, data, 0);
+	{
+#ifdef USE_DX11
+		gpu_memory::scope gpu_scope(gpu_memory::buf_model, name);
+#endif
+		V->Load(name, data, 0);
+	}
 
 	// Registration
 	if (allow_register) 

@@ -275,6 +275,7 @@ void CPerfOverlay::Draw()
 
 		UpdateVram();
 		UpdateRam();
+		gpu_memory::get_totals(m_gpu);
 	}
 
 	// Only inside an open ImGui frame (not before the engine's first ImGui::NewFrame)
@@ -323,6 +324,32 @@ void CPerfOverlay::Draw()
 			ImGui::Text("VRAM %.2f GB used, budget %.1f / %.1f GB", m_vram_used_gb, m_vram_budget_gb, m_vram_total_gb);
 		else if (m_vram_budget_gb > 0.f)
 			ImGui::Text("VRAM %.2f GB used, budget %.1f GB", m_vram_used_gb, m_vram_budget_gb);
+		// What the VRAM is made of: "other" is everything the engine doesn't count itself (driver, DXVK,
+		// upscaler, shaders, small buffers)
+		{
+			const double gb = 1024.0 * 1024.0 * 1024.0;
+			const float tex = float(double(m_gpu.textures()) / gb);
+			const float geo = float(double(m_gpu.geometry()) / gb);
+			const float rt = float(double(m_gpu.bytes[gpu_memory::render_target]) / gb);
+			if (m_vram_used_gb > 0.f)
+				ImGui::Text("  Tex %.2f  Geo %.2f  RT %.2f  Other %.2f GB", tex, geo, rt, _max(0.f, m_vram_used_gb - tex - geo - rt));
+			else
+				ImGui::Text("  Tex %.2f  Geo %.2f  RT %.2f GB", tex, geo, rt);
+
+			if (ps_perf_overlay >= 2)
+			{
+				const u64* b = m_gpu.bytes;
+				ImGui::Text("  Tex: BC %.2f  uncompressed %.2f  no mips %.2f GB",
+				            float(double(b[gpu_memory::tex_bc] + b[gpu_memory::tex_bc_nomips]) / gb),
+				            float(double(b[gpu_memory::tex_raw] + b[gpu_memory::tex_raw_nomips]) / gb),
+				            float(double(b[gpu_memory::tex_bc_nomips] + b[gpu_memory::tex_raw_nomips]) / gb));
+				ImGui::Text("  Geo: level %.2f  models %.2f  grass %.2f GB", float(double(b[gpu_memory::buf_level]) / gb),
+				            float(double(b[gpu_memory::buf_model]) / gb), float(double(b[gpu_memory::buf_grass]) / gb));
+				if (b[gpu_memory::tex_staging])
+					ImGui::Text("  Texture copies in RAM %.2f GB", float(double(b[gpu_memory::tex_staging]) / gb));
+			}
+		}
+
 		if (m_ram_total_gb > 0.f)
 			ImGui::Text("RAM  %.2f GB used, %.1f / %.1f GB free", m_ram_used_gb, m_ram_avail_gb, m_ram_total_gb);
 

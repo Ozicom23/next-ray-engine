@@ -1,5 +1,8 @@
 #include "stdafx.h"
 #include "dx10BufferUtils.h"
+#ifdef USE_DX11
+#include "../xrRenderPC_R4/r4_gpu_memory.h"
+#endif
 
 namespace dx10BufferUtils
 {
@@ -18,6 +21,10 @@ namespace dx10BufferUtils
 
 		HRESULT res = HW.pDevice->CreateBuffer(&desc, &subData, ppBuffer);
 		//R_CHK(res);
+#ifdef USE_DX11
+		if (SUCCEEDED(res))
+			gpu_memory::track(*ppBuffer); // category and name from the caller's gpu_memory::scope
+#endif
 		return res;
 	}
 
@@ -42,6 +49,10 @@ namespace dx10BufferUtils
 
 		HRESULT res = HW.pDevice->CreateBuffer( &desc, 0, ppBuffer);
 		//R_CHK(res);
+#ifdef USE_DX11
+		if (SUCCEEDED(res))
+			gpu_memory::track(*ppBuffer, "constant buffer", gpu_memory::buf_other);
+#endif
 		return res;
 	}
 
