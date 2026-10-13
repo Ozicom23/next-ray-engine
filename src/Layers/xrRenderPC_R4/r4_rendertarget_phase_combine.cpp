@@ -71,18 +71,18 @@ void CRenderTarget::phase_combine()
 		if (ps_r_ssao > 0)
 		{
 			PROF_EVENT("PHASE_AMBIENT_OCCLUSION");
-			phase_hdao();
+			{ PIX_EVENT(phase_hdao); phase_hdao(); }
 		}
 	}
 	else
 	{
 		if (RImplementation.o.ssao_opt_data)
 		{
-			phase_downsamp();
+			{ PIX_EVENT(phase_downsamp); phase_downsamp(); }
 			//phase_ssao();
 		}
 		else if (RImplementation.o.ssao_blur_on)
-			phase_ssao();
+			{ PIX_EVENT(phase_ssao); phase_ssao(); }
 	}
 
 	// Save previus and current matrices
@@ -116,13 +116,13 @@ void CRenderTarget::phase_combine()
 			if (RImplementation.o.ssfx_ao && ps_ssfx_ao.y > 0)
 			{
 				ssfx_PrevPos_Requiered = true;
-				phase_ssfx_ao(); // [SSFX] - New AO Phase
+				{ PIX_EVENT(phase_ssfx_ao); phase_ssfx_ao(); } // [SSFX] - New AO Phase
 			}
 
 			if (RImplementation.o.ssfx_il && ps_ssfx_il.y > 0)
 			{
 				ssfx_PrevPos_Requiered = true;
-				phase_ssfx_il(); // [SSFX] - New IL Phase
+				{ PIX_EVENT(phase_ssfx_il); phase_ssfx_il(); } // [SSFX] - New IL Phase
 			}
 		}
 	}
@@ -154,11 +154,11 @@ void CRenderTarget::phase_combine()
 		//RCache.set_ColorWriteEnable					();
 		//	Moved to shader!
 		//RCache.set_Z(FALSE);
-		g_pGamePersistent->Environment().RenderSky();
+		{ PIX_EVENT(SKY); g_pGamePersistent->Environment().RenderSky(); }
 
 		//	Igor: Render clouds before compine without Z-test
 		//	to avoid siluets. HOwever, it's a bit slower process.
-		g_pGamePersistent->Environment().RenderClouds();
+		{ PIX_EVENT(CLOUDS); g_pGamePersistent->Environment().RenderClouds(); }
 
 		//	Moved to shader!
 		//RCache.set_Z(TRUE);
@@ -337,7 +337,7 @@ void CRenderTarget::phase_combine()
 	if (RImplementation.o.ssfx_ssr && !Device.m_SecondViewport.IsSVPFrame())
 	{
 		ssfx_PrevPos_Requiered = true;
-		phase_ssfx_ssr(); // [SSFX] - New SSR Phase
+		{ PIX_EVENT(phase_ssfx_ssr); phase_ssfx_ssr(); } // [SSFX] - New SSR Phase
 	}
 
 	// [SSFX] - Water SSR rendering
@@ -369,10 +369,10 @@ void CRenderTarget::phase_combine()
 		HW.pContext->CopyResource(rt_ssfx_water->pTexture->surface_get(), rt_ssfx_temp->pTexture->surface_get());
 
 		// Water SSR Blur
-		phase_ssfx_water_blur();
+		{ PIX_EVENT(phase_ssfx_water_blur); phase_ssfx_water_blur(); }
 
 		// Water waves
-		phase_ssfx_water_waves();
+		{ PIX_EVENT(phase_ssfx_water_waves); phase_ssfx_water_waves(); }
 	}
 
 	if (!RImplementation.o.dx10_msaa)
@@ -387,7 +387,7 @@ void CRenderTarget::phase_combine()
 	{
 		if (RImplementation.o.ssfx_rain)
 		{
-			phase_ssfx_rain(); // Render a small color buffer to do the refraction and more
+			{ PIX_EVENT(phase_ssfx_rain); phase_ssfx_rain(); } // Render a small color buffer to do the refraction and more
 
 			if (!RImplementation.o.dx10_msaa)
 				u_setrt(rt_Generic_0, 0, rt_ssfx_motion_vectors, HW.pBaseZB);
@@ -395,7 +395,7 @@ void CRenderTarget::phase_combine()
 				u_setrt(rt_Generic_0_r, 0, rt_ssfx_motion_vectors, rt_MSAADepth->pZRT);
 		}
 
-		g_pGamePersistent->Environment().RenderLast(); // rain/thunder-bolts
+		{ PIX_EVENT(RAIN_THUNDERBOLTS); g_pGamePersistent->Environment().RenderLast(); } // rain/thunder-bolts
 	}
 
 	/*if (ssfx_PrevPos_Requiered)
@@ -511,17 +511,17 @@ void CRenderTarget::phase_combine()
 	if (!_menu_pp)
 	{
 		if (ps_sunshafts_mode == R2SS_SCREEN_SPACE || ps_sunshafts_mode == R2SS_COMBINE_SUNSHAFTS)
-			phase_sunshafts();
+			{ PIX_EVENT(phase_sunshafts); phase_sunshafts(); }
 	}
 
 	if (RImplementation.o.ssfx_fog && ps_ssfx_fog_scattering > 0)
 	{
-		phase_ssfx_fog_scattering();
+		{ PIX_EVENT(phase_ssfx_fog_scattering); phase_ssfx_fog_scattering(); }
 	}
 
 	if (RImplementation.o.ssfx_motionblur && ps_ssfx_motionblur.y > 0)
 	{
-		phase_ssfx_motion_blur();
+		{ PIX_EVENT(phase_ssfx_motion_blur); phase_ssfx_motion_blur(); }
 	}
 
 	if (scope_3D_fake_enabled)
@@ -531,61 +531,61 @@ void CRenderTarget::phase_combine()
 
 	//Compute blur textures
 	if (!Device.m_SecondViewport.IsSVPFrame()) // Temp fix for blur buffer and SVP
-		phase_blur();
+		{ PIX_EVENT(phase_blur); phase_blur(); }
 
 	//Compute bloom (new)
 	if (RImplementation.o.ssfx_bloom)
 	{
 		if (!Device.m_SecondViewport.IsSVPFrame())
-			phase_ssfx_bloom();
+			{ PIX_EVENT(phase_ssfx_bloom); phase_ssfx_bloom(); }
 		else
 			HW.pContext->ClearRenderTargetView(rt_ssfx_bloom1->pRT, ColorRGBA);
 	}
 	else
 	{
-		phase_pp_bloom();
+		{ PIX_EVENT(phase_pp_bloom); phase_pp_bloom(); }
 	}
 	
 	if (ps_r2_ls_flags.test(R2FLAG_DOF))
 	{	
-		phase_dof();
+		{ PIX_EVENT(phase_dof); phase_dof(); }
 	}
 
-	phase_lut();	
+	{ PIX_EVENT(phase_lut); phase_lut(); }	
 
 	if(ps_r2_mask_control.x > 0)
 	{
-		phase_gasmask_dudv();
+		{ PIX_EVENT(phase_gasmask_dudv); phase_gasmask_dudv(); }
 		if (ps_r2_drops_control.x > 0)
 		{
-			phase_gasmask_drops();
+			{ PIX_EVENT(phase_gasmask_drops); phase_gasmask_drops(); }
 		}
 	}
 	
 	if(ps_r2_nightvision > 0)
-		phase_nightvision();
+		{ PIX_EVENT(phase_nightvision); phase_nightvision(); }
 
 	//--DSR-- HeatVision_start
 	if (ps_r2_heatvision > 0)
-		phase_heatvision();
+		{ PIX_EVENT(phase_heatvision); phase_heatvision(); }
 	//--DSR-- HeatVision_end
 
 	if (scope_fake_enabled)
 	{
-		phase_fakescope(); //crookr
+		{ PIX_EVENT(phase_fakescope); phase_fakescope(); } //crookr
 	}
 
     //SMAA, the upscaler does its own anti-aliasing (3D scope frames are not upscaled, keep SMAA there)
 	if (ps_smaa_quality && !(m_upscale_in_scene && !Device.m_SecondViewport.IsSVPFrame()))
 	{
         //PIX_EVENT(SMAA);
-        phase_smaa();
+        { PIX_EVENT(phase_smaa); phase_smaa(); }
         RCache.set_Stencil(FALSE);
     }    
 	
 	if (RImplementation.o.ssfx_taa && ps_ssfx_taa.x > 0 && !m_upscale_in_scene)
 	{
-		phase_ssfx_taa();
+		{ PIX_EVENT(phase_ssfx_taa); phase_ssfx_taa(); }
 	}
 
 	if (ssfx_PrevPos_Requiered)
@@ -726,11 +726,11 @@ void CRenderTarget::phase_combine()
 		// TODO: we should be able to avoid a copy if both are enabled
 		if (ps_r4_hdr10_bloom_on) {
 			HW.pContext->CopyResource(rt_Generic_0->pTexture->surface_get(), rt_Color->pTexture->surface_get());
-			phase_hdr10_bloom(); // samples from rt_Generic_0, writes to rt_Color
+			{ PIX_EVENT(phase_hdr10_bloom); phase_hdr10_bloom(); } // samples from rt_Generic_0, writes to rt_Color
 		}
 		if (ps_r4_hdr10_flare_on) {
 			HW.pContext->CopyResource(rt_Generic_0->pTexture->surface_get(), rt_Color->pTexture->surface_get());
-			phase_hdr10_lens_flare(); // samples from rt_Generic_0, writes to rt_Color
+			{ PIX_EVENT(phase_hdr10_lens_flare); phase_hdr10_lens_flare(); } // samples from rt_Generic_0, writes to rt_Color
 		}
 	}
 

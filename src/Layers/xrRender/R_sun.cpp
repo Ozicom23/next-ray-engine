@@ -294,6 +294,11 @@ void CRender::render_sun_cascade(u32 cascade_ind)
     // Finalize & Cleanup
     {
         PROF_EVENT("Render Cascade: SMAP Finalize");
+#ifdef USE_DX11
+        // GPU time per cascade's shadow map in the performance overlay (stat_gpu_passes)
+        static const LPCWSTR smap_names[] = { L"SUN_SHADOWMAP_C0", L"SUN_SHADOWMAP_C1", L"SUN_SHADOWMAP_C2", L"SUN_SHADOWMAP_C3" };
+        dxPixEventWrapper smap_event(smap_names[_min(cascade_ind, 3u)]);
+#endif
 
         fuckingsun->X.D.combine = cull_xform;
 

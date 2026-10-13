@@ -180,6 +180,7 @@ void CPerfOverlay::DumpPasses() const
 	Msg("* [GPU passes] average per frame over the last %.0f ms, GPU frame %.2f ms:", 250.f, m_show_gpu_ms);
 	for (const gpu_profiler::pass& p : m_passes)
 		Msg("*   %*s%-34s %6.3f", int(p.depth * 2), "", p.name, p.ms);
+	xrLogger::FlushLog(); // write it out now, the log file is otherwise only written every so often
 }
 
 void CPerfOverlay::Destroy()

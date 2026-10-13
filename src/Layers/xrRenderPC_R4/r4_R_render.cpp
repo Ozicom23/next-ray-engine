@@ -174,8 +174,8 @@ void CRender::Render()
 		PIX_EVENT(DEFER_PART0_SPLIT);
 		// level, SPLIT
 		Target->phase_scene_begin();
-		GMBase.r_dsgraph_render_static(0);
-		GMBase.r_dsgraph_render_dynamic(0);
+		{ PIX_EVENT(STATIC_GEOMETRY); GMBase.r_dsgraph_render_static(0); }
+		{ PIX_EVENT(DYNAMIC_OBJECTS); GMBase.r_dsgraph_render_dynamic(0); }
 		Target->disable_aniso();
 	}
 
@@ -205,9 +205,9 @@ void CRender::Render()
 		// level
 		Target->phase_scene_begin();
 		GMBase.r_dsgraph_capture_hud();
-		GMBase.r_dsgraph_render_hud();
-		GMBase.r_dsgraph_render_lods(true,true);
-		if (Details) Details->Render();
+		{ PIX_EVENT(HUD_WEAPON); GMBase.r_dsgraph_render_hud(); }
+		{ PIX_EVENT(LODS); GMBase.r_dsgraph_render_lods(true,true); }
+		if (Details) { PIX_EVENT(GRASS); Details->Render(); }
 		Target->phase_scene_end();
 	}
 
