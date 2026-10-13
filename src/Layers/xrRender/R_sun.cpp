@@ -283,7 +283,47 @@ void CRender::render_sun_cascade(u32 cascade_ind)
 		}
 	}
 
+	// Far cascades keep their shadow map in their own target (r4_sun_cascade_cache) and redraw it every second
+	// frame, cascade 1 and 2 on alternate frames. The sun barely moves in a frame, so the far shadows look the
+	// same; the near cascade, where shadows are easy to see, is drawn every frame
+	bool smap_update = true;
+#ifdef USE_DX11
+	const bool smap_cached = ps_r4_sun_cascade_cache && cascade_ind >= 1 && cascade_ind <= 2 &&
+		!o.dx10_minmax_sm && !Device.m_SecondViewport.IsSVPActive();
+	if (smap_cached)
+	{
+		const u32 slot = cascade_ind - 1;
+		Target->smap_cascade_begin(slot);
+
+		// Redraw right away when the kept map no longer fits: first use, skipped frames (menu, loading),
+		// a camera jump or fast turn (the cascades follow the view frustum), or a sun direction change
+		const bool stale = !Target->smap_cascade_filled[slot] || Device.dwFrame - cascade.cache_frame > 2 ||
+			cascade.cache_cam_pos.distance_to_sqr(Device.vCameraPosition) > 1.f ||
+			cascade.cache_cam_dir.dotproduct(Device.vCameraDirection) < 0.995f ||
+			cascade.cache_sun_dir.dotproduct(fuckingsun->direction) < 0.9999f;
+		smap_update = stale || ((Device.dwFrame + slot) & 1) == 0;
+
+		if (smap_update)
+		{
+			Target->smap_cascade_filled[slot] = true;
+			cascade.cache_frame = Device.dwFrame;
+			cascade.cache_xform = cascade.xform;
+			cascade.cache_cam_pos = Device.vCameraPosition;
+			cascade.cache_cam_dir = Device.vCameraDirection;
+			cascade.cache_sun_dir = fuckingsun->direction;
+		}
+		else
+		{
+			// Light with the map as it was drawn; accum_direct_cascade also reads the sun's combine matrix,
+			// which the skipped shadow map pass would have set
+			cascade.xform = cascade.cache_xform;
+			fuckingsun->X.D.combine = cascade.cache_xform;
+		}
+	}
+#endif
+
 	// Begin SMAP-render
+	if (smap_update)
     {
         PROF_EVENT("Render Cascade: SMAP traverse");
         phase = PHASE_SMAP;
@@ -292,6 +332,7 @@ void CRender::render_sun_cascade(u32 cascade_ind)
     }
 
     // Finalize & Cleanup
+    if (smap_update)
     {
         PROF_EVENT("Render Cascade: SMAP Finalize");
 #ifdef USE_DX11
@@ -362,6 +403,10 @@ void CRender::render_sun_cascade(u32 cascade_ind)
 	else
 		Target->accum_direct_cascade(SE_SUN_FAR, cascade.xform,
 		                             m_sun_cascades[cascade_ind - 1].xform, cascade.bias);
+
+#ifdef USE_DX11
+	Target->smap_cascade_end();
+#endif
 
 	// Restore XForms
 	RCache.set_xform_world(Fidentity);

@@ -36,5 +36,12 @@ namespace sun
 		Fmatrix cull_xform;
 
 		CDSGraphManager GMCascade = CDSGraphManager(u32(0), u32(STYPE_RENDERABLE + STYPE_RENDERABLESHADOW), { true,false,false,false,true,false,false });
+
+		// Shadow map kept from an earlier frame (r4_sun_cascade_cache): what it was rendered with
+		u32 cache_frame = 0;
+		Fmatrix cache_xform;
+		Fvector3 cache_cam_pos;
+		Fvector3 cache_cam_dir;
+		Fvector3 cache_sun_dir;
 	};
 } //namespace sun

@@ -1,5 +1,23 @@
 #include "stdafx.h"
 
+void CRenderTarget::smap_cascade_begin(u32 slot)
+{
+	VERIFY(!m_smap_main);
+	m_smap_main = rt_smap_depth;
+	rt_smap_depth = rt_smap_cascade[slot];
+	// The light shaders sample the sun shadow map by name ("$user$smap_depth"), point that texture at this map
+	m_smap_main->pTexture->surface_set(rt_smap_depth->pSurface);
+}
+
+void CRenderTarget::smap_cascade_end()
+{
+	if (!m_smap_main)
+		return;
+	rt_smap_depth = m_smap_main;
+	m_smap_main = nullptr;
+	rt_smap_depth->pTexture->surface_set(rt_smap_depth->pSurface);
+}
+
 void CRenderTarget::phase_smap_direct(light* L, u32 sub_phase)
 {
 	//	TODO: DX10: Check thst we will never need old SMap implementation

@@ -349,6 +349,7 @@ xr_token perf_overlay_token[] = {
 	{ 0, 0 }
 };
 u32 ps_perf_overlay_pos = 1; // screen corner
+int ps_r4_sun_cascade_cache = 1; // sun cascades 1 and 2 refresh their shadow map every second frame
 xr_token perf_overlay_pos_token[] = {
 	{ "top_left", 0 },
 	{ "top_right", 1 },
@@ -1385,6 +1386,7 @@ void xrRender_initconsole()
 	CMD1(CCC_UpscalerAvailable, "r4_upscaler_available");
 	CMD1(CCC_GpuMemoryStats,    "stat_gpu_memory");
 	CMD1(CCC_GpuPassStats,      "stat_gpu_passes");
+	CMD4(CCC_Integer, "r4_sun_cascade_cache", &ps_r4_sun_cascade_cache, 0, 1);
 #endif
     CMD4(CCC_Integer, "r4_hdr10_colorspace",	  &ps_r4_hdr10_colorspace, 		     0, 2);
 
