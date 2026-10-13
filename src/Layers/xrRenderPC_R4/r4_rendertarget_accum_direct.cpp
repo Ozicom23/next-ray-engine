@@ -479,12 +479,14 @@ void CRenderTarget::accum_direct_cascade(u32 sub_phase, Fmatrix& xform, Fmatrix&
 		//float			fBias				= (SE_SUN_NEAR==sub_phase)?ps_r2_sun_depth_near_bias:ps_r2_sun_depth_far_bias;
 		//	TODO: DX10: Remove this when fix inverse culling for far region
 		//		float			fBias				= (SE_SUN_NEAR==sub_phase)?(-ps_r2_sun_depth_near_bias):ps_r2_sun_depth_far_bias;
+		// The cascade may use only a corner of the shadow map (r4_sun_smap_scale)
+		const float smap_scale = m_sun_smap_scale;
 		Fmatrix m_TexelAdjust =
 		{
-			0.5f, 0.0f, 0.0f, 0.0f,
-			0.0f, -0.5f, 0.0f, 0.0f,
+			0.5f * smap_scale, 0.0f, 0.0f, 0.0f,
+			0.0f, -0.5f * smap_scale, 0.0f, 0.0f,
 			0.0f, 0.0f, fRange, 0.0f,
-			0.5f, 0.5f, fBias, 1.0f
+			0.5f * smap_scale, 0.5f * smap_scale, fBias, 1.0f
 		};
 
 		// compute xforms

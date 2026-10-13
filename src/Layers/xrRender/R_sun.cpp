@@ -5,6 +5,10 @@
 
 #include "R_sun_support.h"
 
+#ifdef USE_DX11
+extern Fvector3 ps_r4_sun_smap_scale;
+#endif
+
 constexpr float tweak_COP_initial_offs = 1200.f;
 
 float OLES_SUN_LIMIT_27_01_07 = 100.f;
@@ -302,6 +306,24 @@ void CRender::render_sun_cascade(u32 cascade_ind)
 
         fuckingsun->X.D.combine = cull_xform;
 
+#ifdef USE_DX11
+        // Far cascades can render into a corner of the shadow map: its pixel cost (mostly alpha tested tree leaves)
+        // goes down with the area, and far shadows are small on screen. accum_direct_cascade scales the lookup to it.
+        const u32 smap_size = RImplementation.o.smapsize;
+        const float smap_scale = cascade_ind < 3 ? clampr((&ps_r4_sun_smap_scale.x)[cascade_ind], 0.25f, 1.f) : 1.f;
+        const u32 smap_used = _min(smap_size, u32(iFloor(float(smap_size) * smap_scale)));
+        Target->m_sun_smap_scale = float(smap_used) / float(smap_size);
+        auto set_smap_viewport = [smap_used, smap_size]()
+        {
+            if (smap_used == smap_size)
+                return;
+            D3D_VIEWPORT VP = { 0.f, 0.f, float(smap_used), float(smap_used), 0.f, 1.f };
+            HW.pContext->RSSetViewports(1, &VP);
+        };
+#else
+        auto set_smap_viewport = []() {};
+#endif
+
         // Render shadow-map
         //. !!! We should clip based on shrinked frustum (again)
         {
@@ -310,6 +332,7 @@ void CRender::render_sun_cascade(u32 cascade_ind)
             if (bDeffered_Shadows || bForward_Shadows)
             {
                 Target->phase_smap_direct(fuckingsun, SE_SUN_FAR);
+                set_smap_viewport();
                 RCache.set_xform_world(Fidentity);
                 RCache.set_xform_view(Fidentity);
                 RCache.set_xform_project(fuckingsun->X.D.combine);
@@ -326,6 +349,7 @@ void CRender::render_sun_cascade(u32 cascade_ind)
                 {
                     fuckingsun->X.D.transluent = TRUE;
                     Target->phase_smap_direct_tsh(fuckingsun, SE_SUN_FAR);
+                    set_smap_viewport();
                     cascade.GMCascade.r_dsgraph_render_graph(1);			// normal level, secondary priority
                     cascade.GMCascade.r_dsgraph_render_sorted();			// strict-sorted geoms
                 }
@@ -362,6 +386,10 @@ void CRender::render_sun_cascade(u32 cascade_ind)
 	else
 		Target->accum_direct_cascade(SE_SUN_FAR, cascade.xform,
 		                             m_sun_cascades[cascade_ind - 1].xform, cascade.bias);
+
+#ifdef USE_DX11
+	Target->m_sun_smap_scale = 1.f;
+#endif
 
 	// Restore XForms
 	RCache.set_xform_world(Fidentity);

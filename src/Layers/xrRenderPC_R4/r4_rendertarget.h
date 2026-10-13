@@ -499,6 +499,9 @@ public:
 	bool need_to_render_sunshafts();
 	bool use_minmax_sm_this_frame();
 
+	// Part of the shadow map (width and height) the current sun cascade uses, r4_sun_smap_scale; the shadow lookup is scaled to it
+	float m_sun_smap_scale = 1.f;
+
 	BOOL enable_scissor(light* L); // true if intersects near plane
 	void enable_dbt_bounds(light* L);
 
