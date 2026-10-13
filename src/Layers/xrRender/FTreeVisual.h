@@ -25,14 +25,6 @@ public:
 	virtual void Copy(dxRender_Visual* pFrom);
 	virtual void Release();
 
-#ifdef USE_DX11
-	// Instanced drawing (r4_tree_instancing, r__dsgraph_render.cpp): trees with the same instance_key draw the
-	// same geometry and can share one draw, each with its own transform
-	virtual u64 instance_key(float LOD) { return 0; } // 0: can't be instanced
-	void write_instance(Fvector4* rows) const; // 3 rows of m_xform
-	virtual void render_instances(float LOD, u32 count) {} // constants of this tree, then count instances
-#endif
-
 	FTreeVisual(void);
 	virtual ~FTreeVisual(void);
 };
@@ -45,10 +37,6 @@ public:
 	virtual ~FTreeVisual_ST(void);
 
 	virtual void Render(float LOD); // LOD - Level Of Detail  [0.0f - min, 1.0f - max], Ignored
-#ifdef USE_DX11
-	virtual u64 instance_key(float LOD);
-	virtual void render_instances(float LOD, u32 count);
-#endif
 	virtual void Load(LPCSTR N, IReader* data, u32 dwFlags);
 	virtual void Copy(dxRender_Visual* pFrom);
 	virtual void Release();
@@ -68,10 +56,6 @@ public:
 	virtual ~FTreeVisual_PM(void);
 
 	virtual void Render(float LOD); // LOD - Level Of Detail  [0.0f - min, 1.0f - max], Ignored
-#ifdef USE_DX11
-	virtual u64 instance_key(float LOD);
-	virtual void render_instances(float LOD, u32 count);
-#endif
 	virtual void Load(LPCSTR N, IReader* data, u32 dwFlags);
 	virtual void Copy(dxRender_Visual* pFrom);
 	virtual void Release();

@@ -140,7 +140,6 @@ namespace R_dsgraph
 	{
 		// Sorting key
         RenderPacketSortKey sortKey;
-		u64 instKey = 0; // tree instancing: same geometry, sorted after sortKey (0: not instanced)
 
 		// Visual data
 		DSGraphItem<u32, false> item;

@@ -553,11 +553,8 @@ void CRender::create()
 	Device.seqRender.Add(&g_PerfOverlay, -4);
 }
 
-extern void tree_instancing_reset();
-
 void CRender::destroy()
 {
-	tree_instancing_reset();
 	m_bMakeAsyncSS = false;
 	FluidManager.Destroy();
 	GMBase.destroy();
@@ -576,7 +573,6 @@ void CRender::destroy()
 
 void CRender::reset_begin()
 {
-	tree_instancing_reset();
 	//AVO: let's reload details while changed details options on vid_restart
 	if (b_loaded && ((dm_current_size != dm_size) || (ps_r__Detail_density != ps_current_detail_density) || (
 		ps_r__Detail_height != ps_current_detail_height)))

@@ -351,7 +351,6 @@ xr_token perf_overlay_token[] = {
 u32 ps_perf_overlay_pos = 1; // screen corner
 int ps_r4_dbg_shadow_skip = 0; // measuring only: 1 trees, 2 other static, 4 dynamic objects left out of shadow maps
 Fvector3 ps_r4_sun_smap_scale = { 1.f, 1.f, 1.f }; // sun cascades 0, 1, 2: part of the shadow map size each renders at
-int ps_r4_tree_instancing = 1; // sun shadow maps: trees of the same geometry in one draw (needs shadow_direct_tree_inst.vs)
 int ps_r4_cbuffer_skip_unchanged = 1; // shader constant buffers: no upload when a draw sets the values they already hold
 xr_token perf_overlay_pos_token[] = {
 	{ "top_left", 0 },
@@ -1421,7 +1420,6 @@ void xrRender_initconsole()
 	CMD1(CCC_GpuPassStats,      "stat_gpu_passes");
 	CMD4(CCC_DbgShadowSkip, "r4_dbg_shadow_skip", &ps_r4_dbg_shadow_skip, 0, 7);
 	CMD1(CCC_TreeBatchStats, "stat_tree_batches");
-	CMD4(CCC_Integer, "r4_tree_instancing", &ps_r4_tree_instancing, 0, 1);
 	CMD4(CCC_Integer, "r4_cbuffer_skip_unchanged", &ps_r4_cbuffer_skip_unchanged, 0, 1);
 	CMD4(CCC_Vector3, "r4_sun_smap_scale", &ps_r4_sun_smap_scale, Fvector3().set(0.25f, 0.25f, 0.25f), Fvector3().set(1.f, 1.f, 1.f));
 #endif
