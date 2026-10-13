@@ -349,7 +349,7 @@ xr_token perf_overlay_token[] = {
 	{ 0, 0 }
 };
 u32 ps_perf_overlay_pos = 1; // screen corner
-int ps_r4_sun_cascade_cache = 0; // sun cascades 1 and 2 refresh their shadow map every second frame (off: far shadows flicker)
+int ps_r4_sun_cascade_cache = 1; // sun cascades 1 and 2 refresh their shadow map every second frame
 xr_token perf_overlay_pos_token[] = {
 	{ "top_left", 0 },
 	{ "top_right", 1 },
