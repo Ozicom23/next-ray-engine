@@ -40,11 +40,11 @@ namespace
 	{
 		ID3D11Texture2D* staging = nullptr;
 		Fmatrix view_proj;
-		bool pending = false;
 	};
 	Slot s_slots[kSlots];
 	u32 s_width = 0, s_height = 0, s_tiles_w = 0, s_tiles_h = 0;
-	u32 s_write = 0;
+	// Ring of copies: written in order, read in order, at most kSlots in flight
+	u32 s_write = 0, s_read = 0;
 
 	// Tiles of the frame read back last
 	xr_vector<float> s_tiles;
@@ -66,10 +66,9 @@ namespace
 		for (Slot& s : s_slots)
 		{
 			_RELEASE(s.staging);
-			s.pending = false;
 		}
 		s_width = s_height = s_tiles_w = s_tiles_h = 0;
-		s_write = 0;
+		s_write = s_read = 0;
 		s_tiles_valid = false;
 	}
 
@@ -233,20 +232,18 @@ void frame_begin(bool usable)
 	if (s_stats)
 		s_frames++;
 
-	// Oldest copy: written kSlots - 1 copies ago
-	if (s_write < kSlots - 1)
+	// Oldest copy, once it is two copies old (the GPU has finished it by then; if not, next frame)
+	if (s_write - s_read < kSlots - 1)
 		return;
-	Slot& s = s_slots[(s_write - (kSlots - 1)) % kSlots];
-	if (!s.pending)
-		return;
+	Slot& s = s_slots[s_read % kSlots];
 	D3D11_MAPPED_SUBRESOURCE mapped;
 	if (FAILED(HW.pContext->Map(s.staging, 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mapped)))
 		return;
+	s_read++;
 	s_tiles.resize(s_tiles_w * s_tiles_h);
 	for (u32 y = 0; y < s_tiles_h; y++)
 		CopyMemory(&s_tiles[y * s_tiles_w], (const BYTE*)mapped.pData + y * mapped.RowPitch, s_tiles_w * sizeof(float));
 	HW.pContext->Unmap(s.staging, 0);
-	s.pending = false;
 	s_tiles_view_proj = s.view_proj;
 	s_tiles_valid = true;
 	if (s_stats)
@@ -268,13 +265,12 @@ void capture(ID3D11DepthStencilView* depth, const Fmatrix& view_proj)
 	if (ensure_targets(tex))
 	{
 		Slot& s = s_slots[s_write % kSlots];
-		if (!s.pending)
+		if (s_write - s_read < kSlots)
 		{
 			HW.pContext->CopyResource(s_depth, tex);
 			reduce();
 			HW.pContext->CopyResource(s.staging, s_tiles_gpu);
 			s.view_proj = view_proj;
-			s.pending = true;
 			s_write++;
 		}
 	}
