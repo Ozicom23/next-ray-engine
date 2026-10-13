@@ -149,6 +149,7 @@ void CRender::Render()
 
     if (RImplementation.o.ssfx_motionvectors)
     {
+        PIX_EVENT(SSFX_MOTION_VECTORS);
         Target->u_setrt(Device.dwRenderWidth, Device.dwRenderHeight, 0, 0, Target->rt_ssfx_motion_vectors->pRT, 0);
 
         FLOAT ColorRGBA[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -253,6 +254,7 @@ void CRender::Render()
 			// SSS Shadows
 			if (ps_ssfx_sss_quality.z > 0)
 			{
+				PIX_EVENT(SSFX_SSS_SHADOWS);
 				Target->phase_ssfx_sss();
 				sss_rendered = true;
 			}
@@ -269,6 +271,7 @@ void CRender::Render()
 			if (ps_ssfx_sss_quality.w > 0)
 			{
 				// Extra lights
+				PIX_EVENT(SSFX_SSS_EXTRA_LIGHTS);
 				Target->phase_ssfx_sss_ext(RImplementation.LP_normal);
 				sss_extended_rendered = true;
 			}
@@ -318,6 +321,7 @@ void CRender::Render()
 	if (RImplementation.o.ssfx_bloom)
 	{
 		// Render Emissive on `rt_ssfx_bloom_emissive`
+		PIX_EVENT(SSFX_BLOOM_EMISSIVE);
 		FLOAT ColorRGBA[4] = { 0,0,0,0 };
 		HW.pContext->ClearRenderTargetView(Target->rt_ssfx_bloom_emissive->pRT, ColorRGBA);
 		Target->u_setrt(Target->rt_ssfx_bloom_emissive, NULL, NULL, !RImplementation.o.dx10_msaa ? HW.pBaseZB : Target->rt_MSAADepth->pZRT);
@@ -338,6 +342,7 @@ void CRender::Render()
 	}
 
 	{
+		PIX_EVENT(SSFX_VOLUMETRIC_BLUR);
 		if (RImplementation.o.ssfx_volumetric)
 			Target->phase_ssfx_volumetric_blur();
 	}
@@ -356,6 +361,7 @@ void CRender::Render()
 	if (g_hud)
 	{
         PROF_EVENT("render_hud");
+		PIX_EVENT(HUD_UI);
 		if (g_hud->RenderActiveItemUIQuery())
 			GMBase.r_dsgraph_render_hud_ui();
 		if (g_hud->RenderCamAttachedUIQuery())

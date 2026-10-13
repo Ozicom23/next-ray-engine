@@ -401,6 +401,9 @@
     <ClInclude Include="r4_gpu_memory.h">
       <Filter>Core_Target</Filter>
     </ClInclude>
+    <ClInclude Include="r4_gpu_profiler.h">
+      <Filter>Core_Target</Filter>
+    </ClInclude>
     <ClInclude Include="r4_rendertarget.h">
       <Filter>Core_Target</Filter>
     </ClInclude>
@@ -1107,6 +1110,9 @@
       <Filter>Core_Target</Filter>
     </ClCompile>
     <ClCompile Include="r4_gpu_memory.cpp">
+      <Filter>Core_Target</Filter>
+    </ClCompile>
+    <ClCompile Include="r4_gpu_profiler.cpp">
       <Filter>Core_Target</Filter>
     </ClCompile>
     <ClCompile Include="..\..\3rd party\FidelityFX-FSR3\src\components\fsr3upscaler\ffx_fsr3upscaler.cpp">

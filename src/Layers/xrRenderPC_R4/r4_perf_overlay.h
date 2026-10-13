@@ -1,6 +1,7 @@
 #pragma once
 
 #include "r4_gpu_memory.h"
+#include "r4_gpu_profiler.h"
 
 // In-game performance overlay (console: perf_overlay, perf_overlay_pos, perf_overlay_toggle).
 // Display-only ImGui window: frame and GPU times, VRAM, render/output resolution, engine CPU timers.
@@ -22,6 +23,9 @@ public:
 	void Draw();
 
 	void Destroy();
+
+	// stat_gpu_passes: the last per-pass GPU times (all depths) to the log
+	void DumpPasses() const;
 
 private:
 	static const u32 kGpuQueries = 4;
@@ -93,6 +97,8 @@ private:
 
 	u32 m_draw_calls = 0;
 	u32 m_polys = 0;
+
+	xr_vector<gpu_profiler::pass> m_passes; // detailed mode: GPU time per render pass
 };
 
 extern CPerfOverlay g_PerfOverlay;

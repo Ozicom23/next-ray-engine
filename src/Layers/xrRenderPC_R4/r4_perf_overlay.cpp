@@ -73,6 +73,9 @@ void CPerfOverlay::CollectGpuTimes()
 
 void CPerfOverlay::GpuFrameBegin()
 {
+	// Per-pass timing costs a few hundred queries per frame, only in detailed mode
+	gpu_profiler::frame_begin(ps_perf_overlay >= 2);
+
 	m_query_active = false;
 	if (!ps_perf_overlay || !CreateQueries())
 		return;
@@ -90,6 +93,8 @@ void CPerfOverlay::GpuFrameBegin()
 
 void CPerfOverlay::GpuFrameEnd()
 {
+	gpu_profiler::frame_end();
+
 	if (!ps_perf_overlay)
 		return;
 
@@ -165,6 +170,18 @@ void CPerfOverlay::UpdateRam()
 	}
 }
 
+void CPerfOverlay::DumpPasses() const
+{
+	if (m_passes.empty())
+	{
+		Msg("* [GPU passes] no data: turn on the detailed overlay (perf_overlay 2) and wait a moment");
+		return;
+	}
+	Msg("* [GPU passes] average per frame over the last %.0f ms, GPU frame %.2f ms:", 250.f, m_show_gpu_ms);
+	for (const gpu_profiler::pass& p : m_passes)
+		Msg("*   %*s%-34s %6.3f", int(p.depth * 2), "", p.name, p.ms);
+}
+
 void CPerfOverlay::Destroy()
 {
 	for (u32 i = 0; i < kGpuQueries; ++i)
@@ -176,6 +193,7 @@ void CPerfOverlay::Destroy()
 	}
 	m_query_active = false;
 	_RELEASE(m_adapter3);
+	gpu_profiler::destroy();
 }
 
 void CPerfOverlay::Draw()
@@ -276,6 +294,7 @@ void CPerfOverlay::Draw()
 		UpdateVram();
 		UpdateRam();
 		gpu_memory::get_totals(m_gpu);
+		gpu_profiler::collect(m_passes);
 	}
 
 	// Only inside an open ImGui frame (not before the engine's first ImGui::NewFrame)
@@ -382,6 +401,24 @@ void CPerfOverlay::Draw()
 			xr_sprintf(label, "frame time (max %.1f ms)", graph_max);
 			ImGui::PlotLines("##frametime", m_graph, int(kGraphSamples), int(m_graph_pos), label, 0.f, graph_max,
 			                 ImVec2(320.f * _max(1.f, io.DisplaySize.y / 1080.f), 60.f * _max(1.f, io.DisplaySize.y / 1080.f)));
+
+			// GPU time per render pass, nested like the PIX_EVENT scopes; small passes are left out to keep it short
+			if (!m_passes.empty())
+			{
+				ImGui::Separator();
+				ImGui::Text("GPU passes, ms");
+				float top_level = 0.f;
+				for (const gpu_profiler::pass& p : m_passes)
+				{
+					if (!p.depth)
+						top_level += p.ms;
+					if (p.depth > 2 || p.ms < 0.1f)
+						continue;
+					ImGui::Text("%*s%-28s %5.2f", int(p.depth * 2), "", p.name, p.ms);
+				}
+				if (m_show_gpu_ms > top_level)
+					ImGui::Text("%-28s %5.2f", "outside passes (UI, present)", m_show_gpu_ms - top_level);
+			}
 		}
 	}
 	ImGui::End();

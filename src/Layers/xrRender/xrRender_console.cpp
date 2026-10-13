@@ -616,6 +616,16 @@ public:
 
 #ifdef USE_DX11
 #include "../xrRenderPC_R4/r4_gpu_memory.h"
+#include "../xrRenderPC_R4/r4_perf_overlay.h"
+
+// GPU time per render pass, as measured for the detailed performance overlay
+class CCC_GpuPassStats : public IConsole_Command
+{
+public:
+	CCC_GpuPassStats(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; }
+	virtual void Execute(LPCSTR args) { g_PerfOverlay.DumpPasses(); }
+	virtual void Info(TInfo& I) { xr_strcpy(I, "GPU time per render pass to the log (needs perf_overlay 2)"); }
+};
 
 // GPU memory by kind of resource, then the largest textures, models and render targets (stat_gpu_memory [count]).
 // stat_memory runs it with 0 for the summary only
@@ -1374,6 +1384,7 @@ void xrRender_initconsole()
 	CMD1(CCC_PerfOverlayToggle, "perf_overlay_toggle");
 	CMD1(CCC_UpscalerAvailable, "r4_upscaler_available");
 	CMD1(CCC_GpuMemoryStats,    "stat_gpu_memory");
+	CMD1(CCC_GpuPassStats,      "stat_gpu_passes");
 #endif
     CMD4(CCC_Integer, "r4_hdr10_colorspace",	  &ps_r4_hdr10_colorspace, 		     0, 2);
 
