@@ -4,7 +4,7 @@
 
 #include <atomic>
 
-int ps_r4_sun_caster_cull = 0;
+int ps_r4_sun_caster_cull = 1;
 
 namespace sun_receivers
 {
