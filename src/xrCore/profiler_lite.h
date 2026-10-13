@@ -52,7 +52,7 @@ namespace xr_prof
 
 #define PROF_LITE_CONCAT_(a, b) a##b
 #define PROF_LITE_CONCAT(a, b) PROF_LITE_CONCAT_(a, b)
-// PROF_EVENT() is named after the function
+// PROF_EVENT() is named after the function. Ends with ';': some uses have none
 #define PROF_LITE_EVENT(...) \
 	static ::xr_prof::desc PROF_LITE_CONCAT(prof_desc_, __LINE__)(__FUNCTION__, "" __VA_ARGS__); \
-	::xr_prof::scope PROF_LITE_CONCAT(prof_scope_, __LINE__)(PROF_LITE_CONCAT(prof_desc_, __LINE__))
+	::xr_prof::scope PROF_LITE_CONCAT(prof_scope_, __LINE__)(PROF_LITE_CONCAT(prof_desc_, __LINE__));

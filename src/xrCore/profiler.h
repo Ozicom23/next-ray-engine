@@ -27,7 +27,7 @@
 #else
 // stat_cpu_passes (profiler_lite.h)
 #	include "profiler_lite.h"
-#	define START_PROFILE(a) { PROF_LITE_EVENT(a);
+#	define START_PROFILE(a) { PROF_LITE_EVENT(a)
 #	define STOP_PROFILE		}
 
 #	define PROF_THREAD(Name)
