@@ -5,7 +5,6 @@
 
 dx10ConstantBuffer& R_constants::GetCBuffer(R_constant* C, BufferType BType)
 {
-	PROF_EVENT("R_constants::GetCBuffer");
 	if (BType == BT_PixelBuffer)
 	{
 		//	Decode index

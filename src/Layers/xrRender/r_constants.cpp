@@ -56,7 +56,6 @@ R_constant* R_constant_table::get(LPCSTR S)
 
 R_constant* R_constant_table::get(shared_str& S)
 {
-	PROF_EVENT("R_constant_table::get shared_str");
 	// demonized: use lower_bound for shared_str search, sorted by pointer
     static auto sortFunc = [](const ref_constant& C, const shared_str& S) noexcept { return C->name < S; };
     auto it = std::lower_bound(table.begin(), table.end(), S, sortFunc);

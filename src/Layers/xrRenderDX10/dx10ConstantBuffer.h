@@ -30,6 +30,8 @@ public:
 
 private:
 	Fvector4* Access(u16 offset);
+	// Copies data at offset; the buffer is uploaded again only when the data differs
+	void Write(u32 offset, const void* data, u32 size);
 
 private:
 	shared_str m_strBufferName;
