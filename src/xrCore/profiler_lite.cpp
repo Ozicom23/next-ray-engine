@@ -117,6 +117,15 @@ namespace xr_prof
 		child = 0;
 		parent = t_current;
 		t_current = this;
+		recursive = false;
+		for (scope* up = parent; up; up = up->parent)
+		{
+			if (up->d == d)
+			{
+				recursive = true;
+				break;
+			}
+		}
 		t0 = ticks();
 	}
 
@@ -128,13 +137,15 @@ namespace xr_prof
 			parent->child += dt;
 		if (t_main)
 		{
-			d->main_total.fetch_add(dt, std::memory_order_relaxed);
+			if (!recursive)
+				d->main_total.fetch_add(dt, std::memory_order_relaxed);
 			d->main_self.fetch_add(dt > child ? dt - child : 0, std::memory_order_relaxed);
 			d->main_calls.fetch_add(1, std::memory_order_relaxed);
 		}
 		else
 		{
-			d->other_total.fetch_add(dt, std::memory_order_relaxed);
+			if (!recursive)
+				d->other_total.fetch_add(dt, std::memory_order_relaxed);
 			d->other_calls.fetch_add(1, std::memory_order_relaxed);
 		}
 	}

@@ -23,6 +23,7 @@ namespace xr_prof
 		desc* d;
 		unsigned long long t0, child;
 		scope* parent;
+		bool recursive; // the same scope is open further up: inclusive time counts the outermost only
 
 		explicit scope(desc& ds)
 		{
