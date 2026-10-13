@@ -78,7 +78,7 @@
 		<text>Steam Deck Preset</text>
 	</string>
 	<string id="ui_mm_video_advanced_deck_preset_desc">
-		<text>Lowers settings whose loss is hard to see on a small 800p screen: ambient occlusion and screen space reflections at half resolution, fewer screen space shadow samples, far sun shadows to 140 m, point and spot light shadows at 3/4 size, sun shafts at medium. Settings already lower stay as they are. Turning it off restores your previous values, so you can compare.</text>
+		<text>Lowers settings whose loss is hard to see on a small 800p screen: ambient occlusion and screen space reflections at half resolution, fewer screen space shadow samples, far sun shadows to 140 m, middle and far sun shadow cascades at 3/4 and 1/2 resolution, point and spot light shadows at 3/4 size, sun shafts at medium. Settings already lower stay as they are. Turning it off restores your previous values, so you can compare.</text>
 	</string>
 	<string id="ui_mm_lst_perf_overlay_off">
 		<text>Off</text>

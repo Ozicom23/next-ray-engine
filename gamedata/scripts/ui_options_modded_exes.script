@@ -13,6 +13,8 @@ local deck_preset = {
 	{ cmd = "ssfx_sss_quality",     index = 2, value = 3,   mode = "min" }, -- screen space shadow samples, other lights
 	{ cmd = "ssfx_shadow_cascades", index = 3, value = 140, mode = "min" }, -- far sun shadow cascade, metres
 	{ cmd = "r2_ls_squality",                  value = 0.75, mode = "min" }, -- point and spot light shadow map size
+	{ cmd = "r4_sun_smap_scale",    index = 2, value = 0.75, mode = "min" }, -- middle sun cascade at 3/4 resolution
+	{ cmd = "r4_sun_smap_scale",    index = 3, value = 0.5,  mode = "min" }, -- far sun cascade at half resolution
 	{ cmd = "r2_sunshafts_quality", token = { st_opt_high = "st_opt_medium", st_opt_ultra = "st_opt_medium" } }, -- volumetric sun shafts
 }
 local deck_preset_section = "deck_preset"
