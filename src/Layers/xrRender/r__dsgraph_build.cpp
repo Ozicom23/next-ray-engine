@@ -35,6 +35,7 @@ ICF float CalcSSA(float& distSQ, Fvector& C, dxRender_Visual* V)
 // r4_dbg_shadow_skip: leave kinds of objects out of all shadow maps to measure their cost with stat_gpu_passes.
 // 1 trees, 2 other static objects, 4 dynamic objects
 extern int ps_r4_dbg_shadow_skip;
+namespace hiz { void test_static(const Fbox& box, bool tree); }
 #endif
 
 void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix* xform)
@@ -300,6 +301,12 @@ void CDSGraphManager::r_dsgraph_insert_static(dxRender_Visual *pVisual)
                 return;
         }
     }
+
+#ifdef USE_DX11
+	// stat_hiz: would the occlusion test against a recent frame's depth cull it
+	if (i_mask[fl_normal])
+		hiz::test_static(pVisual->vis.box, pVisual->Type == MT_TREE_ST || pVisual->Type == MT_TREE_PM);
+#endif
 
 	// Distortive geometry should be marked and R2 special-cases it
 	// a) Allow to optimize RT order

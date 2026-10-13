@@ -553,8 +553,11 @@ void CRender::create()
 	Device.seqRender.Add(&g_PerfOverlay, -4);
 }
 
+namespace hiz { void destroy(); }
+
 void CRender::destroy()
 {
+	hiz::destroy();
 	m_bMakeAsyncSS = false;
 	FluidManager.Destroy();
 	GMBase.destroy();

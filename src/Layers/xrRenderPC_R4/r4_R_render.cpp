@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "r4_hiz.h"
 #include "../../xrEngine/igame_persistent.h"
 #include "../xrRender/FBasicVisual.h"
 #include "../../xrEngine/customhud.h"
@@ -143,6 +144,9 @@ void CRender::Render()
 		HW.pContext->ClearDepthStencilView(HW.pBaseZB, D3D_CLEAR_DEPTH, 1.0f, 0);
 	}*/
 
+    const bool hiz_frame = !Device.m_SecondViewport.IsSVPFrame() && !RImplementation.o.dx10_msaa;
+    if (hiz_frame)
+        hiz::frame_begin();
     GMBase.traverse(RImplementation.pLastSector, ViewBase, Device.vCameraPosition, Device.mFullTransform);
     GMBase.r_dsgraph_capture_static();
     GMBase.r_dsgraph_capture_dynamic();
@@ -177,6 +181,9 @@ void CRender::Render()
 		{ PIX_EVENT(STATIC_GEOMETRY); GMBase.r_dsgraph_render_static(0); }
 		{ PIX_EVENT(DYNAMIC_OBJECTS); GMBase.r_dsgraph_render_dynamic(0); }
 		Target->disable_aniso();
+		// Scene depth without HUD, for the occlusion test of a later frame (stat_hiz)
+		if (hiz_frame)
+			hiz::capture(HW.pBaseZB, Device.mFullTransform);
 	}
 
 	//  Redotix99: for 3D Shader Based Scopes 	
