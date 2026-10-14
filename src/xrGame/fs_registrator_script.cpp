@@ -136,9 +136,20 @@ FS_file_list_ex::FS_file_list_ex(LPCSTR path, u32 flags, LPCSTR mask)
 {
 	const u64 t_begin = CPU::QPC();
 	FS_Path* P = FS.get_path(path);
-	P->m_Flags.set(FS_Path::flNeedRescan,TRUE);
-	FS.m_Flags.set(CLocatorAPI::flNeedCheck,TRUE);
-	FS.rescan_pathes();
+	// The scripts folder is listed three times in every level load (axr_main, dxml_core, MCM), ~0.43 s each on the
+	// Steam Deck: reading the folder through Proton and MO2's virtual file system. The game doesn't write scripts, so
+	// listings within 10 s of its last rescan use that one; a script added by hand shows up at the next load
+	static u64 last_scripts_rescan = 0;
+	const bool scripts = !_stricmp(path, "$game_scripts$");
+	const bool recent = scripts && last_scripts_rescan && t_begin - last_scripts_rescan < 10 * CPU::qpc_freq;
+	if (!recent)
+	{
+		P->m_Flags.set(FS_Path::flNeedRescan,TRUE);
+		FS.m_Flags.set(CLocatorAPI::flNeedCheck,TRUE);
+		FS.rescan_pathes();
+		if (scripts)
+			last_scripts_rescan = t_begin;
+	}
 	const u64 t_rescanned = CPU::QPC();
 
 	FS_FileSet files;
