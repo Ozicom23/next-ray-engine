@@ -400,7 +400,9 @@ static void full_memory_stats(bool assert = true)
 
 // Automation aids that must not stay on in normal play
 extern int g_rc_silent_level_changers;
-int g_precache_frames = 60;
+// Frames after a level load while the loading screen still shows (the camera turns once around the actor): 30
+// instead of the original 60, ~1-2 s shorter level loads on the Steam Deck with no visible difference after arrival
+int g_precache_frames = 30;
 class CCC_IntegerNotSaved : public CCC_Integer
 {
 public:
