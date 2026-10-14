@@ -1312,23 +1312,17 @@ bool CScriptStorage::namespace_loaded(LPCSTR N, bool remove_from_stack)
 
 bool CScriptStorage::object(LPCSTR identifier, int type)
 {
+	// The key directly (raw, as lua_next was): walking the whole table and comparing every key was ~10 us per
+	// lookup with GAMMA's thousands of globals, and every engine call of a Lua function by name looks it up here
+	// (27k on_register calls in each A-Life load)
 	int start = lua_gettop(lua());
-	lua_pushnil(lua());
-	while (lua_next(lua(), -2))
-	{
-		if ((lua_type(lua(), -1) == type) && !xr_strcmp(identifier, lua_tostring(lua(), -2)))
-		{
-			VERIFY(lua_gettop(lua()) >= 3);
-			lua_pop(lua(), 3);
-			VERIFY(lua_gettop(lua()) == start - 1);
-			return (true);
-		}
-		lua_pop(lua(), 1);
-	}
-	VERIFY(lua_gettop(lua()) >= 1);
-	lua_pop(lua(), 1);
+	lua_pushstring(lua(), identifier);
+	lua_rawget(lua(), -2);
+	const bool result = lua_type(lua(), -1) == type;
+	VERIFY(lua_gettop(lua()) >= 2);
+	lua_pop(lua(), 2);
 	VERIFY(lua_gettop(lua()) == start - 1);
-	return (false);
+	return (result);
 }
 
 bool CScriptStorage::object(LPCSTR namespace_name, LPCSTR identifier, int type)
