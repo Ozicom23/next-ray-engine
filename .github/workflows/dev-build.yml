@@ -1,7 +1,8 @@
 # Fast development build: DX11-AVX only, no release.
 # Runs on pushes to dlss-* branches and can be started manually from the Actions tab.
-# Download the "dev_DX11-AVX" artifact from the run page: it contains bin/ (exe + pdb + nvngx_dlss.dll)
-# and db/mods/00_modded_exes_gamedata.db0, laid out like the Anomaly folder.
+# Download the "dev_DX11-AVX" artifact from the run page: it contains bin/ (exe + nvngx_dlss.dll)
+# and db/mods/00_modded_exes_gamedata.db0, laid out like the Anomaly folder. The exe's debug symbols
+# (pdb, ~190 MB, for crash analysis) are a separate artifact, "dev_DX11-AVX_pdb".
 # bin/dlss_dev/nvngx_dlss.dll is NVIDIA's development DLL (on-screen debug overlay), swap it in for debugging.
 
 name: Dev build (DX11-AVX)
@@ -55,7 +56,8 @@ jobs:
         msbuild-architecture: "x64"
 
     - name: Build ${{ env.BUILD_CONF }}
-      run: msbuild /p:Configuration=${{ env.BUILD_CONF }} ${{ env.SOLUTION_FILE_PATH }}
+      # /m: independent projects build at the same time (files within a project already compile in parallel)
+      run: msbuild /m /p:Configuration=${{ env.BUILD_CONF }} ${{ env.SOLUTION_FILE_PATH }}
 
     - name: Pack gamedata
       run: |
@@ -70,7 +72,8 @@ jobs:
         new-item -path "./package/bin" -itemtype directory -force
         new-item -path "./package/db/mods" -itemtype directory -force
         copy-item -path "./_build/_game/bin_dbg/*.exe" -destination "./package/bin"
-        copy-item -path "./_build/_game/bin_dbg/*.pdb" -destination "./package/bin"
+        new-item -path "./package_pdb/bin" -itemtype directory -force
+        copy-item -path "./_build/_game/bin_dbg/*.pdb" -destination "./package_pdb/bin"
         copy-item -path "./compressor/${{ env.PACK_GAMEDATA_NAME }}" -destination "./package/db/mods"
         $sdk = "./src/3rd party/NVIDIA-DLSS"
         copy-item -path "$sdk/lib/Windows_x86_64/rel/nvngx_dlss.dll" -destination "./package/bin"
@@ -83,5 +86,13 @@ jobs:
       with:
         name: dev_${{ env.BUILD_CONF }}
         path: ./package
+        if-no-files-found: "error"
+        retention-days: 14
+
+    - name: Upload debug symbols
+      uses: actions/upload-artifact@v4.6.0
+      with:
+        name: dev_${{ env.BUILD_CONF }}_pdb
+        path: ./package_pdb
         if-no-files-found: "error"
         retention-days: 14
