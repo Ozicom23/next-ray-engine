@@ -325,7 +325,9 @@ local function prof_key(P, name, f)
 end
 
 local function prof_report()
-	local frames = math.max(1, device().frame - prof.start_frame)
+	local measured = math.max(1, device().frame - prof.start_frame)
+	-- A load (end_frame): totals, else averages per frame
+	local frames = prof.end_frame and 1 or measured
 	local function sorted(tbl)
 		local list = {}
 		for key, t in pairs(tbl) do
@@ -334,7 +336,11 @@ local function prof_report()
 		table.sort(list, function(a, b) return a.us > b.us end)
 		return list
 	end
-	log(string.format("* [Lua callbacks] average per frame over %d frames (ms incl. nested callbacks, calls)", frames))
+	if prof.end_frame then
+		log(string.format("* [Lua callbacks] totals over the load and its first %d frames (ms incl. nested callbacks, calls)", measured))
+	else
+		log(string.format("* [Lua callbacks] average per frame over %d frames (ms incl. nested callbacks, calls)", frames))
+	end
 	-- Time in the callbacks' functions, per callback: the rest of a callback's time is its dispatch
 	local in_funcs = {}
 	for key, t in pairs(prof.funcs) do
@@ -358,6 +364,13 @@ end
 function lua_profile_start(seconds)
 	prof = { totals = {}, funcs = {}, keys = {}, start_frame = device().frame, end_time = time_global() + (seconds or 5) * 1000 }
 	log(string.format("* [Lua callbacks] measuring for %d s...", seconds or 5))
+end
+
+-- From a level load on, for its first frames (the precache frames behind the loading screen and a few more): totals.
+-- Counted in frames, time_global() doesn't move while loading
+function lua_profile_load(frames)
+	prof = { totals = {}, funcs = {}, keys = {}, start_frame = device().frame, end_frame = device().frame + (frames or 120) }
+	log(string.format("* [Lua callbacks] measuring the load and its first %d frames...", frames or 120))
 end
 
 local function make_callback_profiled(name, ...)
@@ -384,7 +397,7 @@ local function make_callback_profiled(name, ...)
 		end
 	end
 	total:stop()
-	if (prof and time_global() >= prof.end_time) then
+	if (prof and (prof.end_frame and device().frame >= prof.end_frame or not prof.end_frame and time_global() >= prof.end_time)) then
 		prof_report()
 	end
 end
@@ -443,6 +456,12 @@ function on_game_start()
 	-- Read from disk: the file list of getFS() is from the game's start
 	local marker = io.open(f:update_path("$app_data_root$", "lua_load_profile"), "r")
 	if marker then marker:close() end
+	-- appdata\lua_callback_profile: the callbacks of this load and its first frames (lua_profile_load)
+	local cb_marker = io.open(f:update_path("$app_data_root$", "lua_callback_profile"), "r")
+	if cb_marker then
+		cb_marker:close()
+		lua_profile_load(120)
+	end
 	if (marker and debug and debug.sethook) then
 		sampler = { lines = {}, funcs = {}, clock = profile_timer(), last = 0 }
 		sampler.clock:start()
