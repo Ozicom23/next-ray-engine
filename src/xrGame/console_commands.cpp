@@ -398,6 +398,15 @@ static void full_memory_stats(bool assert = true)
 #endif // DEBUG
 }
 
+// Automation aids that must not stay on in normal play
+extern int g_rc_silent_level_changers;
+class CCC_IntegerNotSaved : public CCC_Integer
+{
+public:
+	CCC_IntegerNotSaved(LPCSTR N, int* V, int _min, int _max) : CCC_Integer(N, V, _min, _max) {}
+	virtual void Save(IWriter*) {}
+};
+
 class CCC_MemStats : public IConsole_Command
 {
 public:
@@ -2657,6 +2666,8 @@ void CCC_RegisterCommands()
 	CMD4(CCC_Float, "ai_smart_factor", &g_smart_cover_factor, 0.f, 1000000.f);
 	CMD3(CCC_Mask, "ai_dbg_lua", &psAI_Flags, aiLua);
 #endif // MASTER_GOLD
+
+	CMD4(CCC_IntegerNotSaved, "rc_silent_level_changers", &g_rc_silent_level_changers, 0, 1);
 
     // Moved lua_gcstep outside of DEBUG to allow for easier experimentation.
 	CMD4(CCC_Integer, "lua_gcstep", &psLUA_GCSTEP, 1, 1000);

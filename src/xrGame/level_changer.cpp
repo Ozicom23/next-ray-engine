@@ -118,6 +118,10 @@ void CLevelChanger::shedule_Update(u32 dt)
 #include "patrol_path.h"
 #include "patrol_path_storage.h"
 
+// rc_silent_level_changers: every level changer travels at once, without asking (automated runs: the remote
+// console can't answer the dialog). Never saved
+int g_rc_silent_level_changers = 0;
+
 void CLevelChanger::feel_touch_new(CObject* tpObject)
 {
 	CActor* l_tpActor = smart_cast<CActor*>(tpObject);
@@ -125,7 +129,7 @@ void CLevelChanger::feel_touch_new(CObject* tpObject)
 	if (!l_tpActor->g_Alive())
 		return;
 
-	if (m_bSilentMode)
+	if (m_bSilentMode || g_rc_silent_level_changers)
 	{
 		NET_Packet p;
 		p.w_begin(M_CHANGE_LEVEL);
@@ -182,7 +186,7 @@ bool CLevelChanger::feel_touch_contact(CObject* object)
 
 void CLevelChanger::update_actor_invitation()
 {
-	if (m_bSilentMode) return;
+	if (m_bSilentMode || g_rc_silent_level_changers) return;
 	xr_vector<CObject*>::iterator it = feel_touch.begin();
 	xr_vector<CObject*>::iterator it_e = feel_touch.end();
 

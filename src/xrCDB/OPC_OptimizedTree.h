@@ -154,6 +154,14 @@ IMPLEMENT_COLLISION_TREE(AABBCollisionTree, AABBCollisionNode)
 class OPCODE_API AABBNoLeafTree : public AABBOptimizedTree
 {
 IMPLEMENT_COLLISION_TREE(AABBNoLeafTree, AABBNoLeafNode)
+public:
+	// Collision model cache (xrCDB.cpp): takes a node array read back from disk, allocated with CALLOC
+	void AdoptNodes(AABBNoLeafNode* nodes, udword nb_nodes)
+	{
+		CFREE(mNodes);
+		mNodes = nodes;
+		mNbNodes = nb_nodes;
+	}
 };
 
 class OPCODE_API AABBQuantizedTree : public AABBOptimizedTree

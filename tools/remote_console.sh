@@ -6,6 +6,9 @@
 #   remote_console.sh load <save> [s]   load a save from the main menu or a level, wait until it runs (default 600 s)
 #   remote_console.sh wait <state> [s]  wait until state is menu / level / idle (default 300 s)
 #   remote_console.sh idle [s]          wait until the command queue is empty and no rc_wait is running
+#   remote_console.sh transition <x> <y> <z> [s]
+#                                       teleport onto a level changer and travel (without its dialog), wait for the end
+#                                       of the new level's precache frames, print the phases' times (default 300 s)
 #   remote_console.sh status | log [n] | running | quit
 set -u
 APPDATA="${GAMMA_APPDATA:-/home/deck/Games/gamma/anomaly/appdata}"
@@ -57,6 +60,51 @@ case "${1:-}" in
 			"rc_wait_level ${3:-600}" "keypress_on_start 1" | send_lines
 		sleep 5
 		wait_state level "${3:-600}"
+		;;
+	transition)
+		timeout="${5:-300}"
+		start_line=$(( $(wc -l < "$LOG") + 1 ))
+		# A menu or the "press any key" prompt would hold the game; changers that ask are answered by
+		# rc_silent_level_changers (not saved)
+		printf '%s\n' "main_menu off" "keypress_on_start 0" "rc_silent_level_changers 1" "log_timestamps 1" \
+			"run_string db.actor:set_actor_position(vector():set($2,$3,$4))" | send_lines
+		start=$(date +%s)
+		until tail -n +"$start_line" "$LOG" | grep -aq 'Handled Necessary Textures Destruction'; do
+			[ $(( $(date +%s) - start )) -ge "$timeout" ] && { echo "timeout waiting for the transition" >&2; exit 1; }
+			sleep 1
+		done
+		sleep 2
+		printf '%s\n' "log_timestamps 0" "rc_silent_level_changers 0" "keypress_on_start 1" "flush" | send_lines
+		sleep 2
+		tail -n +"$start_line" "$LOG" | tr -d '\r' | python3 -c '
+import re, sys
+marks = [("teleport", r"\[remote\] run_string db\.actor:set_actor_position"), ("saving", r"Saving spawns"),
+	("unloading", r"Destroying level"), ("scripts loaded", r"\[axr_main\] scripts loaded in"),
+	("collision model", r"CDB: collision model"), ("level loaded", r"phase time"),
+	("precache done", r"Handled Necessary Textures Destruction")]
+found, last_phase = {}, None
+for line in sys.stdin:
+	m = re.search(r"\[(\d\d):(\d\d):(\d\d)\.(\d\d\d)\]", line)
+	if not m:
+		continue
+	t = int(m[1]) * 3600 + int(m[2]) * 60 + int(m[3]) + int(m[4]) / 1000
+	for name, rx in marks:
+		if re.search(rx, line):
+			if name == "level loaded":
+				last_phase = t # the last phase line before the precache frames
+			elif name not in found:
+				found[name] = (t, line.strip())
+	if "precache done" in found and last_phase is not None and "level loaded" not in found:
+		found["level loaded"] = (last_phase, "")
+t0 = found.get("teleport", (None,))[0]
+prev = t0
+for name, _ in marks:
+	if name in found and t0 is not None:
+		t, line = found[name]
+		extra = line.split("]", 2)[-1].strip()[:90] if name in ("scripts loaded", "collision model") else ""
+		print("%-16s %6.2f s  (+%5.2f)  %s" % (name, t - t0, t - prev, extra))
+		prev = t
+'
 		;;
 	wait)  wait_state "$2" "${3:-300}" ;;
 	idle)
