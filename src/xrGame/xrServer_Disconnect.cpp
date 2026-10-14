@@ -12,6 +12,10 @@ void xrServer::Disconnect()
 	}
 
 	IPureServer::Disconnect();
-	SLS_Clear();
+	{
+		PROF_EVENT("server: entities");
+		SLS_Clear();
+	}
+	PROF_EVENT("server: game (A-Life)");
 	xr_delete(game);
 }

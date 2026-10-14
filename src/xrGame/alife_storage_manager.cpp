@@ -136,29 +136,47 @@ void CALifeStorageManager::load(void* buffer, const u32& buffer_size, LPCSTR fil
 	IReader source(buffer, buffer_size);
 	header().load(source);
 	time_manager().load(source);
-	spawns().load(source, file_name);
-	graph().on_load();
-	objects().load(source);
+	{
+		PROF_EVENT("A-Life load: spawns");
+		spawns().load(source, file_name);
+	}
+	{
+		PROF_EVENT("A-Life load: graph");
+		graph().on_load();
+	}
+	{
+		PROF_EVENT("A-Life load: objects");
+		objects().load(source);
+	}
 
 	VERIFY(can_register_objects());
 	can_register_objects(false);
 	CALifeObjectRegistry::OBJECT_REGISTRY::iterator B = objects().objects().begin();
 	CALifeObjectRegistry::OBJECT_REGISTRY::iterator E = objects().objects().end();
 	CALifeObjectRegistry::OBJECT_REGISTRY::iterator I;
-	for (I = B; I != E; ++I)
 	{
-		ALife::_OBJECT_ID id = (*I).second->ID;
-		(*I).second->ID = server().PerformIDgen(id);
-		VERIFY(id == (*I).second->ID);
-		register_object((*I).second, false);
+		PROF_EVENT("A-Life load: register objects");
+		for (I = B; I != E; ++I)
+		{
+			ALife::_OBJECT_ID id = (*I).second->ID;
+			(*I).second->ID = server().PerformIDgen(id);
+			VERIFY(id == (*I).second->ID);
+			register_object((*I).second, false);
+		}
 	}
 
-	registry().load(source);
+	{
+		PROF_EVENT("A-Life load: registries");
+		registry().load(source);
+	}
 
 	can_register_objects(true);
 
-	for (I = B; I != E; ++I)
-		(*I).second->on_register();
+	{
+		PROF_EVENT("A-Life load: on_register");
+		for (I = B; I != E; ++I)
+			(*I).second->on_register();
+	}
 
 	if (!g_pGameLevel)
 		return;
@@ -217,7 +235,10 @@ bool CALifeStorageManager::load(LPCSTR save_name_no_check)
 
 	u32 source_count = stream->r_u32();
 	void* source_data = xr_malloc(source_count);
-	rtc_decompress(source_data, source_count, stream->pointer(), stream->length() - 3 * sizeof(u32));
+	{
+		PROF_EVENT("A-Life load: decompress");
+		rtc_decompress(source_data, source_count, stream->pointer(), stream->length() - 3 * sizeof(u32));
+	}
 	FS.r_close(stream);
 	load(source_data, source_count, file_name);
 	xr_free(source_data);
