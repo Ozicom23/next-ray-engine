@@ -15,9 +15,10 @@ struct batch_light
 
 // Light shadow cache (r4_light_shadow_cache): every frame all shadowed lights' shadow maps were drawn again into the
 // atlas. When a batch has the same lights at the same places and sizes as last frame, none of them moving (their
-// static casters were last captured long ago) and no trees or bushes (wind) or semi-transparent casters among the
-// static ones, the atlas with only the static geometry drawn is kept and copied back; moving objects and grass are
-// drawn on top as before. Same shadows, the static geometry drawn once instead of every frame.
+// static casters were last captured long ago) and no semi-transparent casters among them, the atlas with only the
+// static geometry drawn is kept and copied back; moving objects and grass are
+// drawn on top as before, and trees and bushes (they sway in the wind) too. Same shadows, the static geometry drawn
+// once instead of every frame.
 namespace light_shadow_cache
 {
 	enum result { off, fill, hit };
@@ -44,14 +45,17 @@ namespace light_shadow_cache
 	// stat_light_cache
 	bool s_stats = false;
 	u32 s_stats_end = 0;
-	u32 s_hits = 0, s_fills = 0, s_off_moving = 0, s_off_trees = 0, s_off_forward = 0, s_off_other = 0, s_frames = 0;
+	u32 s_hits = 0, s_fills = 0, s_off_moving = 0, s_off_forward = 0, s_off_other = 0, s_frames = 0;
+	// Why a cacheable batch was drawn again: no cache from the frame before, lights, static capture, place, size, transform
+	u32 s_miss_old = 0, s_miss_lights = 0, s_miss_version = 0, s_miss_place = 0, s_miss_size = 0, s_miss_xform = 0;
 	u32 s_last_stat_frame = 0;
 
 	void start_stats(float seconds)
 	{
 		s_stats = true;
 		s_stats_end = Device.dwTimeGlobal + iFloor(seconds * 1000.f);
-		s_hits = s_fills = s_off_moving = s_off_trees = s_off_forward = s_off_other = s_frames = 0;
+		s_hits = s_fills = s_off_moving = s_off_forward = s_off_other = s_frames = 0;
+		s_miss_old = s_miss_lights = s_miss_version = s_miss_place = s_miss_size = s_miss_xform = 0;
 		Msg("* [Light shadow cache] measuring for %.0f s...", seconds);
 	}
 
@@ -64,8 +68,11 @@ namespace light_shadow_cache
 			s_stats = false;
 			const float f = float(_max(1u, s_frames));
 			Msg("* [Light shadow cache] per frame over %u frames, shadow map batches: from cache %.2f, drawn and cached %.2f,"
-				" not cached: moving %.2f, trees %.2f, semi-transparent %.2f, other %.2f", s_frames, s_hits / f, s_fills / f,
-				s_off_moving / f, s_off_trees / f, s_off_forward / f, s_off_other / f);
+				" not cached: moving %.2f, semi-transparent %.2f, other %.2f", s_frames, s_hits / f, s_fills / f,
+				s_off_moving / f, s_off_forward / f, s_off_other / f);
+			Msg("*   drawn again because: no cache from the frame before %.2f, other lights %.2f, static capture %.2f,"
+				" atlas place %.2f, size %.2f, transform %.2f", s_miss_old / f, s_miss_lights / f, s_miss_version / f,
+				s_miss_place / f, s_miss_size / f, s_miss_xform / f);
 			xrLogger::FlushLog();
 			return;
 		}
@@ -115,12 +122,28 @@ namespace light_shadow_cache
 	static bool same(const xr_vector<key_entry>& a, const xr_vector<key_entry>& b)
 	{
 		if (a.size() != b.size())
+		{
+			count(s_miss_lights);
 			return false;
+		}
 		for (size_t i = 0; i < a.size(); i++)
 		{
-			if (a[i].L != b[i].L || a[i].version != b[i].version || a[i].x != b[i].x || a[i].y != b[i].y ||
-				a[i].size != b[i].size || memcmp(&a[i].combine, &b[i].combine, sizeof(Fmatrix)))
+			u32* why = nullptr;
+			if (a[i].L != b[i].L)
+				why = &s_miss_lights;
+			else if (a[i].version != b[i].version)
+				why = &s_miss_version;
+			else if (a[i].x != b[i].x || a[i].y != b[i].y)
+				why = &s_miss_place;
+			else if (a[i].size != b[i].size)
+				why = &s_miss_size;
+			else if (memcmp(&a[i].combine, &b[i].combine, sizeof(Fmatrix)))
+				why = &s_miss_xform;
+			if (why)
+			{
+				count(*why);
 				return false;
+			}
 		}
 		return true;
 	}
@@ -146,17 +169,14 @@ namespace light_shadow_cache
 				count(s_off_forward);
 				return off;
 			}
-			if (b.L->GMLight.i_static_trees)
-			{
-				count(s_off_trees);
-				return off;
-			}
 		}
 		slot& s = s_slots[sid];
 		static xr_vector<key_entry> key;
 		make_key(batch, key);
 		// Used in the frame before: the lights in the key are still the same objects
-		if (s.valid && s.tex && s.frame + 1 >= Device.dwFrame && same(s.key, key))
+		if (!s.valid || !s.tex || s.frame + 1 < Device.dwFrame)
+			count(s_miss_old);
+		else if (same(s.key, key))
 		{
 			s.frame = Device.dwFrame;
 			count(s_hits);
@@ -450,30 +470,45 @@ void CRender::render_lights(light_Package& LP)
 				};
 
 				const int cache = light_shadow_cache::lookup(sid, batch);
+				// Trees and bushes sway in the wind: never cached, drawn each frame over the cached rest
+				auto render_trees = [&](light* L)
+				{
+					if (!L->GMLight.i_static_trees)
+						return;
+					L->GMLight.i_render_trees = 1;
+					L->GMLight.r_dsgraph_render_static(0, false);
+					L->GMLight.i_render_trees = -1;
+				};
 				if (cache == light_shadow_cache::hit)
 				{
 					light_shadow_cache::restore(sid);
 					for (const batch_light& b : batch)
 					{
 						setup(b.L);
+						render_trees(b.L);
 						render_rest(b);
 					}
 				}
 				else
 				{
+					const bool fill = cache == light_shadow_cache::fill;
 					for (const batch_light& b : batch)
 					{
 						setup(b.L);
+						if (fill)
+							b.L->GMLight.i_render_trees = 0;
 						b.L->GMLight.r_dsgraph_render_static(0, false);
-						if (cache != light_shadow_cache::fill)
+						b.L->GMLight.i_render_trees = -1;
+						if (!fill)
 							render_rest(b);
 					}
-					if (cache == light_shadow_cache::fill)
+					if (fill)
 					{
 						light_shadow_cache::store(sid, batch);
 						for (const batch_light& b : batch)
 						{
 							setup(b.L);
+							render_trees(b.L);
 							render_rest(b);
 						}
 					}
