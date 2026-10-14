@@ -555,6 +555,8 @@ void CRender::create()
 
 namespace hiz { void destroy(); }
 
+namespace tex_streaming { void update(); void clear(); } // dx10SH_Texture.cpp
+
 void CRender::destroy()
 {
 	tex_streaming::clear();
@@ -677,8 +679,6 @@ void CRender::reset_end()
 	// that some data is not ready in the first frame (for example device camera position)
 	m_bFirstFrameAfterReset = true;
 }
-
-namespace tex_streaming { void update(); void clear(); }
 
 void CRender::OnFrame()
 {
