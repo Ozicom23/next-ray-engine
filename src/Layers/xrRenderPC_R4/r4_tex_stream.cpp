@@ -93,7 +93,9 @@ namespace
 			f.first += u.bytes;
 			f.second++;
 		}
-		xr_vector<std::pair<xr_string, std::pair<u64, u32>>> fl(folders.begin(), folders.end());
+		xr_vector<std::pair<xr_string, std::pair<u64, u32>>> fl;
+		for (const auto& f : folders)
+			fl.push_back(f);
 		std::sort(fl.begin(), fl.end(), [](const auto& a, const auto& b) { return a.second.first > b.second.first; });
 		Msg("*   never bound, by folder:");
 		for (size_t i = 0; i < fl.size() && i < 25; i++)
