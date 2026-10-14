@@ -440,7 +440,10 @@ function on_game_start()
 	-- With the file appdata\lua_load_profile present: where loading the scripts spends its time, by source line
 	-- and function (sampled every 1000 Lua instructions, the time since the last sample counted for the current place)
 	local sampler = nil
-	if (f:exist("$app_data_root$", "lua_load_profile") and debug and debug.sethook) then
+	-- Read from disk: the file list of getFS() is from the game's start
+	local marker = io.open(f:update_path("$app_data_root$", "lua_load_profile"), "r")
+	if marker then marker:close() end
+	if (marker and debug and debug.sethook) then
 		sampler = { lines = {}, funcs = {}, clock = profile_timer(), last = 0 }
 		sampler.clock:start()
 		debug.sethook(function()
