@@ -67,6 +67,7 @@ void CDSGraphManager::traverse(CSector* start, CFrustum& F, Fvector& vBase, Fmat
 	// frames create empty-frustum entries and skew static capture decisions.
 	m_sector_frustums.clear();
 	m_static_seen.clear();
+	i_static_trees = 0;
 	i_start->traverse(std::move(F),*this);
 }
 

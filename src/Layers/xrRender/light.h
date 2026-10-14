@@ -42,6 +42,7 @@ public:
 	u32 frame_render;
 	light* m_parent;
 	u8 m_moving_frames;
+	u32 m_static_version = 0; // bumped whenever its shadow map's static geometry is captured again (shadow cache)
 
 	int omnipart_num;
 	int sss_id;

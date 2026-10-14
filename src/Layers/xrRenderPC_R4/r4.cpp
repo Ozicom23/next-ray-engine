@@ -554,10 +554,12 @@ void CRender::create()
 }
 
 namespace hiz { void destroy(); }
+namespace light_shadow_cache { void destroy(); }
 
 void CRender::destroy()
 {
 	hiz::destroy();
+	light_shadow_cache::destroy();
 	m_bMakeAsyncSS = false;
 	FluidManager.Destroy();
 	GMBase.destroy();

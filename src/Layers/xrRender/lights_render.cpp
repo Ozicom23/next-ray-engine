@@ -5,6 +5,202 @@
 
 extern int ps_r2_shadow_omnipart_vischeck;
 
+// A light of a shadow map batch (lights sharing the shadow map atlas)
+struct batch_light
+{
+	light* L;
+	bool decorative;
+	bool forward; // semi-transparent casters, drawn to the colour target as well
+};
+
+// Light shadow cache (r4_light_shadow_cache): every frame all shadowed lights' shadow maps were drawn again into the
+// atlas. When a batch has the same lights at the same places and sizes as last frame, none of them moving (their
+// static casters were last captured long ago) and no trees or bushes (wind) or semi-transparent casters among the
+// static ones, the atlas with only the static geometry drawn is kept and copied back; moving objects and grass are
+// drawn on top as before. Same shadows, the static geometry drawn once instead of every frame.
+namespace light_shadow_cache
+{
+	enum result { off, fill, hit };
+#ifdef USE_DX11
+	int ps_cache = 1;
+
+	struct key_entry
+	{
+		light* L;
+		u32 version;
+		int x, y, size;
+		Fmatrix combine;
+	};
+	struct slot
+	{
+		ID3D11Texture2D* tex = nullptr;
+		xr_vector<key_entry> key;
+		u32 frame = 0; // when it was last filled or used
+		bool valid = false;
+	};
+	const u32 kSlots = 4;
+	slot s_slots[kSlots];
+
+	// stat_light_cache
+	bool s_stats = false;
+	u32 s_stats_end = 0;
+	u32 s_hits = 0, s_fills = 0, s_off_moving = 0, s_off_trees = 0, s_off_forward = 0, s_off_other = 0, s_frames = 0;
+	u32 s_last_stat_frame = 0;
+
+	void start_stats(float seconds)
+	{
+		s_stats = true;
+		s_stats_end = Device.dwTimeGlobal + iFloor(seconds * 1000.f);
+		s_hits = s_fills = s_off_moving = s_off_trees = s_off_forward = s_off_other = s_frames = 0;
+		Msg("* [Light shadow cache] measuring for %.0f s...", seconds);
+	}
+
+	static void count(u32& c)
+	{
+		if (!s_stats)
+			return;
+		if (Device.dwTimeGlobal >= s_stats_end)
+		{
+			s_stats = false;
+			const float f = float(_max(1u, s_frames));
+			Msg("* [Light shadow cache] per frame over %u frames, shadow map batches: from cache %.2f, drawn and cached %.2f,"
+				" not cached: moving %.2f, trees %.2f, semi-transparent %.2f, other %.2f", s_frames, s_hits / f, s_fills / f,
+				s_off_moving / f, s_off_trees / f, s_off_forward / f, s_off_other / f);
+			xrLogger::FlushLog();
+			return;
+		}
+		if (s_last_stat_frame != Device.dwFrame)
+		{
+			s_last_stat_frame = Device.dwFrame;
+			s_frames++;
+		}
+		c++;
+	}
+
+	static ID3D11Texture2D* atlas()
+	{
+		ID3DBaseTexture* t = RImplementation.Target->rt_smap_depth->pSurface;
+		return (ID3D11Texture2D*)t;
+	}
+
+	static bool ensure_texture(slot& s)
+	{
+		ID3D11Texture2D* a = atlas();
+		if (!a)
+			return false;
+		D3D11_TEXTURE2D_DESC da;
+		a->GetDesc(&da);
+		if (s.tex)
+		{
+			D3D11_TEXTURE2D_DESC ds;
+			s.tex->GetDesc(&ds);
+			if (ds.Width == da.Width && ds.Height == da.Height && ds.Format == da.Format)
+				return true;
+			_RELEASE(s.tex);
+			s.valid = false;
+		}
+		D3D11_TEXTURE2D_DESC d = da;
+		d.BindFlags = D3D11_BIND_DEPTH_STENCIL; // a copy destination only, same as the atlas
+		d.MiscFlags = 0;
+		return SUCCEEDED(HW.pDevice->CreateTexture2D(&d, nullptr, &s.tex));
+	}
+
+	static void make_key(const xr_vector<batch_light>& batch, xr_vector<key_entry>& key)
+	{
+		key.clear();
+		for (const batch_light& b : batch)
+			key.push_back({ b.L, b.L->m_static_version, b.L->X.S.posX, b.L->X.S.posY, int(b.L->X.S.size), b.L->X.S.combine });
+	}
+
+	static bool same(const xr_vector<key_entry>& a, const xr_vector<key_entry>& b)
+	{
+		if (a.size() != b.size())
+			return false;
+		for (size_t i = 0; i < a.size(); i++)
+		{
+			if (a[i].L != b[i].L || a[i].version != b[i].version || a[i].x != b[i].x || a[i].y != b[i].y ||
+				a[i].size != b[i].size || memcmp(&a[i].combine, &b[i].combine, sizeof(Fmatrix)))
+				return false;
+		}
+		return true;
+	}
+
+	result lookup(u16 sid, const xr_vector<batch_light>& batch)
+	{
+		if (!ps_cache || sid >= kSlots || batch.empty())
+			return off;
+		for (const batch_light& b : batch)
+		{
+			if (b.decorative)
+			{
+				count(s_off_other);
+				return off;
+			}
+			if (b.L->m_moving_frames < 32u)
+			{
+				count(s_off_moving);
+				return off;
+			}
+			if (b.forward)
+			{
+				count(s_off_forward);
+				return off;
+			}
+			if (b.L->GMLight.i_static_trees)
+			{
+				count(s_off_trees);
+				return off;
+			}
+		}
+		slot& s = s_slots[sid];
+		static xr_vector<key_entry> key;
+		make_key(batch, key);
+		// Used in the frame before: the lights in the key are still the same objects
+		if (s.valid && s.tex && s.frame + 1 >= Device.dwFrame && same(s.key, key))
+		{
+			s.frame = Device.dwFrame;
+			count(s_hits);
+			return hit;
+		}
+		count(s_fills);
+		return fill;
+	}
+
+	void store(u16 sid, const xr_vector<batch_light>& batch)
+	{
+		slot& s = s_slots[sid];
+		if (!ensure_texture(s))
+		{
+			s.valid = false;
+			return;
+		}
+		HW.pContext->CopyResource(s.tex, atlas());
+		make_key(batch, s.key);
+		s.frame = Device.dwFrame;
+		s.valid = true;
+	}
+
+	void restore(u16 sid)
+	{
+		HW.pContext->CopyResource(atlas(), s_slots[sid].tex);
+	}
+
+	void destroy()
+	{
+		for (slot& s : s_slots)
+		{
+			_RELEASE(s.tex);
+			s.valid = false;
+			s.key.clear();
+		}
+	}
+#else
+	result lookup(u16, const xr_vector<batch_light>&) { return off; }
+	void store(u16, const xr_vector<batch_light>&) {}
+	void restore(u16) {}
+#endif
+}
+
 bool check_grass_shadow(light* L, CFrustum VB)
 {
 	// Grass shadows are allowed?
@@ -168,6 +364,8 @@ void CRender::render_lights(light_Package& LP)
 				xr_vector<light*>& source = LP.v_shadowed;
 				light* L = source.back();
 				u16			sid = L->vis.smap_ID;
+				static xr_vector<batch_light> batch;
+				batch.clear();
 				while (!source.empty())
 				{
 					if (source.empty())		break;
@@ -200,6 +398,7 @@ void CRender::render_lights(light_Package& LP)
 								L->GMLight.traverse((CSector*)L->SpatialComponent->spatial.sector, L->X.S.frustum, L->position, L->X.S.combine);
 								L->GMLight.r_dsgraph_capture_static();
 								L->m_moving_frames++;
+								L->m_static_version++;
 							}
 							L->GMLight.r_dsgraph_capture_dynamic(L->ignore_object);
 						}
@@ -210,36 +409,76 @@ void CRender::render_lights(light_Package& LP)
 					if (bDeffered_Shadows || bForward_Shadows)
 					{
 						L_spot_s.push_back(L);
-						Target->phase_smap_spot(L);
-						RCache.set_xform_world(Fidentity);
-						RCache.set_xform_view(L->X.S.view);
-						RCache.set_xform_project(L->X.S.project);
-						L->GMLight.r_dsgraph_render_static(0, false);
-						L->GMLight.r_dsgraph_render_dynamic(0, true);
-						if (Details && Details->dtFS && check_grass_shadow(L, ViewBase) && L->flags.bShadow && !decorative_light)
-						{
-							Details->fade_distance = -1; // Use light position to calc "fade"
-							Details->light_position.set(L->position);
-							Details->hw_Render(L);
-						}
-					
-						L->X.S.transluent = FALSE;
-						if (bForward_Shadows)
-						{
-							L->X.S.transluent = TRUE;
-							Target->phase_smap_spot_tsh(L);
-					
-							L->GMLight.r_dsgraph_render_static(1, false);
-							L->GMLight.r_dsgraph_render_dynamic(1, true);
-					
-							L->GMLight.r_dsgraph_render_sorted();			// strict-sorted geoms
-						}
+						batch.push_back({ L, decorative_light, bForward_Shadows });
 					}
 					else if (L->flags.bVolumetric && ps_r2_ls_flags.test(R2FLAG_VOLUMETRIC_LIGHTS))
 					{
 						L_spot_s.push_back(L);
 					}
 				}
+
+				// The batch's shadow maps: static geometry from the cache when nothing changed (r4_light_shadow_cache)
+				auto setup = [&](light* L)
+				{
+					Target->phase_smap_spot(L);
+					RCache.set_xform_world(Fidentity);
+					RCache.set_xform_view(L->X.S.view);
+					RCache.set_xform_project(L->X.S.project);
+				};
+				auto render_rest = [&](const batch_light& b)
+				{
+					light* L = b.L;
+					L->GMLight.r_dsgraph_render_dynamic(0, true);
+					if (Details && Details->dtFS && check_grass_shadow(L, ViewBase) && L->flags.bShadow && !b.decorative)
+					{
+						Details->fade_distance = -1; // Use light position to calc "fade"
+						Details->light_position.set(L->position);
+						Details->hw_Render(L);
+					}
+
+					L->X.S.transluent = FALSE;
+					if (b.forward)
+					{
+						L->X.S.transluent = TRUE;
+						Target->phase_smap_spot_tsh(L);
+
+						L->GMLight.r_dsgraph_render_static(1, false);
+						L->GMLight.r_dsgraph_render_dynamic(1, true);
+
+						L->GMLight.r_dsgraph_render_sorted();			// strict-sorted geoms
+					}
+				};
+
+				const int cache = light_shadow_cache::lookup(sid, batch);
+				if (cache == light_shadow_cache::hit)
+				{
+					light_shadow_cache::restore(sid);
+					for (const batch_light& b : batch)
+					{
+						setup(b.L);
+						render_rest(b);
+					}
+				}
+				else
+				{
+					for (const batch_light& b : batch)
+					{
+						setup(b.L);
+						b.L->GMLight.r_dsgraph_render_static(0, false);
+						if (cache != light_shadow_cache::fill)
+							render_rest(b);
+					}
+					if (cache == light_shadow_cache::fill)
+					{
+						light_shadow_cache::store(sid, batch);
+						for (const batch_light& b : batch)
+						{
+							setup(b.L);
+							render_rest(b);
+						}
+					}
+				}
+				batch.clear();
 			}
 			//		if (was_spot_shadowed)		->	accum spot shadowed
 			if (!L_spot_s.empty())
