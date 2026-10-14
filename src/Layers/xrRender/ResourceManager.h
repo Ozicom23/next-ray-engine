@@ -99,6 +99,7 @@ private:
 	void LS_Load();
 	void LS_Unload();
 public:
+	const map_Texture& textures() const { return m_textures; } // stat_tex_stream
 	// Miscelaneous
 	void _ParseList(sh_list& dest, LPCSTR names);
 	IBlender* _GetBlender(LPCSTR Name);

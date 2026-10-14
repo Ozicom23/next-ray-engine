@@ -10,4 +10,6 @@ namespace tex_stream
 	void frame_begin();
 	// A main view world object drawn with this pass. ssa: its radius squared over its distance squared
 	void note_draw(const STextureList* textures, float ssa);
+	// Any texture bound for any draw (world, grass, LODs, sky, HUD, UI)
+	void note_bound(CTexture* T);
 }

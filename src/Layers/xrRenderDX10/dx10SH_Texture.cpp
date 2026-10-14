@@ -239,8 +239,15 @@ void CTexture::ProcessStaging()
 	_RELEASE(pTargetSurface);
 }
 
+#ifdef USE_DX11
+namespace tex_stream { void note_bound(CTexture* T); }
+#endif
+
 void CTexture::Apply(u32 dwStage)
 {
+#ifdef USE_DX11
+	tex_stream::note_bound(this);
+#endif
 	while (flags.bLoading)
 	{
 		SwitchToThread();
