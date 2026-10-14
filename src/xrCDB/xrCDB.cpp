@@ -47,7 +47,7 @@ namespace cform_cache
 	const u32 kMagic = 0x42444358; // "XCDB"
 	const u32 kVersion = 1;
 	const int kMinTris = 50000; // the level collision model, small models build fast enough
-	const u32 kMaxFiles = 48;
+	const u64 kMaxBytes = 2ull << 30; // ~120 MB per level of GAMMA (40 bytes per triangle): the ~16 levels used last
 
 	struct header
 	{
@@ -85,30 +85,44 @@ namespace cform_cache
 		return true;
 	}
 
-	// Oldest files go first when there are too many (a cache file is ~40 bytes per triangle)
+	// Least recently used files go first when they're more than kMaxBytes together
 	static void prune(const char* dir)
 	{
 		string_path mask;
 		xr_sprintf(mask, "%s*.bin", dir);
-		struct item { FILETIME t; xr_string name; };
+		struct item { FILETIME t; xr_string name; u64 size; };
 		xr_vector<item> files;
 		WIN32_FIND_DATAA fd;
 		HANDLE h = FindFirstFileA(mask, &fd);
 		if (h == INVALID_HANDLE_VALUE)
 			return;
 		do
-			files.push_back({ fd.ftLastWriteTime, fd.cFileName });
+			files.push_back({ fd.ftLastWriteTime, fd.cFileName, (u64(fd.nFileSizeHigh) << 32) | fd.nFileSizeLow });
 		while (FindNextFileA(h, &fd));
 		FindClose(h);
-		if (files.size() <= kMaxFiles)
-			return;
+		u64 total = 0;
+		for (const item& f : files)
+			total += f.size;
 		std::sort(files.begin(), files.end(), [](const item& a, const item& b) { return CompareFileTime(&a.t, &b.t) < 0; });
-		for (size_t i = 0; i + kMaxFiles < files.size(); i++)
+		for (size_t i = 0; total > kMaxBytes && i + 1 < files.size(); i++)
 		{
 			string_path f;
 			xr_sprintf(f, "%s%s", dir, files[i].name.c_str());
-			DeleteFileA(f);
+			if (DeleteFileA(f))
+				total -= files[i].size;
 		}
+	}
+
+	// A file read back counts as used: its time is what prune() keeps the recent levels by
+	static void touch(const char* name)
+	{
+		HANDLE h = CreateFileA(name, FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+		if (h == INVALID_HANDLE_VALUE)
+			return;
+		FILETIME now;
+		GetSystemTimeAsFileTime(&now);
+		SetFileTime(h, nullptr, nullptr, &now);
+		CloseHandle(h);
 	}
 
 	static AABBNoLeafTree* load(u64 key, int verts_count, int tris_count)
@@ -153,6 +167,7 @@ namespace cform_cache
 			Msg("! CDB: collision model cache file %s doesn't match, building", name);
 			return nullptr;
 		}
+		touch(name);
 		AABBNoLeafTree* tree = CNEW(AABBNoLeafTree)();
 		tree->AdoptNodes(nodes, h.nb_nodes);
 		return tree;
