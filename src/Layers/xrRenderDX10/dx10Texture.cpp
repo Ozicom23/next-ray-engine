@@ -530,10 +530,15 @@ IC u32 it_height_rev_base(u32 d, u32 s)	{	return	color_rgba	(
 */
 // Mip levels the last texture_load on this thread dropped (CTexture::m_mip_skip)
 thread_local int g_texture_load_skip = 0;
+// Texture streaming (r4_tex_stream): when set, 2D textures load with mips skipped until the largest is at most this
+// size; g_texture_load_lod_normal is the skip they would have had (texture_lod)
+thread_local int g_texture_load_max_dim = 0;
+thread_local int g_texture_load_lod_normal = 0;
 
 ID3DBaseTexture* CRender::texture_load(LPCSTR fRName, u32& ret_msize, bool bStaging)
 {
 	g_texture_load_skip = 0;
+	g_texture_load_lod_normal = 0;
 	//	Moved here just to avoid warning
 #ifdef USE_DX11
 	D3DX11_IMAGE_INFO IMG;
@@ -736,6 +741,15 @@ _DDS:
 			img_loaded_lod = get_texture_load_lod(fn);
 
 #ifdef USE_DX11
+			g_texture_load_lod_normal = img_loaded_lod;
+			if (g_texture_load_max_dim > 0)
+			{
+				int s = 0;
+				while (s < 15 && ((IMG.Width >> s) > u32(g_texture_load_max_dim) || (IMG.Height >> s) > u32(g_texture_load_max_dim)))
+					s++;
+				if (s > img_loaded_lod)
+					img_loaded_lod = s;
+			}
 			{
 				int skipped = 0;
 				if (ID3DBaseTexture* T = dds_skip::load(S->pointer(), S->length(), img_loaded_lod, bStaging, mip_cnt, skipped))

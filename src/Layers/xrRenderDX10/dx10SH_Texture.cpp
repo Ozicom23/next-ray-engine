@@ -21,6 +21,209 @@
 #define		PRIORITY_NORMAL	8
 #define		PRIORITY_LOW	4
 
+#ifdef USE_DX11
+// Texture streaming (r4_tex_stream): world textures load small with the level (mips skipped until the largest is at
+// most 128 px) and whole on their first bind, in the background; until the whole one is in (swapped on the main
+// thread between frames) the small one is drawn, so nothing waits. One not bound for r4_tex_stream_keep seconds goes
+// back to its small version. Anything that asks for a streamed texture's surface or size gets it whole for good.
+// Measured on the Steam Deck: ~0.5 GB of GAMMA's ~2.4 GB of textures were bound in a minute of play
+int ps_r4_tex_stream = 0; // read when textures load
+int ps_r4_tex_stream_keep = 60;
+extern xr_task_group textures_load_tasks;
+extern thread_local int g_texture_load_skip;
+extern thread_local int g_texture_load_max_dim;
+extern thread_local int g_texture_load_lod_normal;
+
+namespace tex_streaming
+{
+	static xr_vector<ref_texture> s_loading; // whole versions loading
+	static xr_vector<ref_texture> s_whole; // whole versions in use
+	static u32 s_next_sweep = 0;
+	const int kSmallSize = 128;
+
+	// World textures: not UI, fonts, engine textures ($...), shader helper textures (noise, LUTs, sky), lights, or
+	// scope reticles (those always load whole, see get_texture_load_lod)
+	bool eligible(LPCSTR name)
+	{
+		string_path n;
+		xr_strcpy(n, name);
+		strlwr(n);
+		if (strchr(n, '$'))
+			return false;
+		static const char* prefixes[] = { "ui\\", "ui_", "fonts\\", "intro\\", "shaders\\", "fx\\", "pfx\\", "sky\\", "ed\\",
+			"lights\\", "lights_", "internal\\" };
+		for (const char* p : prefixes)
+			if (!strncmp(n, p, xr_strlen(p)))
+				return false;
+		static const char* parts[] = { "reticle", "crosshair", "bonus_sights", "\\sights\\", "/sights/", "lut", "noise" };
+		for (const char* p : parts)
+			if (strstr(n, p))
+				return false;
+		return true;
+	}
+
+	void queue(CTexture* T) { s_loading.push_back(ref_texture(T)); }
+
+	// Main thread, every frame: finished whole versions in, unused ones out
+	void update()
+	{
+		for (size_t i = 0; i < s_loading.size();)
+		{
+			CTexture* T = &*s_loading[i];
+			if (T->m_stream == 2 && !T->m_stream_done.load(std::memory_order_acquire))
+			{
+				i++;
+				continue;
+			}
+			if (T->m_stream == 2)
+			{
+				T->stream_swap_in();
+				if (T->m_stream == 3)
+					s_whole.push_back(s_loading[i]);
+			}
+			s_loading[i] = s_loading.back();
+			s_loading.pop_back();
+		}
+
+		const u32 now = Device.dwTimeContinual;
+		if (now < s_next_sweep)
+			return;
+		s_next_sweep = now + 1000;
+		const u32 keep = u32(_max(ps_r4_tex_stream_keep, 1)) * 1000;
+		for (size_t i = 0; i < s_whole.size();)
+		{
+			CTexture* T = &*s_whole[i];
+			if (T->m_stream == 3 && now - T->m_last_used <= keep)
+			{
+				i++;
+				continue;
+			}
+			if (T->m_stream == 3)
+				T->stream_evict();
+			s_whole[i] = s_whole.back();
+			s_whole.pop_back();
+		}
+	}
+
+	// Level unload, device destroy: loads finished, every streamed texture back to small
+	void clear()
+	{
+		textures_load_tasks.wait();
+		for (ref_texture& T : s_loading)
+		{
+			if (T->m_stream == 2)
+			{
+				T->stream_swap_in();
+				if (T->m_stream == 3)
+					T->stream_evict();
+			}
+		}
+		for (ref_texture& T : s_whole)
+		{
+			if (T->m_stream == 3)
+				T->stream_evict();
+		}
+		s_loading.clear();
+		s_whole.clear();
+	}
+}
+
+// Background load of the whole version (main thread, from Apply)
+void CTexture::stream_request()
+{
+	m_stream = 2;
+	m_stream_done.store(false, std::memory_order_relaxed);
+	tex_streaming::queue(this); // keeps it alive until the load is in
+	CTexture* T = this;
+	textures_load_tasks.run([T]()
+	{
+		u32 mem = 0;
+		g_texture_load_max_dim = 0;
+		ID3DBaseTexture* whole = ::RImplementation.texture_load(*T->cName, mem, false);
+		T->m_stream_pending_mem = mem;
+		T->m_stream_pending_skip = u8(g_texture_load_skip);
+		T->m_stream_pending = whole;
+		T->m_stream_done.store(true, std::memory_order_release);
+	});
+}
+
+// Main thread: the loaded whole version in, the small one kept
+void CTexture::stream_swap_in()
+{
+	ID3DBaseTexture* whole = m_stream_pending;
+	m_stream_pending = nullptr;
+	m_stream_done.store(false, std::memory_order_relaxed);
+	if (!whole)
+	{
+		m_stream = 0; // couldn't load it: stays small
+		return;
+	}
+	if (flags.bLoadedAsStaging)
+		ProcessStaging();
+	m_stream_small = pSurface;
+	if (m_stream_small)
+		m_stream_small->AddRef();
+	m_stream_small_skip = m_mip_skip;
+	m_stream_small_mem = flags.MemoryUsage;
+	surface_set(whole);
+	whole->Release();
+	m_mip_skip = m_stream_pending_skip;
+	flags.MemoryUsage = m_stream_pending_mem;
+	m_stream = 3;
+}
+
+// Main thread: back to the small version
+void CTexture::stream_evict()
+{
+	if (m_stream != 3 || !m_stream_small)
+		return;
+	surface_set(m_stream_small);
+	_RELEASE(m_stream_small);
+	m_mip_skip = m_stream_small_skip;
+	flags.MemoryUsage = m_stream_small_mem;
+	m_stream = 1;
+}
+
+// Whole for good (asked for its surface or size)
+void CTexture::stream_whole_now()
+{
+	wait_for_loading();
+	if (m_stream == 1)
+	{
+		if (flags.bLoadedAsStaging)
+			ProcessStaging();
+		u32 mem = 0;
+		g_texture_load_max_dim = 0;
+		m_stream_pending = ::RImplementation.texture_load(*cName, mem, false);
+		m_stream_pending_mem = mem;
+		m_stream_pending_skip = u8(g_texture_load_skip);
+		stream_swap_in();
+	}
+	else if (m_stream == 2)
+	{
+		while (!m_stream_done.load(std::memory_order_acquire))
+			SwitchToThread();
+		stream_swap_in();
+	}
+	_RELEASE(m_stream_small);
+	m_stream = 0;
+}
+
+// Unload: a background load finished first, both versions released
+void CTexture::stream_drop()
+{
+	if (m_stream == 2)
+	{
+		while (!m_stream_done.load(std::memory_order_acquire))
+			SwitchToThread();
+	}
+	_RELEASE(m_stream_pending);
+	m_stream_done.store(false, std::memory_order_relaxed);
+	_RELEASE(m_stream_small);
+	m_stream = 0;
+}
+#endif
+
 void resptrcode_texture::create(LPCSTR _name)
 {
 	PROF_EVENT("resptrcode_texture::create");
@@ -130,6 +333,10 @@ void CTexture::surface_set(ID3DBaseTexture* surf)
 
 ID3DBaseTexture* CTexture::surface_get()
 {
+#ifdef USE_DX11
+	if (m_stream)
+		stream_whole_now();
+#endif
 	while (flags.bLoading)
 	{
 		SwitchToThread();
@@ -255,6 +462,10 @@ void CTexture::Apply(u32 dwStage)
 	}
 	if (flags.bLoadedAsStaging)
 		ProcessStaging();
+#ifdef USE_DX11
+	if (m_stream == 1)
+		stream_request();
+#endif
 
 	//if( !RImplementation.o.dx10_msaa )
 	//   VERIFY( !((!pSurface)^(!m_pSRView)) );	//	Both present or both missing
@@ -605,10 +816,16 @@ void CTexture::Load()
 		// Normal texture
 		u32 mem = 0;
 		//pSurface = ::RImplementation.texture_load	(*cName,mem);
+#ifdef USE_DX11
+		const bool stream = m_stream_eligible && ps_r4_tex_stream;
+		g_texture_load_max_dim = stream ? tex_streaming::kSmallSize : 0;
+#endif
 		pSurface = ::RImplementation.texture_load(*cName, mem, true);
 #ifdef USE_DX11
-		extern thread_local int g_texture_load_skip;
+		g_texture_load_max_dim = 0;
 		m_mip_skip = u8(g_texture_load_skip);
+		// Streamed when the small version is smaller than the texture would be (else it is small anyway)
+		m_stream = (stream && pSurface && g_texture_load_skip > g_texture_load_lod_normal) ? 1 : 0;
 #endif
 
 		if (GetUsage() == D3D_USAGE_STAGING)
@@ -641,6 +858,9 @@ void CTexture::Unload()
 	{
 		SwitchToThread();
 	}
+#ifdef USE_DX11
+	stream_drop();
+#endif
 
 	// Already unloaded or never loaded: nothing to do.
 	if (!flags.bLoaded)

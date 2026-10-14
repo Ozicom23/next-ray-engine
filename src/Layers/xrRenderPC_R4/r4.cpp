@@ -557,6 +557,7 @@ namespace hiz { void destroy(); }
 
 void CRender::destroy()
 {
+	tex_streaming::clear();
 	hiz::destroy();
 	m_bMakeAsyncSS = false;
 	FluidManager.Destroy();
@@ -677,9 +678,12 @@ void CRender::reset_end()
 	m_bFirstFrameAfterReset = true;
 }
 
+namespace tex_streaming { void update(); void clear(); }
+
 void CRender::OnFrame()
 {
 	PROF_EVENT("CRender::OnFrame()");
+	tex_streaming::update();
 	
 	Models->DeleteQueue();
 

@@ -621,6 +621,9 @@ void CResourceManager::DeleteGeom(const SGeometry* Geom)
 
 //--------------------------------------------------------------------------------------------------------------
 xr_task_group textures_load_tasks;
+#ifdef USE_DX11
+namespace tex_streaming { bool eligible(LPCSTR name); } // dx10SH_Texture.cpp
+#endif
 // Textures created on this thread while set are left unloaded until used (CTexture::m_on_demand)
 thread_local bool g_texture_create_on_demand = false;
 CTexture* CResourceManager::_CreateTexture(LPCSTR _Name)
@@ -645,6 +648,9 @@ CTexture* CResourceManager::_CreateTexture(LPCSTR _Name)
 		m_textures.insert(mk_pair(T->set_name(Name), T));
 		T->Preload();
 		T->m_on_demand = g_texture_create_on_demand;
+#ifdef USE_DX11
+		T->m_stream_eligible = !T->m_on_demand && tex_streaming::eligible(Name);
+#endif
 		if (Device.b_is_Ready && !T->m_on_demand)
 		{
 			static DWORD this_thread_id = 0;

@@ -117,10 +117,14 @@ void CRender::level_Load(IReader* fs)
 	b_loaded = TRUE;
 }
 
+namespace tex_streaming { void clear(); }
+
 void CRender::level_Unload()
 {
 	if (0 == g_pGameLevel) return;
 	if (!b_loaded) return;
+
+	tex_streaming::clear();
 
 	GMBase.clear();
 	GMRainWet.clear();

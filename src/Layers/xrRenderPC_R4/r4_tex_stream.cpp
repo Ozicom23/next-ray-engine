@@ -28,7 +28,7 @@ namespace
 			CTexture* T = (CTexture*)size_t(it.first);
 			if (!T->flags.bLoaded || T->flags.MemoryUsage == 0)
 				continue;
-			const u32 w = T->get_Width(), h = T->get_Height();
+			const u32 w = T->get_Width_loaded(), h = T->get_Height_loaded();
 			if (!w || !h)
 				continue;
 			const int skip = T->m_mip_skip;

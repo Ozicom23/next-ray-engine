@@ -3,6 +3,7 @@
 #pragma once
 
 #include "../../xrCore/xr_resource.h"
+#include <atomic>
 
 class ENGINE_API CAviPlayerCustom;
 class CTheoraSurface;
@@ -41,17 +42,46 @@ public:
 	ID3DBaseTexture* surface_get();
 
 	IC BOOL isUser() { return flags.bUser; }
+	// The size of the whole texture: a streamed one is loaded whole for good first (callers may rely on it)
 	IC u32 get_Width()
 	{
+#ifdef USE_DX11
+		if (m_stream) stream_whole_now();
+#endif
 		desc_enshure();
 		return desc.Width;
 	}
 
 	IC u32 get_Height()
 	{
+#ifdef USE_DX11
+		if (m_stream) stream_whole_now();
+#endif
 		desc_enshure();
 		return desc.Height;
 	}
+
+	// The size of what is loaded now (a streamed texture's small version too), for measuring
+	IC u32 get_Width_loaded()
+	{
+		desc_enshure();
+		return desc.Width;
+	}
+
+	IC u32 get_Height_loaded()
+	{
+		desc_enshure();
+		return desc.Height;
+	}
+
+#ifdef USE_DX11
+	// Texture streaming (r4_tex_stream), see dx10SH_Texture.cpp
+	void stream_request();
+	void stream_swap_in();
+	void stream_evict();
+	void stream_whole_now();
+	void stream_drop();
+#endif
 
 	void video_Sync(u32 _time) { m_play_time = _time; }
 	void video_Play(BOOL looped, u32 _time = 0xFFFFFFFF);
@@ -104,6 +134,18 @@ public: //	Public class members (must be encapsulated furthur)
 	u8 m_mip_skip = 0; // mip levels dropped when loading (texture_lod)
 	bool m_on_demand = false; // not loaded with the level, only when used (weather sky textures, r4_sky_on_demand)
 	u32 m_last_used = 0; // Device.dwTimeContinual of the last bind
+#ifdef USE_DX11
+	// Texture streaming (r4_tex_stream): loaded small with the level, whole on its first bind
+	bool m_stream_eligible = false; // a world texture (set when created)
+	u8 m_stream = 0; // 0 not streamed, 1 small, 2 whole one loading, 3 whole
+	u8 m_stream_small_skip = 0;
+	u8 m_stream_pending_skip = 0;
+	u32 m_stream_small_mem = 0;
+	u32 m_stream_pending_mem = 0;
+	ID3DBaseTexture* m_stream_small = nullptr; // the small version, kept while the whole one is used
+	ID3DBaseTexture* m_stream_pending = nullptr; // the whole one, loaded in the background
+	std::atomic<bool> m_stream_done{ false }; // the background load finished (m_stream_pending set, may be null)
+#endif
 
 	union
 	{
