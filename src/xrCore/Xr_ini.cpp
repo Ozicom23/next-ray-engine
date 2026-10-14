@@ -165,6 +165,46 @@ CInifile::CInifile(IReader* F, LPCSTR path
 	);
 }
 
+// Ini loads by file name: time and whether they came from the DLTX cache (stat_script_load)
+namespace ini_load_stats
+{
+	struct entry { u64 ticks = 0; u32 loads = 0, cached = 0; };
+	xr_map<xr_string, entry> s_files;
+	xrCriticalSection s_cs;
+
+	void add(LPCSTR name, u64 ticks, bool cached)
+	{
+		xrCriticalSectionGuard g(s_cs);
+		entry& e = s_files[name ? name : ""];
+		e.ticks += ticks;
+		e.loads++;
+		if (cached)
+			e.cached++;
+	}
+}
+
+XRCORE_API void ini_load_stats_dump()
+{
+	using namespace ini_load_stats;
+	xrCriticalSectionGuard g(s_cs);
+	xr_vector<std::pair<xr_string, entry>> list;
+	u64 total = 0;
+	u32 loads = 0;
+	for (auto& it : s_files)
+	{
+		list.push_back(it);
+		total += it.second.ticks;
+		loads += it.second.loads;
+	}
+	std::sort(list.begin(), list.end(), [](const auto& a, const auto& b) { return a.second.ticks > b.second.ticks; });
+	const double ms = 1000.0 / double(CPU::qpc_freq);
+	Msg("* [Ini load] %u loads of %u files: %.0f ms", loads, u32(list.size()), double(total) * ms);
+	for (size_t i = 0; i < list.size() && i < 15; i++)
+		Msg("*   %-70s %7.1f ms, %u loads, %u from cache", list[i].first.c_str(), double(list[i].second.ticks) * ms,
+			list[i].second.loads, list[i].second.cached);
+	s_files.clear();
+}
+
 CInifile::CInifile(LPCSTR szFileName,
                    BOOL ReadOnly,
                    BOOL bLoad,
@@ -177,6 +217,13 @@ CInifile::CInifile(LPCSTR szFileName,
 
 {
 	PROF_EVENT("CInifile::CInifile FileName");
+	struct timed
+	{
+		LPCSTR name;
+		u64 t0 = CPU::QPC();
+		bool cached = false;
+		~timed() { ini_load_stats::add(name, CPU::QPC() - t0, cached); }
+	} timing{ szFileName };
 	if (szFileName && strstr(szFileName, "system"))
 		Msg("-----loading %s", szFileName);
 
@@ -203,6 +250,7 @@ CInifile::CInifile(LPCSTR szFileName,
 				if (print_dltx_warnings)
 					Msg("[DLTX] [%s] Found data in cache", m_file_name);
                 DATA = CachedDataIt->second;
+				timing.cached = true;
 				return;
 			}
 		}

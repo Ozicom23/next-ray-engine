@@ -844,7 +844,12 @@ namespace script_load_stats
 	}
 }
 
-void script_load_stats_dump() { script_load_stats::dump(); }
+XRCORE_API void ini_load_stats_dump();
+void script_load_stats_dump()
+{
+	script_load_stats::dump();
+	ini_load_stats_dump();
+}
 
 bool CScriptStorage::do_file(LPCSTR caScriptName, LPCSTR caNameSpaceName)
 {
