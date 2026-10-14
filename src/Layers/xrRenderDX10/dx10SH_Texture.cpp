@@ -598,6 +598,10 @@ void CTexture::Load()
 		u32 mem = 0;
 		//pSurface = ::RImplementation.texture_load	(*cName,mem);
 		pSurface = ::RImplementation.texture_load(*cName, mem, true);
+#ifdef USE_DX11
+		extern thread_local int g_texture_load_skip;
+		m_mip_skip = u8(g_texture_load_skip);
+#endif
 
 		if (GetUsage() == D3D_USAGE_STAGING)
 		{

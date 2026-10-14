@@ -528,8 +528,12 @@ IC u32 it_height_rev_base(u32 d, u32 s)	{	return	color_rgba	(
 	(color_get_R(s)+color_get_G(s)+color_get_B(s))/3	);	// height
 }
 */
+// Mip levels the last texture_load on this thread dropped (CTexture::m_mip_skip)
+thread_local int g_texture_load_skip = 0;
+
 ID3DBaseTexture* CRender::texture_load(LPCSTR fRName, u32& ret_msize, bool bStaging)
 {
+	g_texture_load_skip = 0;
 	//	Moved here just to avoid warning
 #ifdef USE_DX11
 	D3DX11_IMAGE_INFO IMG;
@@ -652,6 +656,7 @@ _DDS:
 				int skipped = 0;
 				if (ID3DBaseTexture* T = dds_skip::load(S->pointer(), S->length(), get_texture_load_lod(fn), bStaging, mip_cnt, skipped))
 				{
+					g_texture_load_skip = skipped;
 					FS.r_close(S);
 					ret_msize = calc_texture_size(skipped, mip_cnt, img_size);
 					return T;
@@ -735,6 +740,7 @@ _DDS:
 				int skipped = 0;
 				if (ID3DBaseTexture* T = dds_skip::load(S->pointer(), S->length(), img_loaded_lod, bStaging, mip_cnt, skipped))
 				{
+					g_texture_load_skip = skipped;
 					FS.r_close(S);
 					ret_msize = calc_texture_size(skipped, mip_cnt, img_size);
 					return T;

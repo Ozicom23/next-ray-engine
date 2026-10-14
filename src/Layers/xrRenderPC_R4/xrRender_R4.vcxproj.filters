@@ -407,6 +407,9 @@
     <ClInclude Include="r4_hiz.h">
       <Filter>Core_Target</Filter>
     </ClInclude>
+    <ClInclude Include="r4_tex_stream.h">
+      <Filter>Core_Target</Filter>
+    </ClInclude>
     <ClInclude Include="r4_sun_receivers.h">
       <Filter>Core_Target</Filter>
     </ClInclude>
@@ -1122,6 +1125,9 @@
       <Filter>Core_Target</Filter>
     </ClCompile>
     <ClCompile Include="r4_hiz.cpp">
+      <Filter>Core_Target</Filter>
+    </ClCompile>
+    <ClCompile Include="r4_tex_stream.cpp">
       <Filter>Core_Target</Filter>
     </ClCompile>
     <ClCompile Include="r4_sun_receivers.cpp">

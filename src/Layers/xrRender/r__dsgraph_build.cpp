@@ -375,8 +375,17 @@ void CDSGraphManager::r_dsgraph_insert_static(dxRender_Visual *pVisual)
 	}
 }
 
+#ifdef USE_DX11
+namespace tex_stream { void note_draw(const STextureList* textures, float ssa); }
+#endif
+
 void CDSGraphManager::AddToRenderQueue(R_dsgraph::RenderQueue& queue, const R_dsgraph::DSGraphItem<u32, false>& item, const SPass& pass)
 {
+#ifdef USE_DX11
+	// stat_tex_stream: main view world objects' textures and their size on screen
+	if (i_mask[fl_normal] && !item.b_hud_mode)
+		tex_stream::note_draw(&*pass.T, item.ssa);
+#endif
 	if (PortalTraverseDbg_Enabled())
 	{
 		PortalTraverseDebugStats& dbg = PortalTraverseDbg_Get();

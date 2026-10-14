@@ -101,6 +101,7 @@ public: //	Public class members (must be encapsulated furthur)
 
 	bool m_is_hot = false;		//--DSR-- HeatVision
 	bool m_is_glowing = false;	//--DSR-- SilencerOverheat
+	u8 m_mip_skip = 0; // mip levels dropped when loading (texture_lod)
 
 	union
 	{

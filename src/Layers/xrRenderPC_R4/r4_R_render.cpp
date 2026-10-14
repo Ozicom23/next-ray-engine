@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "r4_hiz.h"
+#include "r4_tex_stream.h"
 #include "../../xrEngine/igame_persistent.h"
 #include "../xrRender/FBasicVisual.h"
 #include "../../xrEngine/customhud.h"
@@ -147,6 +148,8 @@ void CRender::Render()
     // Occlusion culling: the 3D scope's view isn't tested against the main view's depth
     const bool hiz_frame = !Device.m_SecondViewport.IsSVPFrame() && !RImplementation.o.dx10_msaa;
     hiz::frame_begin(hiz_frame);
+    if (hiz_frame)
+        tex_stream::frame_begin();
     GMBase.traverse(RImplementation.pLastSector, ViewBase, Device.vCameraPosition, Device.mFullTransform);
     GMBase.r_dsgraph_capture_static();
     GMBase.r_dsgraph_capture_dynamic();
