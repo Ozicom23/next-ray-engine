@@ -39,8 +39,16 @@ void CSE_ALifeDynamicObject::on_register()
 		clear_client_data();
 
     ::luabind::functor<void> funct;
-    if (ai().script_engine().functor("_G.CSE_ALifeDynamicObject_on_register", funct))
+	bool found;
+	{
+		PROF_EVENT("on_register: find the Lua function");
+		found = ai().script_engine().functor("_G.CSE_ALifeDynamicObject_on_register", funct);
+	}
+    if (found)
+	{
+		PROF_EVENT("on_register: Lua");
         funct((u16)ID);
+	}
 }
 
 void CSE_ALifeDynamicObject::on_before_register()

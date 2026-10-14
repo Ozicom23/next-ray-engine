@@ -270,7 +270,8 @@ bool CLevel::net_start_client6()
 
 		//		g_pGamePersistent->LoadTitle		("st_client_synchronising");
 		g_pGamePersistent->LoadTitle();
-		Device.PreCache(60, true, true);
+		extern int g_precache_frames;
+		Device.PreCache(g_precache_frames, true, true);
 		net_start_result_total = TRUE;
 	}
 	else

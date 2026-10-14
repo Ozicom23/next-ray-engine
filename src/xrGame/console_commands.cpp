@@ -400,6 +400,7 @@ static void full_memory_stats(bool assert = true)
 
 // Automation aids that must not stay on in normal play
 extern int g_rc_silent_level_changers;
+int g_precache_frames = 60;
 class CCC_IntegerNotSaved : public CCC_Integer
 {
 public:
@@ -2668,6 +2669,9 @@ void CCC_RegisterCommands()
 #endif // MASTER_GOLD
 
 	CMD4(CCC_IntegerNotSaved, "rc_silent_level_changers", &g_rc_silent_level_changers, 0, 1);
+	// Frames rendered behind the loading screen after a level load, the camera turning around once (textures and
+	// shaders of the surroundings get loaded). Not saved while measuring
+	CMD4(CCC_IntegerNotSaved, "precache_frames", &g_precache_frames, 2, 120);
 
     // Moved lua_gcstep outside of DEBUG to allow for easier experimentation.
 	CMD4(CCC_Integer, "lua_gcstep", &psLUA_GCSTEP, 1, 1000);
