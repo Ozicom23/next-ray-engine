@@ -584,26 +584,12 @@ bool ignore_name(const char* _name)
 
 bool ignore_path(const char* _path)
 {
-	// A file that exists opens with no access requested, so its attributes give the same answer without opening it.
-	// Opening every file was ~0.5 s per script file list on the Steam Deck (Proton, MO2's virtual file system), and
-	// file_list_open_ex rescans with this check: axr_main and MCM list the scripts on every level load. Directories
-	// keep the old check (opening one without FILE_FLAG_BACKUP_SEMANTICS fails on Windows)
-	const DWORD attributes = GetFileAttributes(_path);
-	if (attributes == INVALID_FILE_ATTRIBUTES)
-		return true;
-	if (!(attributes & FILE_ATTRIBUTE_DIRECTORY))
-		return false;
-
-	HANDLE h = CreateFile(_path, 0, 0, NULL, OPEN_EXISTING,
-	                      FILE_ATTRIBUTE_READONLY | FILE_FLAG_NO_BUFFERING, NULL);
-
-	if (h != INVALID_HANDLE_VALUE)
-	{
-		CloseHandle(h);
-		return false;
-	}
-	else
-		return true;
+	// Whether it exists, by its attributes. It was opened with CreateFile: ~0.5 s per script file list on the Steam
+	// Deck (Proton, MO2's virtual file system), and file_list_open_ex rescans with this check (axr_main, dxml_core and
+	// MCM list the scripts on every level load). Opening also failed for every directory (that needs
+	// FILE_FLAG_BACKUP_SEMANTICS), so rescanning a recursive path such as $game_config$ dropped the loose files of
+	// all its subfolders from the file list: the next config include from one of them was a fatal error
+	return GetFileAttributes(_path) == INVALID_FILE_ATTRIBUTES;
 }
 
 bool CLocatorAPI::Recurse(const char* path)
