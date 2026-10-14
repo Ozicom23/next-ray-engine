@@ -1115,6 +1115,15 @@ public:
 	}
 }; //CCC_ALifeSave
 
+// Where the time of loading scripts went since the last report (they all run again on every level load)
+void script_load_stats_dump();
+class CCC_ScriptLoadStats : public IConsole_Command
+{
+public:
+	CCC_ScriptLoadStats(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; }
+	virtual void Execute(LPCSTR args) { script_load_stats_dump(); }
+};
+
 class CCC_ALifeLoadFrom : public IConsole_Command
 {
 public:
@@ -2580,6 +2589,7 @@ void CCC_RegisterCommands()
 
 	CMD1(CCC_ALifeSave, "save"); // save game
 	CMD1(CCC_ALifeLoadFrom, "load"); // load game from ...
+	CMD1(CCC_ScriptLoadStats, "stat_script_load");
 	CMD1(CCC_LoadLastSave, "load_last_save"); // load last saved game from ...
 
 	CMD1(CCC_FlushLog, "flush"); // flush log

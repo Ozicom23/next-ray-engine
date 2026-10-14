@@ -816,8 +816,38 @@ static bool unlocalRegex(xr_set<xr_string>& unlocals, xr_string& s, const std::r
 	return false;
 };
 
+// stat_script_load: where the time of loading scripts goes (a level load runs every script again)
+namespace script_load_stats
+{
+	u64 t_read = 0, t_unlocal = 0, t_compile = 0, t_run = 0, t_unlocalizers = 0;
+	u32 files = 0, unlocal_files = 0;
+	struct file_time { xr_string name; u64 total, unlocal, run; };
+	xr_vector<file_time> per_file;
+
+	inline u64 now() { return CPU::QPC(); }
+	inline double ms(u64 t) { return double(t) * 1000.0 / double(CPU::qpc_freq); }
+
+	void dump()
+	{
+		Msg("* [Script load] %u files since the last report: read %.0f ms, unlocalize %.0f ms (%u files, reading their lists %.0f ms),"
+			" compile %.0f ms, run %.0f ms", files, ms(t_read), ms(t_unlocal), unlocal_files, ms(t_unlocalizers), ms(t_compile), ms(t_run));
+		std::sort(per_file.begin(), per_file.end(), [](const file_time& a, const file_time& b) { return a.total > b.total; });
+		for (size_t i = 0; i < per_file.size() && i < 25; i++)
+			Msg("*   %-48s %7.1f ms (unlocalize %.1f, run %.1f)", per_file[i].name.c_str(), ms(per_file[i].total),
+				ms(per_file[i].unlocal), ms(per_file[i].run));
+		xrLogger::FlushLog();
+		t_read = t_unlocal = t_compile = t_run = t_unlocalizers = 0;
+		files = unlocal_files = 0;
+		per_file.clear();
+	}
+}
+
+void script_load_stats_dump() { script_load_stats::dump(); }
+
 bool CScriptStorage::do_file(LPCSTR caScriptName, LPCSTR caNameSpaceName)
 {
+	using namespace script_load_stats;
+	const u64 t_begin = now();
 	if (!unlocalizerPassed) {
 		auto file_list = FS.file_list_open("$game_config$", "unlocalizers\\", FS_RootOnly | FS_ListFiles);
 		if (!file_list) {
@@ -872,9 +902,13 @@ bool CScriptStorage::do_file(LPCSTR caScriptName, LPCSTR caNameSpaceName)
 			unlocalizerPassed = true;
 		}
 	}
+	const u64 t_opened0 = now();
+	t_unlocalizers += t_opened0 - t_begin;
 	int start = lua_gettop(lua());
 	string_path l_caLuaFileName;
 	IReader* l_tpFileReader = FS.r_open(caScriptName);
+	const u64 t_opened = now();
+	t_read += t_opened - t_opened0;
 
 	if (!l_tpFileReader)
 	{
@@ -989,7 +1023,10 @@ bool CScriptStorage::do_file(LPCSTR caScriptName, LPCSTR caNameSpaceName)
 		unlocalizerResult = join_list(tokens);
 		scriptContents = unlocalizerResult.c_str();
 		scriptLength = strlen(scriptContents);
+		unlocal_files++;
 	}
+	const u64 t_unlocalized = now();
+	t_unlocal += t_unlocalized - t_opened;
 
 	strconcat(sizeof(l_caLuaFileName), l_caLuaFileName, "@", caScriptName);
 
@@ -1001,6 +1038,8 @@ bool CScriptStorage::do_file(LPCSTR caScriptName, LPCSTR caNameSpaceName)
 		bufferLoaded = load_buffer(lua(), static_cast<LPCSTR>(l_tpFileReader->pointer()), (size_t)l_tpFileReader->length(), l_caLuaFileName, caNameSpaceName);
 	}
 
+	const u64 t_compiled = now();
+	t_compile += t_compiled - t_unlocalized;
 	if (!bufferLoaded)
 	{
 		//		VERIFY		(lua_gettop(lua()) >= 4);
@@ -1028,6 +1067,12 @@ bool CScriptStorage::do_file(LPCSTR caScriptName, LPCSTR caNameSpaceName)
 	// because that's the first and the only call of the main chunk - there is no point to compile it
 	//	luaJIT_setmode	(lua(),0,LUAJIT_MODE_ENGINE|LUAJIT_MODE_OFF);						// Oles
 	int l_iErrorCode = lua_pcall(lua(), 0, 0, (-1 == errFuncId) ? 0 : errFuncId); // new_Andy
+	{
+		const u64 t_end = now();
+		t_run += t_end - t_compiled;
+		files++;
+		per_file.push_back({ xr_string(caNameSpaceName ? caNameSpaceName : caScriptName), t_end - t_begin, t_unlocalized - t_opened, t_end - t_compiled });
+	}
 	//	luaJIT_setmode	(lua(),0,LUAJIT_MODE_ENGINE|LUAJIT_MODE_ON);						// Oles
 
 #ifdef USE_DEBUGGER
