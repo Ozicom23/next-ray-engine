@@ -194,8 +194,9 @@ private:
 	CMatrix*						matrices	[8	];	// matrices are supported only for FFP
 #endif
 
-	void Invalidate();
 public:
+	// Forgets the bound state, so the next sets bind again (after rendering that bypassed the backend)
+	void Invalidate();
 	struct _stats
 	{
 		u32 polys;
