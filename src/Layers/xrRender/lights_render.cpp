@@ -230,10 +230,13 @@ namespace light_shadow_cache
 		e.valid = true;
 	}
 
-	// Copies the entry into the light's place in the bound atlas; the caller rebinds the engine's state afterwards
-	void copy_to_atlas(entry& e, light* L)
+	// Copies the entry into the light's place in the atlas; the caller rebinds the engine's state afterwards
+	void copy_to_atlas(entry& e, light* L, ID3D11DepthStencilView* atlas)
 	{
 		ID3D11DeviceContext* ctx = HW.pContext;
+		// The engine binds its targets lazily at its next draw (a changed target first unbinds all), so this draw binds
+		// the atlas itself; else it could write nothing, or into the entry's own texture
+		ctx->OMSetRenderTargets(0, nullptr, atlas);
 		D3D11_MAPPED_SUBRESOURCE m;
 		if (FAILED(ctx->Map(s_cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m)))
 			return;
@@ -581,7 +584,7 @@ void CRender::render_lights(light_Package& LP)
 							light_shadow_cache::filled(*e, L);
 						}
 						setup(L);
-						light_shadow_cache::copy_to_atlas(*e, L);
+						light_shadow_cache::copy_to_atlas(*e, L, Target->rt_smap_depth->pZRT);
 						RCache.Invalidate(); // the copy bypassed the engine's state tracking
 						setup(L);
 						render_trees(L);
