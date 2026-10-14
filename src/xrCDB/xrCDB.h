@@ -95,7 +95,9 @@ namespace CDB
 			if (S_READY != status)
 			{
 				Log ("! WARNING: syncronized CDB::query");
+#ifdef PROF_EVENT // not in every project that includes this
 				PROF_EVENT("CDB: wait for the collision model");
+#endif
 				async_cform_load.wait();
 			}
 		}
