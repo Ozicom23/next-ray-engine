@@ -13,49 +13,62 @@ struct batch_light
 	bool forward; // semi-transparent casters, drawn to the colour target as well
 };
 
-// Light shadow cache (r4_light_shadow_cache): every frame all shadowed lights' shadow maps were drawn again into the
-// atlas. When a batch has the same lights at the same places and sizes as last frame, none of them moving (their
-// static casters were last captured long ago) and no semi-transparent casters among them, the atlas with only the
-// static geometry drawn is kept and copied back; moving objects and grass are
-// drawn on top as before, and trees and bushes (they sway in the wind) too. Same shadows, the static geometry drawn
-// once instead of every frame.
+// Light shadow cache (r4_light_shadow_cache): every frame every shadowed light's shadow map was drawn again into the
+// atlas, static geometry included. A light that doesn't move (its static casters were captured long ago) and has no
+// semi-transparent casters now keeps its static geometry, without trees and bushes (they sway in the wind), in a depth
+// texture of its own. Each frame that is copied into the light's place in the atlas by a small shader (D3D11 can't
+// copy part of a depth texture), and the trees, moving objects and grass are drawn over it as before. It is drawn
+// again when the light's size, transform or static capture change. Same shadows, the static geometry drawn once.
 namespace light_shadow_cache
 {
-	enum result { off, fill, hit };
 #ifdef USE_DX11
 	int ps_cache = 1;
 
-	struct key_entry
-	{
-		light* L;
-		u32 version;
-		int x, y, size;
-		Fmatrix combine;
-	};
-	struct slot
+	struct entry
 	{
 		ID3D11Texture2D* tex = nullptr;
-		xr_vector<key_entry> key;
-		u32 frame = 0; // when it was last filled or used
+		ID3D11DepthStencilView* dsv = nullptr;
+		ID3D11ShaderResourceView* srv = nullptr;
+		u32 size = 0, version = 0, used = 0;
+		Fmatrix combine;
 		bool valid = false;
+		void release() { _RELEASE(srv); _RELEASE(dsv); _RELEASE(tex); valid = false; }
 	};
-	const u32 kSlots = 4;
-	slot s_slots[kSlots];
+	xr_map<light*, entry> s_entries;
+	const u32 kUnusedFrames = 600;
+
+	// The copy into the atlas
+	ID3D11VertexShader* s_vs = nullptr;
+	ID3D11PixelShader* s_ps = nullptr;
+	ID3D11Buffer* s_cb = nullptr;
+	ID3D11DepthStencilState* s_ds = nullptr;
+	ID3D11RasterizerState* s_rs = nullptr;
+	ID3D11BlendState* s_bs = nullptr;
+	bool s_failed = false;
+
+	const char* kCopyShader =
+		"Texture2D<float> src : register(t0);\n"
+		"cbuffer params : register(b0) { float4 origin; };\n"
+		"float4 vs(uint id : SV_VertexID) : SV_Position\n"
+		"{\n"
+		"	float2 uv = float2((id << 1) & 2, id & 2);\n"
+		"	return float4(uv * float2(2, -2) + float2(-1, 1), 0, 1);\n"
+		"}\n"
+		"float ps(float4 pos : SV_Position) : SV_Depth\n"
+		"{\n"
+		"	return src.Load(int3(int2(pos.xy - origin.xy), 0));\n"
+		"}\n";
 
 	// stat_light_cache
 	bool s_stats = false;
-	u32 s_stats_end = 0;
-	u32 s_hits = 0, s_fills = 0, s_off_moving = 0, s_off_forward = 0, s_off_other = 0, s_frames = 0;
-	// Why a cacheable batch was drawn again: no cache from the frame before, lights, static capture, place, size, transform
-	u32 s_miss_old = 0, s_miss_lights = 0, s_miss_version = 0, s_miss_place = 0, s_miss_size = 0, s_miss_xform = 0;
-	u32 s_last_stat_frame = 0;
+	u32 s_stats_end = 0, s_frames = 0, s_last_stat_frame = 0;
+	u32 s_hits = 0, s_fills = 0, s_off_moving = 0, s_off_forward = 0, s_off_other = 0;
 
 	void start_stats(float seconds)
 	{
 		s_stats = true;
 		s_stats_end = Device.dwTimeGlobal + iFloor(seconds * 1000.f);
 		s_hits = s_fills = s_off_moving = s_off_forward = s_off_other = s_frames = 0;
-		s_miss_old = s_miss_lights = s_miss_version = s_miss_place = s_miss_size = s_miss_xform = 0;
 		Msg("* [Light shadow cache] measuring for %.0f s...", seconds);
 	}
 
@@ -67,12 +80,9 @@ namespace light_shadow_cache
 		{
 			s_stats = false;
 			const float f = float(_max(1u, s_frames));
-			Msg("* [Light shadow cache] per frame over %u frames, shadow map batches: from cache %.2f, drawn and cached %.2f,"
-				" not cached: moving %.2f, semi-transparent %.2f, other %.2f", s_frames, s_hits / f, s_fills / f,
-				s_off_moving / f, s_off_forward / f, s_off_other / f);
-			Msg("*   drawn again because: no cache from the frame before %.2f, other lights %.2f, static capture %.2f,"
-				" atlas place %.2f, size %.2f, transform %.2f", s_miss_old / f, s_miss_lights / f, s_miss_version / f,
-				s_miss_place / f, s_miss_size / f, s_miss_xform / f);
+			Msg("* [Light shadow cache] per frame over %u frames, %u lights cached: shadow maps from cache %.2f, drawn and cached %.2f,"
+				" not cached: moving %.2f, semi-transparent %.2f, other %.2f", s_frames, u32(s_entries.size()), s_hits / f,
+				s_fills / f, s_off_moving / f, s_off_forward / f, s_off_other / f);
 			xrLogger::FlushLog();
 			return;
 		}
@@ -84,140 +94,203 @@ namespace light_shadow_cache
 		c++;
 	}
 
-	static ID3D11Texture2D* atlas()
+	static bool create_shaders()
 	{
-		ID3DBaseTexture* t = RImplementation.Target->rt_smap_depth->pSurface;
-		return (ID3D11Texture2D*)t;
-	}
-
-	static bool ensure_texture(slot& s)
-	{
-		ID3D11Texture2D* a = atlas();
-		if (!a)
+		if (s_ps)
+			return true;
+		if (s_failed)
 			return false;
-		D3D11_TEXTURE2D_DESC da;
-		a->GetDesc(&da);
-		if (s.tex)
+		ID3DBlob* vs = nullptr;
+		ID3DBlob* ps = nullptr;
+		ID3DBlob* err = nullptr;
+		HRESULT hr = D3DCompile(kCopyShader, xr_strlen(kCopyShader), "light_shadow_copy", nullptr, nullptr, "vs", "vs_5_0", 0, 0, &vs, &err);
+		if (SUCCEEDED(hr))
+			hr = D3DCompile(kCopyShader, xr_strlen(kCopyShader), "light_shadow_copy", nullptr, nullptr, "ps", "ps_5_0", 0, 0, &ps, &err);
+		if (SUCCEEDED(hr))
+			hr = HW.pDevice->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, &s_vs);
+		if (SUCCEEDED(hr))
+			hr = HW.pDevice->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, &s_ps);
+		if (SUCCEEDED(hr))
 		{
-			D3D11_TEXTURE2D_DESC ds;
-			s.tex->GetDesc(&ds);
-			if (ds.Width == da.Width && ds.Height == da.Height && ds.Format == da.Format)
-				return true;
-			_RELEASE(s.tex);
-			s.valid = false;
+			D3D11_BUFFER_DESC bd = {};
+			bd.ByteWidth = 16;
+			bd.Usage = D3D11_USAGE_DYNAMIC;
+			bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+			bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+			hr = HW.pDevice->CreateBuffer(&bd, nullptr, &s_cb);
 		}
-		D3D11_TEXTURE2D_DESC d = da;
-		d.BindFlags = D3D11_BIND_DEPTH_STENCIL; // a copy destination only, same as the atlas
-		d.MiscFlags = 0;
-		return SUCCEEDED(HW.pDevice->CreateTexture2D(&d, nullptr, &s.tex));
-	}
-
-	static void make_key(const xr_vector<batch_light>& batch, xr_vector<key_entry>& key)
-	{
-		key.clear();
-		for (const batch_light& b : batch)
-			key.push_back({ b.L, b.L->m_static_version, int(b.L->X.S.posX), int(b.L->X.S.posY), int(b.L->X.S.size), b.L->X.S.combine });
-	}
-
-	static bool same(const xr_vector<key_entry>& a, const xr_vector<key_entry>& b)
-	{
-		if (a.size() != b.size())
+		if (SUCCEEDED(hr))
 		{
-			count(s_miss_lights);
+			D3D11_DEPTH_STENCIL_DESC dd = {};
+			dd.DepthEnable = TRUE;
+			dd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+			dd.DepthFunc = D3D11_COMPARISON_ALWAYS;
+			hr = HW.pDevice->CreateDepthStencilState(&dd, &s_ds);
+		}
+		if (SUCCEEDED(hr))
+		{
+			D3D11_RASTERIZER_DESC rd = {};
+			rd.FillMode = D3D11_FILL_SOLID;
+			rd.CullMode = D3D11_CULL_NONE;
+			rd.DepthClipEnable = FALSE;
+			hr = HW.pDevice->CreateRasterizerState(&rd, &s_rs);
+		}
+		if (SUCCEEDED(hr))
+		{
+			D3D11_BLEND_DESC bl = {};
+			bl.RenderTarget[0].RenderTargetWriteMask = 0;
+			hr = HW.pDevice->CreateBlendState(&bl, &s_bs);
+		}
+		if (FAILED(hr))
+		{
+			Msg("! Light shadow cache: copy shader failed: %s", err ? (const char*)err->GetBufferPointer() : "");
+			s_failed = true;
+		}
+		_RELEASE(vs);
+		_RELEASE(ps);
+		_RELEASE(err);
+		return !s_failed;
+	}
+
+	static bool ensure_texture(entry& e, u32 size)
+	{
+		if (e.tex && e.size == size)
+			return true;
+		e.release();
+		D3D11_TEXTURE2D_DESC d = {};
+		d.Width = d.Height = size;
+		d.MipLevels = d.ArraySize = 1;
+		d.Format = DXGI_FORMAT_R24G8_TYPELESS;
+		d.SampleDesc.Count = 1;
+		d.Usage = D3D11_USAGE_DEFAULT;
+		d.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+		D3D11_DEPTH_STENCIL_VIEW_DESC dv = {};
+		dv.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+		dv.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+		D3D11_SHADER_RESOURCE_VIEW_DESC sv = {};
+		sv.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+		sv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		sv.Texture2D.MipLevels = 1;
+		if (FAILED(HW.pDevice->CreateTexture2D(&d, nullptr, &e.tex)) || FAILED(HW.pDevice->CreateDepthStencilView(e.tex, &dv, &e.dsv)) ||
+			FAILED(HW.pDevice->CreateShaderResourceView(e.tex, &sv, &e.srv)))
+		{
+			e.release();
 			return false;
 		}
-		for (size_t i = 0; i < a.size(); i++)
-		{
-			u32* why = nullptr;
-			if (a[i].L != b[i].L)
-				why = &s_miss_lights;
-			else if (a[i].version != b[i].version)
-				why = &s_miss_version;
-			else if (a[i].x != b[i].x || a[i].y != b[i].y)
-				why = &s_miss_place;
-			else if (a[i].size != b[i].size)
-				why = &s_miss_size;
-			else if (memcmp(&a[i].combine, &b[i].combine, sizeof(Fmatrix)))
-				why = &s_miss_xform;
-			if (why)
-			{
-				count(*why);
-				return false;
-			}
-		}
+		e.size = size;
 		return true;
 	}
 
-	result lookup(u16 sid, const xr_vector<batch_light>& batch)
+	// The light's cache entry when it can be cached, else nullptr. fresh: the entry holds this frame's static geometry
+	entry* get(const batch_light& b, bool& fresh)
 	{
-		if (!ps_cache || sid >= kSlots || batch.empty())
-			return off;
-		for (const batch_light& b : batch)
+		fresh = false;
+		if (!ps_cache)
+			return nullptr;
+		light* L = b.L;
+		if (b.decorative || L->flags.bHudMode)
 		{
-			if (b.decorative)
-			{
-				count(s_off_other);
-				return off;
-			}
-			if (b.L->m_moving_frames < 32u)
-			{
-				count(s_off_moving);
-				return off;
-			}
-			if (b.forward)
-			{
-				count(s_off_forward);
-				return off;
-			}
+			count(s_off_other);
+			return nullptr;
 		}
-		slot& s = s_slots[sid];
-		static xr_vector<key_entry> key;
-		make_key(batch, key);
-		// Used in the frame before: the lights in the key are still the same objects
-		if (!s.valid || !s.tex || s.frame + 1 < Device.dwFrame)
-			count(s_miss_old);
-		else if (same(s.key, key))
+		if (L->m_moving_frames < 32u)
 		{
-			s.frame = Device.dwFrame;
-			count(s_hits);
-			return hit;
+			count(s_off_moving);
+			return nullptr;
 		}
-		count(s_fills);
-		return fill;
+		if (b.forward)
+		{
+			count(s_off_forward);
+			return nullptr;
+		}
+		if (!create_shaders())
+			return nullptr;
+		if (s_entries.size() >= 64 && s_entries.find(L) == s_entries.end())
+		{
+			count(s_off_other); // enough lights cached
+			return nullptr;
+		}
+		entry& e = s_entries[L];
+		e.used = Device.dwFrame;
+		const u32 size = L->X.S.size;
+		fresh = e.valid && e.size == size && e.version == L->m_static_version && !memcmp(&e.combine, &L->X.S.combine, sizeof(Fmatrix));
+		if (!ensure_texture(e, size))
+		{
+			s_entries.erase(L);
+			return nullptr;
+		}
+		count(fresh ? s_hits : s_fills);
+		return &e;
 	}
 
-	void store(u16 sid, const xr_vector<batch_light>& batch)
+	void filled(entry& e, light* L)
 	{
-		slot& s = s_slots[sid];
-		if (!ensure_texture(s))
-		{
-			s.valid = false;
+		e.version = L->m_static_version;
+		e.combine = L->X.S.combine;
+		e.valid = true;
+	}
+
+	// Copies the entry into the light's place in the bound atlas; the caller rebinds the engine's state afterwards
+	void copy_to_atlas(entry& e, light* L)
+	{
+		ID3D11DeviceContext* ctx = HW.pContext;
+		D3D11_MAPPED_SUBRESOURCE m;
+		if (FAILED(ctx->Map(s_cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m)))
 			return;
-		}
-		HW.pContext->CopyResource(s.tex, atlas());
-		make_key(batch, s.key);
-		s.frame = Device.dwFrame;
-		s.valid = true;
+		float* o = (float*)m.pData;
+		o[0] = float(L->X.S.posX);
+		o[1] = float(L->X.S.posY);
+		o[2] = o[3] = 0.f;
+		ctx->Unmap(s_cb, 0);
+
+		D3D11_VIEWPORT vp = { float(L->X.S.posX), float(L->X.S.posY), float(e.size), float(e.size), 0.f, 1.f };
+		ctx->RSSetViewports(1, &vp);
+		ctx->IASetInputLayout(nullptr);
+		ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		ctx->VSSetShader(s_vs, nullptr, 0);
+		ctx->GSSetShader(nullptr, nullptr, 0);
+		ctx->HSSetShader(nullptr, nullptr, 0);
+		ctx->DSSetShader(nullptr, nullptr, 0);
+		ctx->PSSetShader(s_ps, nullptr, 0);
+		ctx->PSSetShaderResources(0, 1, &e.srv);
+		ctx->PSSetConstantBuffers(0, 1, &s_cb);
+		ctx->OMSetDepthStencilState(s_ds, 0);
+		ctx->RSSetState(s_rs);
+		const float blend[4] = {};
+		ctx->OMSetBlendState(s_bs, blend, 0xffffffff);
+		ctx->Draw(3, 0);
+		ID3D11ShaderResourceView* none = nullptr;
+		ctx->PSSetShaderResources(0, 1, &none);
 	}
 
-	void restore(u16 sid)
+	// Entries of lights not drawn for a while
+	void sweep()
 	{
-		HW.pContext->CopyResource(atlas(), s_slots[sid].tex);
+		for (auto it = s_entries.begin(); it != s_entries.end();)
+		{
+			if (Device.dwFrame - it->second.used > kUnusedFrames)
+			{
+				it->second.release();
+				it = s_entries.erase(it);
+			}
+			else
+				++it;
+		}
 	}
 
 	void destroy()
 	{
-		for (slot& s : s_slots)
-		{
-			_RELEASE(s.tex);
-			s.valid = false;
-			s.key.clear();
-		}
+		for (auto& it : s_entries)
+			it.second.release();
+		s_entries.clear();
+		_RELEASE(s_vs);
+		_RELEASE(s_ps);
+		_RELEASE(s_cb);
+		_RELEASE(s_ds);
+		_RELEASE(s_rs);
+		_RELEASE(s_bs);
+		s_failed = false;
 	}
-#else
-	result lookup(u16, const xr_vector<batch_light>&) { return off; }
-	void store(u16, const xr_vector<batch_light>&) {}
-	void restore(u16) {}
 #endif
 }
 
@@ -267,6 +340,9 @@ IC void hud_light_restore(xr_map<light*, std::pair<Fvector, Fvector>>& saved_pos
 
 void CRender::render_lights(light_Package& LP)
 {
+#ifdef USE_DX11
+	light_shadow_cache::sweep();
+#endif
 	xr_map<light*, std::pair<Fvector, Fvector>> saved_pos;
 	stats.ls_shadowed_in += (u32)LP.v_shadowed.size();
 	stats.ls_unshadowed_point_in += (u32)LP.v_point.size();
@@ -338,7 +414,8 @@ void CRender::render_lights(light_Package& LP)
 			for (u16 smap_ID = 0; refactored.size() != total; smap_ID++)
 			{
 				LP_smap_pool.initialize(o.smapsize);
-				std::sort(source.begin(), source.end(), [](light* _1, light* _2) {return _1->X.S.size > _2->X.S.size; });
+				// Equal sizes in a fixed order, so the same lights get the same atlas places every frame (light shadow cache)
+				std::sort(source.begin(), source.end(), [](light* _1, light* _2) {return _1->X.S.size != _2->X.S.size ? _1->X.S.size > _2->X.S.size : _1 < _2; });
 				source.erase(std::remove_if(source.begin(), source.end(), [smap_ID](light* L)
 				{
 					SMAP_Rect R;
@@ -469,7 +546,6 @@ void CRender::render_lights(light_Package& LP)
 					}
 				};
 
-				const int cache = light_shadow_cache::lookup(sid, batch);
 				// Trees and bushes sway in the wind: never cached, drawn each frame over the cached rest
 				auto render_trees = [&](light* L)
 				{
@@ -479,39 +555,43 @@ void CRender::render_lights(light_Package& LP)
 					L->GMLight.r_dsgraph_render_static(0, false);
 					L->GMLight.i_render_trees = -1;
 				};
-				if (cache == light_shadow_cache::hit)
+				for (const batch_light& b : batch)
 				{
-					light_shadow_cache::restore(sid);
-					for (const batch_light& b : batch)
+					light* L = b.L;
+#ifdef USE_DX11
+					bool fresh = false;
+					if (light_shadow_cache::entry* e = light_shadow_cache::get(b, fresh))
 					{
-						setup(b.L);
-						render_trees(b.L);
-						render_rest(b);
-					}
-				}
-				else
-				{
-					const bool fill = cache == light_shadow_cache::fill;
-					for (const batch_light& b : batch)
-					{
-						setup(b.L);
-						if (fill)
-							b.L->GMLight.i_render_trees = 0;
-						b.L->GMLight.r_dsgraph_render_static(0, false);
-						b.L->GMLight.i_render_trees = -1;
-						if (!fill)
-							render_rest(b);
-					}
-					if (fill)
-					{
-						light_shadow_cache::store(sid, batch);
-						for (const batch_light& b : batch)
+						if (!fresh)
 						{
-							setup(b.L);
-							render_trees(b.L);
-							render_rest(b);
+							// The light's own texture: static geometry without trees
+							Target->u_setrt(e->size, e->size, NULL, NULL, NULL, e->dsv);
+							HW.pContext->ClearDepthStencilView(e->dsv, D3D_CLEAR_DEPTH, 1.0f, 0);
+							D3D_VIEWPORT VP = { 0.f, 0.f, float(e->size), float(e->size), 0.f, 1.f };
+							HW.pContext->RSSetViewports(1, &VP);
+							RCache.set_CullMode(CULL_CCW);
+							RCache.set_Stencil(FALSE);
+							RCache.set_ColorWriteEnable(FALSE);
+							RCache.set_xform_world(Fidentity);
+							RCache.set_xform_view(L->X.S.view);
+							RCache.set_xform_project(L->X.S.project);
+							L->GMLight.i_render_trees = 0;
+							L->GMLight.r_dsgraph_render_static(0, false);
+							L->GMLight.i_render_trees = -1;
+							light_shadow_cache::filled(*e, L);
 						}
+						setup(L);
+						light_shadow_cache::copy_to_atlas(*e, L);
+						RCache.Invalidate(); // the copy bypassed the engine's state tracking
+						setup(L);
+						render_trees(L);
+						render_rest(b);
+						continue;
 					}
+#endif
+					setup(L);
+					L->GMLight.r_dsgraph_render_static(0, false);
+					render_rest(b);
 				}
 				batch.clear();
 			}
