@@ -56,8 +56,8 @@ public:
 
 	virtual void Copy(IEnvDescriptorRender& _in);
 #ifdef USE_DX11
-	// Weather textures on demand: now_needed loads them now, else in the background; marks them used
-	void residency(bool now_needed, u32 now);
+	// Weather textures on demand: loads them in the background, marks them used
+	void residency(u32 now);
 #endif
 private:
 	ref_texture sky_texture;

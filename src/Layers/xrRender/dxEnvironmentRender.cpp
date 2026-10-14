@@ -169,9 +169,9 @@ void dxEnvDescriptorMixerRender::lerp(IEnvDescriptorRender* inA, IEnvDescriptorR
 
 #ifdef USE_DX11
 // Weather sky textures on demand (r4_sky_on_demand): GAMMA's weathers have ~1.2 GB of uncompressed sky textures for
-// every weather and hour, and two keyframes are drawn at a time. They are created unloaded; each frame the current
-// keyframes' textures are made sure loaded (loaded now if they weren't: a short stall, as on a forced weather change),
-// the next keyframe's are loaded in the background, and ones not used for a while are unloaded.
+// every weather and hour, and two keyframes are drawn at a time. They are created unloaded and load in the background:
+// the next keyframe's ahead of time; a keyframe's that isn't loaded when it is drawn (a forced weather change) is
+// drawn with the textures shown before until it is, so nothing waits. Ones not used for a while are unloaded.
 int ps_r4_sky_on_demand = 1;
 extern thread_local bool g_texture_create_on_demand;
 extern xr_task_group textures_load_tasks;
@@ -179,6 +179,8 @@ extern xr_task_group textures_load_tasks;
 namespace sky_on_demand
 {
 	static xr_vector<ref_texture> s_textures; // every weather texture, kept alive while the device is
+	static xr_vector<CTexture*> s_loading; // background loads asked for and not finished
+	static ref_texture s_shown[3][2]; // per list (sky, sky env, clouds) and keyframe: the last loaded texture drawn
 	static u32 s_next_sweep = 0;
 	const u32 kUnusedMs = 10000;
 
@@ -199,36 +201,62 @@ namespace sky_on_demand
 		if (!T)
 			return;
 		T->m_last_used = now;
-		if (!T->flags.bLoaded && !T->flags.bLoading)
-		{
-			CTexture* raw = &*T;
-			textures_load_tasks.run([raw]() { raw->Load(); });
-		}
+		CTexture* raw = &*T;
+		if (T->flags.bLoaded || T->flags.bLoading || std::find(s_loading.begin(), s_loading.end(), raw) != s_loading.end())
+			return;
+		s_loading.push_back(raw);
+		textures_load_tasks.run([raw]() { raw->Load(); });
 	}
 
-	static void ensure(ref_texture& T, u32 now)
+	// The mixer's list for this frame: textures still loading are replaced by the ones drawn before
+	template <typename List>
+	static void resolve(List& list, int kind, u32 now)
 	{
-		if (!T)
-			return;
-		T->m_last_used = now;
-		if (!T->flags.bLoaded)
-			T->Load(); // returns at once when a background load runs; surface_get and Apply wait for it
+		for (size_t i = 0; i < list.size(); i++)
+		{
+			ref_texture& T = list[i].second;
+			if (!T)
+				continue;
+			const int slot = i ? 1 : 0;
+			T->m_last_used = now;
+			if (T->flags.bLoaded && !T->flags.bLoading)
+			{
+				s_shown[kind][slot] = T;
+				continue;
+			}
+			prefetch(T, now);
+			ref_texture& shown = s_shown[kind][slot];
+			if (shown && shown->flags.bLoaded && !shown->flags.bLoading)
+			{
+				shown->m_last_used = now;
+				T = shown;
+			}
+			else
+				T->Load(); // nothing drawn before (the level's first frame): load it now, waits for a background load
+		}
 	}
 
 	static void sweep(u32 now)
 	{
+		s_loading.erase(std::remove_if(s_loading.begin(), s_loading.end(), [](CTexture* T) { return T->flags.bLoaded && !T->flags.bLoading; }), s_loading.end());
 		if (now < s_next_sweep)
 			return;
 		s_next_sweep = now + 1000;
 		for (ref_texture& T : s_textures)
 		{
-			if (T->m_on_demand && T->flags.bLoaded && !T->flags.bLoading && now - T->m_last_used > kUnusedMs)
+			if (T->m_on_demand && T->flags.bLoaded && !T->flags.bLoading && now - T->m_last_used > kUnusedMs &&
+				std::find(s_loading.begin(), s_loading.end(), &*T) == s_loading.end())
 				T->Unload();
 		}
 	}
 
 	static void clear()
 	{
+		textures_load_tasks.wait();
+		s_loading.clear();
+		for (auto& kind : s_shown)
+			for (ref_texture& T : kind)
+				T = nullptr;
 		s_textures.clear();
 	}
 }
@@ -288,20 +316,11 @@ void dxEnvDescriptorRender::OnDeviceCreate(CEnvDescriptor& owner)
 }
 
 #ifdef USE_DX11
-void dxEnvDescriptorRender::residency(bool now_needed, u32 now)
+void dxEnvDescriptorRender::residency(u32 now)
 {
-	if (now_needed)
-	{
-		sky_on_demand::ensure(sky_texture, now);
-		sky_on_demand::ensure(sky_texture_env, now);
-		sky_on_demand::ensure(clouds_texture, now);
-	}
-	else
-	{
-		sky_on_demand::prefetch(sky_texture, now);
-		sky_on_demand::prefetch(sky_texture_env, now);
-		sky_on_demand::prefetch(clouds_texture, now);
-	}
+	sky_on_demand::prefetch(sky_texture, now);
+	sky_on_demand::prefetch(sky_texture_env, now);
+	sky_on_demand::prefetch(clouds_texture, now);
 }
 #endif
 
@@ -343,13 +362,14 @@ void dxEnvironmentRender::OnFrame(CEnvironment& env)
 	}
 
 #ifdef USE_DX11
-	// Weather textures on demand: the two keyframes drawn now loaded, the next one loading, unused ones unloaded
+	// Weather textures on demand: the two keyframes drawn now and the next one loading in the background, the
+	// mixer drawing what is loaded, unused ones unloaded
 	{
 		const u32 now = Device.dwTimeContinual;
 		for (int i = 0; i < 2; i++)
 		{
 			if (env.Current[i])
-				((dxEnvDescriptorRender*)&*env.Current[i]->m_pDescriptor)->residency(true, now);
+				((dxEnvDescriptorRender*)&*env.Current[i]->m_pDescriptor)->residency(now);
 		}
 		if (env.CurrentWeather && env.Current[1] && !env.CurrentWeather->empty())
 		{
@@ -359,15 +379,14 @@ void dxEnvironmentRender::OnFrame(CEnvironment& env)
 				if (list[i] == env.Current[1])
 				{
 					CEnvDescriptor* next = list[(i + 1) % list.size()];
-					((dxEnvDescriptorRender*)&*next->m_pDescriptor)->residency(false, now);
+					((dxEnvDescriptorRender*)&*next->m_pDescriptor)->residency(now);
 					break;
 				}
 			}
 		}
-		// The mixer's own textures (also set while paused or by other paths)
-		for (auto& it : mixRen.sky_r_textures) sky_on_demand::ensure(it.second, now);
-		for (auto& it : mixRen.sky_r_textures_env) sky_on_demand::ensure(it.second, now);
-		for (auto& it : mixRen.clouds_r_textures) sky_on_demand::ensure(it.second, now);
+		sky_on_demand::resolve(mixRen.sky_r_textures, 0, now);
+		sky_on_demand::resolve(mixRen.sky_r_textures_env, 1, now);
+		sky_on_demand::resolve(mixRen.clouds_r_textures, 2, now);
 		sky_on_demand::sweep(now);
 	}
 #endif
