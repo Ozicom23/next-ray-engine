@@ -74,18 +74,20 @@ bool r_line(CScriptIniFile* self, LPCSTR S, int L, ::luabind::internal_string&N,
 	return (true);
 }
 
-// _g.script's r_string_ex / r_bool_ex / r_float_ex as one call (used by _g_patches.script): false when the section
-// or the line doesn't exist, true when the value is empty (r_string gives nil), else the value. The same checks as
-// the script's section_exist, line_exist and r_string calls, which loading GAMMA's scripts makes ~10^5 times
-::luabind::object r_value_ex(CScriptIniFile* self, LPCSTR S, LPCSTR L)
+// _g.script's r_string_ex / r_bool_ex / r_float_ex as one call (used by _g_patches.script): 0 when the section or
+// the line doesn't exist, 1 when the value is empty (r_string gives nil), 2 and the value. The same checks as the
+// script's section_exist, line_exist and r_string calls, which loading GAMMA's scripts makes ~10^5 times. The value
+// comes back like r_line's (an out value), called as ini:r_value_ex(section, line, "")
+int r_value_ex(CScriptIniFile* self, LPCSTR S, LPCSTR L, ::luabind::internal_string& V)
 {
-	lua_State* state = ai().script_engine().lua();
+	V = "";
 	if (!self->section_exist(S) || !self->line_exist(S, L))
-		return ::luabind::object(state, false);
+		return 0;
 	LPCSTR value = self->r_string(S, L);
 	if (!value)
-		return ::luabind::object(state, true);
-	return ::luabind::object(state, value);
+		return 1;
+	V = value;
+	return 2;
 }
 
 #pragma warning(push)
@@ -214,7 +216,7 @@ void CScriptIniFile::script_register(lua_State* L)
 		.def("r_vector", &CScriptIniFile::r_fvector3)
 		.def("close", &CScriptIniFile::close)
 		.def("r_line", &::r_line, out_value<4>() + out_value<5>())
-		.def("r_value_ex", &::r_value_ex)
+		.def("r_value_ex", &::r_value_ex, out_value<4>())
 
 		// demonized: new exports
 		.def("get_filename", &CScriptIniFile::fname)

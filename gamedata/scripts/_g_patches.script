@@ -211,10 +211,10 @@ if trim_native and str_explode_native then
 			-- r_memoize: def when the section or line doesn't exist; the value, as bool ("true"/"1") or number by type;
 			-- def again when that is nil
 			local function read(ini, s, k, def, typ)
-				local v = r_value_ex(ini, s, k)
-				if v == false then return def end
-				local result = nil -- true: empty value, r_string gives nil
-				if v ~= true then
+				local status, v = r_value_ex(ini, s, k, "")
+				if status == 0 then return def end
+				local result = nil -- 1: empty value, r_string gives nil
+				if status == 2 then
 					result = v
 					if typ == 0 then
 						result = result == "true" or result == "1" or false
