@@ -1004,12 +1004,9 @@ bool CScriptStorage::do_file(LPCSTR caScriptName, LPCSTR caNameSpaceName)
 
 		// Get contents of the script file and split by lines
 		xr_vector<xr_string> tokens;
-		xr_string temp;
-		while (!l_tpFileReader->eof())
-		{
-			char c = l_tpFileReader->r_u8();
-			temp += c;
-		}
+		// The whole file at once (it was read a byte at a time)
+		xr_string temp(scriptContents, scriptLength);
+		l_tpFileReader->seek(l_tpFileReader->length());
 
 		std::stringstream stringStream(std::string(temp.c_str()));
 		xr_string line;
@@ -1025,6 +1022,12 @@ bool CScriptStorage::do_file(LPCSTR caScriptName, LPCSTR caNameSpaceName)
 			Msg("%s", u);
 		}*/
 
+		// Built once: constructing them for every line of every script was most of the time
+		static const std::regex local_function(R"((^local)([\t ]+)(function)([\t ]+)([_a-zA-Z].*)([\t ]*)(\(.*$))");
+		static const std::regex local_variable(R"((^local)([\t ]+)(.*))");
+		static const std::regex comment_after(R"((.*)--.*)");
+		static const std::regex comment_split(R"((.*)(--.*))");
+
 		for (auto& s : tokens) {
 
 			//Msg("%s", s.c_str());
@@ -1034,11 +1037,14 @@ bool CScriptStorage::do_file(LPCSTR caScriptName, LPCSTR caNameSpaceName)
 				continue;
 			}
 
-			std::regex pattern;
+			// Both patterns need the line to start with "local" and a space or tab
+			if (s.size() < 6 || s.compare(0, 5, "local") != 0 || (s[5] != ' ' && s[5] != '\t')) {
+				continue;
+			}
 
 			//local function x(a,b,c)
-			pattern = std::regex(R"((^local)([\t ]+)(function)([\t ]+)([_a-zA-Z].*)([\t ]*)(\(.*$))");
-			if (unlocalRegex(unlocals, s, pattern, 5, "$3$4$5$6$7")) {
+			const std::regex& pattern_function = local_function;
+			if (unlocalRegex(unlocals, s, pattern_function, 5, "$3$4$5$6$7")) {
 				unlocalPerformed = true;
 				continue;
 			}
@@ -1047,14 +1053,14 @@ bool CScriptStorage::do_file(LPCSTR caScriptName, LPCSTR caNameSpaceName)
 			//local a
 			//local a,b,c = ... (if one of a,b,c is in unlocalizers list - all of them will be unlocalized)
 			//local x; local y; - unsupported yet
-			pattern = std::regex(R"((^local)([\t ]+)(.*))");
+			const std::regex& pattern = local_variable;
 			if (std::regex_match(s, pattern)) {
 				std::smatch match;
 				std::regex_search(s, match, pattern);
 				xr_string m = std::string(match[3]).c_str();
 
 				// strip comments
-				std::regex r = std::regex(R"((.*)--.*)");
+				const std::regex& r = comment_after;
 				if (std::regex_match(m, r)) {
 					//Msg("found comments\n");
 					std::smatch noncomments;
@@ -1075,7 +1081,7 @@ bool CScriptStorage::do_file(LPCSTR caScriptName, LPCSTR caNameSpaceName)
 						if (!hasValue) {
 
 							// strip comments
-							std::regex r = std::regex(R"((.*)(--.*))");
+							const std::regex& r = comment_split;
 							if (std::regex_match(s, r)) {
 								//Msg("found comments\n");
 								std::smatch noncomments;
