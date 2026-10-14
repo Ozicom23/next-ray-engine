@@ -188,7 +188,7 @@ if trim_native and str_explode_native then
 			for i = 1, #d do h = (h * 31 + d:byte(i)) % 2147483647 end
 			return #d .. ":" .. h
 		end
-		local r_value_ex = ini_file.r_value_ex
+		-- Called as a method: the function taken from the class table (ini_file.r_value_ex) fails when called
 		local next = next
 		_G.native_g_ini_readers = function()
 			local orig_string, orig_bool, orig_float, orig_line = ini_file.r_string_ex, ini_file.r_bool_ex, ini_file.r_float_ex, ini_file.r_line_ex
@@ -211,7 +211,7 @@ if trim_native and str_explode_native then
 			-- r_memoize: def when the section or line doesn't exist; the value, as bool ("true"/"1") or number by type;
 			-- def again when that is nil
 			local function read(ini, s, k, def, typ)
-				local status, v = r_value_ex(ini, s, k, "")
+				local status, v = ini:r_value_ex(s, k, "")
 				if status == 0 then return def end
 				local result = nil -- 1: empty value, r_string gives nil
 				if status == 2 then
