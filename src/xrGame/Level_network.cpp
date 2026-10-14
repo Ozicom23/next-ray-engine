@@ -151,16 +151,23 @@ void CLevel::net_Stop()
 	else if (IsDemoSave() && !IsDemoInfoSaved())
 		SaveDemoInfo();
 
-	remove_objects();
+	{
+		PROF_EVENT("net_Stop: remove objects");
+		remove_objects();
+	}
 
 	//WARNING ! remove_objects() uses this flag, so position of this line must e here ..
 	game_configured = FALSE;
 
-	IGame_Level::net_Stop();
-	IPureClient::Disconnect();
+	{
+		PROF_EVENT("net_Stop: client");
+		IGame_Level::net_Stop();
+		IPureClient::Disconnect();
+	}
 
 	if (Server)
 	{
+		PROF_EVENT("net_Stop: server");
 		Server->Disconnect();
 		xr_delete(Server);
 	}
@@ -170,7 +177,10 @@ void CLevel::net_Stop()
     Device.LuaGCDebug.clear();
 
 	if (!g_dedicated_server)
+	{
+		PROF_EVENT("net_Stop: Lua garbage collection");
 		ai().script_engine().collect_all_garbage();
+	}
 
 #ifdef DEBUG
 	show_animation_stats		();

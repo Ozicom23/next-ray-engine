@@ -311,6 +311,17 @@ void CLevel::ClientReceive()
 #ifdef DEBUG
 				Msg("--- Changing level message received...");
 #endif // #ifdef DEBUG
+#if XRCORE_PROFILER == PROFILER_NONE
+				// stat_next_load: from here, so unloading the old level is measured too
+				{
+					extern bool g_stat_next_load;
+					if (g_stat_next_load)
+					{
+						g_stat_next_load = false;
+						xr_prof::start_total_capture("level change to the end of the precache frames");
+					}
+				}
+#endif
                 Msg("Device.LuaGC clear");
                 Device.LuaGC.clear();
                 Device.LuaGCDebug.clear();
