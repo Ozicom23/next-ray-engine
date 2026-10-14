@@ -99,13 +99,6 @@ void CDSGraphManager::r_dsgraph_render_graph(RenderQueueArray& queues, u32 _prio
 
         for (auto& packet : queue)
         {
-			// Light shadow cache: static geometry without trees (wind) is cached, the trees drawn each frame
-			if (i_render_trees >= 0)
-			{
-				const bool tree = packet.item.pVisual->Type == MT_TREE_ST || packet.item.pVisual->Type == MT_TREE_PM;
-				if (tree != (i_render_trees == 1))
-					continue;
-			}
             auto& currentKey = packet.sortKey;
             if (currentKey.high != high)
             {

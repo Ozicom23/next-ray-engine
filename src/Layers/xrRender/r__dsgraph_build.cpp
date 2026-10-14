@@ -315,9 +315,6 @@ void CDSGraphManager::r_dsgraph_insert_static(dxRender_Visual *pVisual)
 		return;
 #endif
 
-	if (pVisual->Type == MT_TREE_ST || pVisual->Type == MT_TREE_PM)
-		i_static_trees++;
-
 	// Distortive geometry should be marked and R2 special-cases it
 	// a) Allow to optimize RT order
 	// b) Should be rendered to special distort buffer in another pass

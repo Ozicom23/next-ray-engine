@@ -625,17 +625,6 @@ public:
 namespace hiz { void start_stats(float seconds); }
 extern int ps_r4_hiz_cull;
 namespace tex_stream { void start_stats(float seconds); }
-namespace light_shadow_cache { extern int ps_cache; void start_stats(float seconds); }
-class CCC_LightCacheStats : public IConsole_Command
-{
-public:
-	CCC_LightCacheStats(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; }
-	virtual void Execute(LPCSTR args)
-	{
-		const float seconds = float(atof(args));
-		light_shadow_cache::start_stats(seconds > 0.f ? _min(seconds, 60.f) : 5.f);
-	}
-};
 extern int ps_r4_sky_on_demand;
 class CCC_TexStreamStats : public IConsole_Command
 {
@@ -1473,8 +1462,6 @@ void xrRender_initconsole()
 	CMD4(CCC_Integer, "r4_hiz_cull", &ps_r4_hiz_cull, 0, 1);
 	CMD1(CCC_SunCasterStats, "stat_sun_casters");
 	CMD1(CCC_TexStreamStats, "stat_tex_stream");
-	CMD1(CCC_LightCacheStats, "stat_light_cache");
-	CMD4(CCC_Integer, "r4_light_shadow_cache", &light_shadow_cache::ps_cache, 0, 1);
 	CMD4(CCC_Integer, "r4_sky_on_demand", &ps_r4_sky_on_demand, 0, 1); // read when the weathers are created
 	CMD4(CCC_Integer, "r4_sun_caster_cull", &ps_r4_sun_caster_cull, 0, 1);
 	CMD4(CCC_Integer, "r4_sun_parallel_cull", &ps_r4_sun_parallel_cull, 0, 1);
