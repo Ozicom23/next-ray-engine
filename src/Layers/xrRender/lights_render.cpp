@@ -109,7 +109,7 @@ namespace light_shadow_cache
 	{
 		key.clear();
 		for (const batch_light& b : batch)
-			key.push_back({ b.L, b.L->m_static_version, b.L->X.S.posX, b.L->X.S.posY, int(b.L->X.S.size), b.L->X.S.combine });
+			key.push_back({ b.L, b.L->m_static_version, int(b.L->X.S.posX), int(b.L->X.S.posY), int(b.L->X.S.size), b.L->X.S.combine });
 	}
 
 	static bool same(const xr_vector<key_entry>& a, const xr_vector<key_entry>& b)
