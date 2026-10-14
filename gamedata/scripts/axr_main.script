@@ -303,6 +303,7 @@ end
 -- dispatch around them, then writes the per frame averages to the log. Off, it costs one check per callback.
 -----------------------------------------------------------
 local prof = nil
+local sample_first_update = nil
 
 local function prof_timer(tbl, key)
 	local t = tbl[key]
@@ -402,7 +403,51 @@ local function make_callback_profiled(name, ...)
 	end
 end
 
+-- Where Lua code spends its time, by source line and function: sampled every 1000 Lua instructions, the time since
+-- the last sample counted for the current place (time in engine functions goes to the line that called them)
+function sampler_start()
+	local sampler = { lines = {}, funcs = {}, clock = profile_timer(), last = 0 }
+	sampler.clock:start()
+	debug.sethook(function()
+		sampler.clock:stop()
+		local now = sampler.clock:time()
+		sampler.clock:start()
+		local dt = now - sampler.last
+		sampler.last = now
+		local info = debug.getinfo(2, "Sln")
+		if info then
+			local line = info.short_src .. ":" .. tostring(info.currentline)
+			local func = info.short_src .. ":" .. tostring(info.linedefined) .. " " .. tostring(info.name)
+			sampler.lines[line] = (sampler.lines[line] or 0) + dt
+			sampler.funcs[func] = (sampler.funcs[func] or 0) + dt
+		end
+	end, "", 1000)
+	return sampler
+end
+
+function sampler_report(sampler, title)
+	debug.sethook()
+	local function top(tbl, what)
+		local list = {}
+		for k, v in pairs(tbl) do list[#list + 1] = { k = k, v = v } end
+		table.sort(list, function(a, b) return a.v > b.v end)
+		log(string.format("* [axr_main] %s, %s:", title, what))
+		for i = 1, math.min(30, #list) do
+			log(string.format("*   %8.1f ms  %s", list[i].v / 1000, list[i].k))
+		end
+	end
+	top(sampler.funcs, "by function")
+	top(sampler.lines, "by line")
+end
+
 function make_callback(name,...)
+	if (sample_first_update and name == "actor_on_first_update") then
+		sample_first_update = nil
+		local sampler = sampler_start()
+		make_callback(name, ...)
+		sampler_report(sampler, "actor_on_first_update profile")
+		return
+	end
 	if (prof and intercepts[name]) then
 		return make_callback_profiled(name, ...)
 	end
@@ -461,24 +506,11 @@ function on_game_start()
 	if cb_marker then
 		cb_marker:close()
 		lua_profile_load(120)
+		-- and actor_on_first_update by source line
+		sample_first_update = debug and debug.sethook and true
 	end
 	if (marker and debug and debug.sethook) then
-		sampler = { lines = {}, funcs = {}, clock = profile_timer(), last = 0 }
-		sampler.clock:start()
-		debug.sethook(function()
-			sampler.clock:stop()
-			local now = sampler.clock:time()
-			sampler.clock:start()
-			local dt = now - sampler.last
-			sampler.last = now
-			local info = debug.getinfo(2, "Sln")
-			if info then
-				local line = info.short_src .. ":" .. tostring(info.currentline)
-				local func = info.short_src .. ":" .. tostring(info.linedefined) .. " " .. tostring(info.name)
-				sampler.lines[line] = (sampler.lines[line] or 0) + dt
-				sampler.funcs[func] = (sampler.funcs[func] or 0) + dt
-			end
-		end, "", 1000)
+		sampler = sampler_start()
 	end
 	for	it=0, f_cnt-1 do
 		local file = flist:GetAt(it)
@@ -494,18 +526,7 @@ function on_game_start()
 	end
 	load_timer:stop()
 	if sampler then
-		debug.sethook()
-		local function top(tbl, title)
-			local list = {}
-			for k, v in pairs(tbl) do list[#list + 1] = { k = k, v = v } end
-			table.sort(list, function(a, b) return a.v > b.v end)
-			log(string.format("* [axr_main] load profile, %s:", title))
-			for i = 1, math.min(30, #list) do
-				log(string.format("*   %8.1f ms  %s", list[i].v / 1000, list[i].k))
-			end
-		end
-		top(sampler.funcs, "by function")
-		top(sampler.lines, "by line")
+		sampler_report(sampler, "load profile")
 	end
 	local start_timers = {}
 	local start_total = profile_timer()

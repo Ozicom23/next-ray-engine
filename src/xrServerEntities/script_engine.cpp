@@ -391,7 +391,10 @@ void CScriptEngine::init()
 	invalidate_functor_cache();
 #endif
 
-	CScriptStorage::reinit();
+	{
+		PROF_EVENT("script init: new Lua state");
+		CScriptStorage::reinit();
+	}
 
 #ifdef USE_LUA_STUDIO
     if (m_lua_studio_world || Core.ParamsData.test(ECoreParams::lua_studio) {
@@ -409,11 +412,14 @@ void CScriptEngine::init()
     }
 #endif // #ifdef USE_LUA_STUDIO
 
-	::luabind::open(lua());
-	::luabind::bind_class_info(lua());
-	setup_callbacks();
-	export_classes(lua());
-	setup_auto_load();
+	{
+		PROF_EVENT("script init: engine classes for Lua");
+		::luabind::open(lua());
+		::luabind::bind_class_info(lua());
+		setup_callbacks();
+		export_classes(lua());
+		setup_auto_load();
+	}
 
 #ifdef DEBUG
     m_stack_is_ready					= true;
@@ -433,14 +439,23 @@ void CScriptEngine::init()
 	unlocalizerPassed = false;
 	bool save = m_reload_modules;
 	m_reload_modules = true;
-	process_file_if_exists("_G", false);
+	{
+		PROF_EVENT("script init: _G");
+		process_file_if_exists("_G", false);
+	}
 	m_reload_modules = save;
 
-	register_script_classes();
-	object_factory().register_script();
+	{
+		PROF_EVENT("script init: script classes");
+		register_script_classes();
+		object_factory().register_script();
+	}
 
 #ifdef XRGAME_EXPORTS
-	load_common_scripts();
+	{
+		PROF_EVENT("script init: common scripts");
+		load_common_scripts();
+	}
 #endif
 	m_stack_level = lua_gettop(lua());
 	

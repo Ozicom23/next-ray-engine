@@ -20,13 +20,16 @@ void CLevel::cl_Process_Spawn(NET_Packet& P)
 	//Msg("cl_Process_Spawn spawning %s", s_name.c_str());
 
 	// Create DC (xrSE)
-	CSE_Abstract* E = F_entity_Create(*s_name);
-	R_ASSERT2(E, *s_name);
+	CSE_Abstract* E;
+	{
+		PROF_EVENT("spawn: server entity");
+		E = F_entity_Create(*s_name);
+		R_ASSERT2(E, *s_name);
 
-
-	E->Spawn_Read(P);
-	if (E->s_flags.is(M_SPAWN_UPDATE))
-		E->UPDATE_Read(P);
+		E->Spawn_Read(P);
+		if (E->s_flags.is(M_SPAWN_UPDATE))
+			E->UPDATE_Read(P);
+	}
 
 	if (!E->match_configuration())
 	{
@@ -109,7 +112,11 @@ void CLevel::g_sv_Spawn(CSE_Abstract* E)
 
 	// Client spawn
 	//	T.Start		();
-	CObject* O = Objects.Create(*E->s_name);
+	CObject* O;
+	{
+		PROF_EVENT("spawn: create object");
+		O = Objects.Create(*E->s_name);
+	}
 	// Msg				("--spawn--CREATE: %f ms",1000.f*T.GetAsync());
 
 	//	T.Start		();
@@ -123,7 +130,12 @@ void CLevel::g_sv_Spawn(CSE_Abstract* E)
         return;
     }
 
-	if (!O->net_Spawn(E))
+	bool spawned;
+	{
+		PROF_EVENT("spawn: net_Spawn");
+		spawned = !!O->net_Spawn(E);
+	}
+	if (!spawned)
 	{
         Msg("! Failed to spawn entity '%s', net_Spawn failed", *E->s_name);
 		O->net_Destroy();
@@ -188,6 +200,7 @@ void CLevel::g_sv_Spawn(CSE_Abstract* E)
 			GEN.write_start();
 			GEN.read_start();
 			GEN.w_u16(u16(O->ID()));
+			PROF_EVENT("spawn: take ownership");
 			cl_Process_Event(E->ID_Parent, GE_OWNERSHIP_TAKE, GEN);
 			//*/
 		}

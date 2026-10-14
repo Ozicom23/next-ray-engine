@@ -304,6 +304,7 @@ void CALifeUpdateManager::load(LPCSTR game_name, bool no_assert, bool new_only)
 #endif
 	//	g_pGamePersistent->LoadTitle		("st_server_connecting");
 	g_pGamePersistent->LoadTitle(true, g_pGameLevel->name());
+	PROF_EVENT("Load Alife Simulator: wait for the level");
 	level_load.wait();
 }
 
