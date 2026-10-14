@@ -592,6 +592,20 @@ bool ignore_path(const char* _path)
 	return GetFileAttributes(_path) == INVALID_FILE_ATTRIBUTES;
 }
 
+// stat_script_load: time of the forced rescans (file_list_open_ex) by part
+XRCORE_API u64 g_fs_rescan_enum = 0, g_fs_rescan_check = 0, g_fs_rescan_register = 0;
+XRCORE_API u32 g_fs_rescan_files = 0, g_fs_rescan_checked = 0;
+
+// Names of only printable ASCII characters (no '?') come back from FindNextFile as they are, so a file with such a name
+// exists: the check is for names with other characters, which the ANSI functions can turn into another name
+static bool needs_existence_check(const char* name)
+{
+	for (const unsigned char* c = (const unsigned char*)name; *c; c++)
+		if (*c < 0x20 || *c >= 0x7f || *c == '?')
+			return true;
+	return false;
+}
+
 bool CLocatorAPI::Recurse(const char* path)
 {
 	string_path scanPath;
@@ -609,15 +623,25 @@ bool CLocatorAPI::Recurse(const char* path)
 	rec_files.reserve(256);
 	size_t oldSize = rec_files.size();
 	intptr_t done = handle;
+	const bool timed = m_Flags.test(flNeedCheck);
+	u64 t_check = 0;
+	const u64 t_begin = timed ? CPU::QPC() : 0;
 	while (done != -1)
 	{
 		string1024 fullPath;
 		bool ignore = false;
 		if (m_Flags.test(flNeedCheck))
 		{
-			xr_strcpy(fullPath, sizeof(fullPath), path);
-			xr_strcat(fullPath, findData.name);
-			ignore = ignore_name(findData.name) || ignore_path(fullPath);
+			ignore = ignore_name(findData.name);
+			if (!ignore && needs_existence_check(findData.name))
+			{
+				const u64 t0 = CPU::QPC();
+				xr_strcpy(fullPath, sizeof(fullPath), path);
+				xr_strcat(fullPath, findData.name);
+				ignore = ignore_path(fullPath);
+				t_check += CPU::QPC() - t0;
+				g_fs_rescan_checked++;
+			}
 		}
 		else
 		{
@@ -629,12 +653,21 @@ bool CLocatorAPI::Recurse(const char* path)
 	}
 	_findclose(handle);
 	size_t newSize = rec_files.size();
+	const u64 t_enumerated = timed ? CPU::QPC() : 0;
 	if (newSize > oldSize)
 	{
 		std::sort(rec_files.begin() + oldSize, rec_files.end(), pred_str_ff);
 		for (size_t i = oldSize; i < newSize; i++)
 			ProcessOne(path, rec_files[i]);
 		rec_files.erase(rec_files.begin() + oldSize, rec_files.end());
+	}
+	if (timed)
+	{
+		// Subfolders recurse from ProcessOne: their time is in this one's registering too
+		g_fs_rescan_enum += t_enumerated - t_begin - t_check;
+		g_fs_rescan_check += t_check;
+		g_fs_rescan_register += CPU::QPC() - t_enumerated;
+		g_fs_rescan_files += u32(newSize - oldSize);
 	}
 	// insert self
 	if (path && path[0] != 0)

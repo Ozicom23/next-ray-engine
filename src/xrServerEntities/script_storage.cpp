@@ -927,6 +927,8 @@ static bool unlocalRegex(xr_set<xr_string>& unlocals, xr_string& s, const std::r
 extern u32 g_file_list_ex_calls; // fs_registrator_script.cpp
 extern u64 g_file_list_ex_rescan, g_file_list_ex_list;
 #endif
+XRCORE_API extern u64 g_fs_rescan_enum, g_fs_rescan_check, g_fs_rescan_register; // LocatorAPI.cpp
+XRCORE_API extern u32 g_fs_rescan_files, g_fs_rescan_checked;
 
 // stat_script_load: where the time of loading scripts goes (a level load runs every script again)
 namespace script_load_stats
@@ -951,6 +953,10 @@ namespace script_load_stats
 		g_file_list_ex_calls = 0;
 		g_file_list_ex_rescan = g_file_list_ex_list = 0;
 #endif
+		Msg("* [Script load] forced rescans: %u entries, enumerating %.0f ms, existence checks %.0f ms (%u), registering %.0f ms",
+			g_fs_rescan_files, ms(g_fs_rescan_enum), ms(g_fs_rescan_check), g_fs_rescan_checked, ms(g_fs_rescan_register));
+		g_fs_rescan_enum = g_fs_rescan_check = g_fs_rescan_register = 0;
+		g_fs_rescan_files = g_fs_rescan_checked = 0;
 		std::sort(per_file.begin(), per_file.end(), [](const file_time& a, const file_time& b) { return a.total > b.total; });
 		for (size_t i = 0; i < per_file.size() && i < 25; i++)
 			Msg("*   %-48s %7.1f ms (unlocalize %.1f, run %.1f)", per_file[i].name.c_str(), ms(per_file[i].total),
