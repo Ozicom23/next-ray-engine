@@ -1863,14 +1863,12 @@ BOOL CInifile::r_line(LPCSTR S, int L, const char** N, const char** V) const
 {
 	Sect& SS = r_section(S);
 	if (L >= (int)SS.Data.size() || L < 0) return FALSE;
-	for (SectCIt I = SS.Data.begin(); I != SS.Data.end(); I++)
-		if (!(L--))
-		{
-			*N = *I->first;
-			*V = *I->second;
-			return TRUE;
-		}
-	return FALSE;
+	// Data is a vector: the line by index directly (scripts reading every line of a section walked it from the
+	// start for each one)
+	const Item& I = SS.Data[L];
+	*N = *I.first;
+	*V = *I.second;
+	return TRUE;
 }
 
 BOOL CInifile::r_line(const shared_str& S, int L, const char** N, const char** V) const

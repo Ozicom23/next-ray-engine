@@ -128,15 +128,24 @@ public:
 	void Sort(u32 flags);
 };
 
+// stat_script_load: getFS():file_list_open_ex calls (each rescans its folder on disk) and their time
+u32 g_file_list_ex_calls = 0;
+u64 g_file_list_ex_rescan = 0, g_file_list_ex_list = 0;
+
 FS_file_list_ex::FS_file_list_ex(LPCSTR path, u32 flags, LPCSTR mask)
 {
+	const u64 t_begin = CPU::QPC();
 	FS_Path* P = FS.get_path(path);
 	P->m_Flags.set(FS_Path::flNeedRescan,TRUE);
 	FS.m_Flags.set(CLocatorAPI::flNeedCheck,TRUE);
 	FS.rescan_pathes();
+	const u64 t_rescanned = CPU::QPC();
 
 	FS_FileSet files;
 	FS.file_list(files, path, flags, mask);
+	g_file_list_ex_calls++;
+	g_file_list_ex_rescan += t_rescanned - t_begin;
+	g_file_list_ex_list += CPU::QPC() - t_rescanned;
 
 	for (FS_FileSetIt it = files.begin(); it != files.end(); ++it)
 	{

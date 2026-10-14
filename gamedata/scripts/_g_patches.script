@@ -65,6 +65,36 @@ _G.printf_xrscript = function(fmt, ...)
 end
 
 -- UTILS
+-- str_explode with limit on items to split
+-- n is the amount of times to split
+-- str_explode("1,2,3,4", ",", 1) = {"1", "2,3,4"}
+_G.str_explode_lim = function(str, sep, n, plain)
+	local n = n or math_huge
+	if not (str and sep) then
+		printe("!ERROR str_explode | missing parameter str = %s, sep = %s",str,sep)
+		callstack()
+	end
+	if not (sep ~= "" and string_find(str,sep,1,plain) and n > 0) then
+		return { str }
+	end
+	local t = {}
+	local rest = {}
+	local size = 0
+	for s in str:gsplit(sep,plain) do 
+		size = size + 1
+		if size > n then
+			rest[#rest + 1] = s
+		else
+			t[size] = trim(s)
+		end
+	end
+	if is_not_empty(rest) then
+		local rest_s = table_concat(rest, sep)
+		t[#t + 1] = rest_s
+	end
+	return t
+end
+
 -- trim and str_explode from _g.script, done by the engine when it can (str_explode_native, trim_native): same
 -- results for string arguments and separators without pattern characters, which is nearly every call. Loading
 -- GAMMA's scripts on every level load spent most of its time in these two.
@@ -123,41 +153,120 @@ if trim_native and str_explode_native then
 			return lua_str_explode(str, sep, plain)
 		end
 	end
+	local lua_str_explode_lim = _G.str_explode_lim
+	if str_explode_lim_native then
+		_G.str_explode_lim = function(str, sep, n, plain)
+			local lim = n or math_huge
+			if type(str) == "string" and type(sep) == "string" and type(lim) == "number" and (plain or is_literal(sep)) then
+				local r = str_explode_lim_native(str, sep, lim)
+				if check then
+					check.calls = check.calls + 1
+					local l = lua_str_explode_lim(str, sep, n, plain)
+					local same = #r == #l
+					for i = 1, #r do
+						if r[i] ~= l[i] then same = false end
+					end
+					if not same then report(string_format("str_explode_lim(%q, %q, %s)", str, sep, tostring(n)), table_concat(r, "|"), table_concat(l, "|")) end
+				end
+				return r
+			end
+			return lua_str_explode_lim(str, sep, n, plain)
+		end
+	end
+
+	-- _g.script's ini readers (r_string_ex, r_bool_ex, r_float_ex, r_line_ex) with one engine call (ini_file.r_value_ex)
+	-- instead of section_exist, line_exist and r_string, and without building a cache key for every read. axr_main
+	-- runs _g.script a second time, as the namespace _g (its ignore list has "_G.script", the file list is lower case),
+	-- which puts _g's readers back over the ones above; axr_main calls this right after that. Only when the functions
+	-- are exactly the known ones (same bytecode): then the results are the same. Their cache is never filled (it only
+	-- stores keys that are already in it), a cache that has entries anyway goes to the original functions.
+	if ini_file.r_value_ex then
+		local function fingerprint(f)
+			local ok, d = pcall(string.dump, f, true)
+			if not ok then return "" end
+			local h = 0
+			for i = 1, #d do h = (h * 31 + d:byte(i)) % 2147483647 end
+			return #d .. ":" .. h
+		end
+		local r_value_ex = ini_file.r_value_ex
+		local next = next
+		_G.native_g_ini_readers = function()
+			local orig_string, orig_bool, orig_float, orig_line = ini_file.r_string_ex, ini_file.r_bool_ex, ini_file.r_float_ex, ini_file.r_line_ex
+			local up_name, r_memoize = debug.getupvalue(orig_string, 1)
+			if not (up_name == "r_memoize" and fingerprint(r_memoize) == "425:460674565" and fingerprint(orig_string) == "40:1080281121"
+				and fingerprint(orig_bool) == "44:2027270283" and fingerprint(orig_float) == "44:219816218"
+				and fingerprint(orig_line) == "266:1801200648" and select(2, debug.getupvalue(orig_bool, 1)) == r_memoize
+				and select(2, debug.getupvalue(orig_float, 1)) == r_memoize) then
+				log(string_format("* [_g_patches] _g.script's ini readers are not the known ones (%s %s %s %s %s), kept",
+					fingerprint(r_memoize), fingerprint(orig_string), fingerprint(orig_bool), fingerprint(orig_float), fingerprint(orig_line)))
+				return
+			end
+			-- ini_cache is a global of the namespace _g (unlocalizer_modded_exes_global.ltx)
+			local env = getfenv(r_memoize)
+			local function cache_empty(ini)
+				local c = env.ini_cache
+				local t = c and c[ini]
+				return t == nil or next(t) == nil
+			end
+			-- r_memoize: def when the section or line doesn't exist; the value, as bool ("true"/"1") or number by type;
+			-- def again when that is nil
+			local function read(ini, s, k, def, typ)
+				local v = r_value_ex(ini, s, k)
+				if v == false then return def end
+				local result = nil -- true: empty value, r_string gives nil
+				if v ~= true then
+					result = v
+					if typ == 0 then
+						result = result == "true" or result == "1" or false
+					elseif typ == 1 then
+						result = tonumber(result)
+					end
+				end
+				return result == nil and def or result
+			end
+			local function reader(orig, typ)
+				return function(ini, s, k, def)
+					if type(s) == "string" and type(k) == "string" and type(ini) == "userdata" and cache_empty(ini) then
+						local r = read(ini, s, k, def, typ)
+						if check then
+							check.calls = check.calls + 1
+							local l = orig(ini, s, k, def)
+							if r ~= l then report(string_format("ini read %s [%s] %s (def %s, type %s)", tostring(ini.get_filename and ini:get_filename()), s, k, tostring(def), tostring(typ)), r, l) end
+						end
+						return r
+					end
+					return orig(ini, s, k, def)
+				end
+			end
+			ini_file.r_string_ex = reader(orig_string, nil)
+			ini_file.r_bool_ex = reader(orig_bool, 0)
+			ini_file.r_float_ex = reader(orig_float, 1)
+			ini_file.r_line_ex = function(ini, s, k)
+				if type(s) == "string" and type(k) == "number" and type(ini) == "userdata" then
+					-- As the original: an (empty) cache table for this ini
+					local c = env.ini_cache
+					if c and not c[ini] then c[ini] = {} end
+					if c and next(c[ini]) == nil then
+						if check then
+							check.calls = check.calls + 1
+							local a, b, d = ini:r_line(s, k, "", "")
+							local la, lb, ld = orig_line(ini, s, k)
+							if a ~= la or b ~= lb or d ~= ld then report(string_format("r_line_ex [%s] %d", s, k), a, la) end
+							return a, b, d
+						end
+						return ini:r_line(s, k, "", "")
+					end
+				end
+				return orig_line(ini, s, k)
+			end
+			log("* [_g_patches] _g.script's ini readers through the engine (r_value_ex)")
+		end
+	end
 	if check then
 		_G.str_native_check_report = function()
 			log(string_format("* [str_native_check] %d calls compared, %d differed", check.calls, check.diffs))
 		end
 	end
-end
-
--- str_explode with limit on items to split
--- n is the amount of times to split
--- str_explode("1,2,3,4", ",", 1) = {"1", "2,3,4"}
-_G.str_explode_lim = function(str, sep, n, plain)
-	local n = n or math_huge
-	if not (str and sep) then
-		printe("!ERROR str_explode | missing parameter str = %s, sep = %s",str,sep)
-		callstack()
-	end
-	if not (sep ~= "" and string_find(str,sep,1,plain) and n > 0) then
-		return { str }
-	end
-	local t = {}
-	local rest = {}
-	local size = 0
-	for s in str:gsplit(sep,plain) do 
-		size = size + 1
-		if size > n then
-			rest[#rest + 1] = s
-		else
-			t[size] = trim(s)
-		end
-	end
-	if is_not_empty(rest) then
-		local rest_s = table_concat(rest, sep)
-		t[#t + 1] = rest_s
-	end
-	return t
 end
 
 -- Inserts character into string

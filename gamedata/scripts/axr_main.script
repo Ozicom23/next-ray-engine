@@ -518,7 +518,12 @@ function on_game_start()
 		--printf("%s size=%s",file_name,file:Size())
 		if (file:Size() > 0 and ignore[file_name] ~= true) then
 			file_name = file_name:sub(0,file_name:len()-7)
-			if (_G[file_name] and _G[file_name].on_game_start) then
+			local script = _G[file_name]
+			-- That ran _g.script again (as the namespace _g): its ini readers through the engine from here (_g_patches)
+			if (file_name == "_g" and native_g_ini_readers) then
+				native_g_ini_readers()
+			end
+			if (script and script.on_game_start) then
 				size_t = size_t + 1 
 				t[size_t] = file_name -- load all scripts first
 			end

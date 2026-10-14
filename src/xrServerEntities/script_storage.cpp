@@ -376,6 +376,45 @@ namespace native_strings
 		lua_rawseti(L, -2, i);
 		return 1;
 	}
+
+	// str_explode_lim of _g_patches.script: the first n pieces trimmed, then the rest of the string as one piece as
+	// it is (the Lua code joins the remaining pieces with the separator again); the string itself when the separator
+	// isn't in it or n isn't above 0
+	int str_explode_lim_native(lua_State* L)
+	{
+		size_t n, m;
+		const char* s = luaL_checklstring(L, 1, &n);
+		const char* sep = luaL_checklstring(L, 2, &m);
+		const lua_Number lim = luaL_checknumber(L, 3);
+		const char* hit = find(s, n, 0, sep, m);
+		if (!hit || !(lim > 0))
+		{
+			lua_createtable(L, 1, 0);
+			lua_pushlstring(L, s, n);
+			lua_rawseti(L, -2, 1);
+			return 1;
+		}
+		lua_createtable(L, 8, 0);
+		int i = 1;
+		size_t start = 0;
+		for (;;)
+		{
+			if (lua_Number(i) > lim)
+			{
+				lua_pushlstring(L, s + start, n - start);
+				lua_rawseti(L, -2, i);
+				break;
+			}
+			const size_t end = hit ? size_t(hit - s) : n;
+			push_trimmed(L, s + start, end - start);
+			lua_rawseti(L, -2, i++);
+			if (!hit)
+				break;
+			start = end + m;
+			hit = find(s, n, start, sep, m);
+		}
+		return 1;
+	}
 }
 extern lua_CFunction luaopen_socket_core_init();
 extern void pdebug_init_init(lua_State* L);
@@ -511,6 +550,7 @@ void CScriptStorage::reinit()
 	luaopen_lua_extensions(lua(), isDebugEnabled);
 	lua_register(lua(), "trim_native", native_strings::trim_native);
 	lua_register(lua(), "str_explode_native", native_strings::str_explode_native);
+	lua_register(lua(), "str_explode_lim_native", native_strings::str_explode_lim_native);
 	disable_os_funcs(lua());
 
 	if (isDebugEnabled)
@@ -883,6 +923,11 @@ static bool unlocalRegex(xr_set<xr_string>& unlocals, xr_string& s, const std::r
 	return false;
 };
 
+#ifdef XRGAME_EXPORTS
+extern u32 g_file_list_ex_calls; // fs_registrator_script.cpp
+extern u64 g_file_list_ex_rescan, g_file_list_ex_list;
+#endif
+
 // stat_script_load: where the time of loading scripts goes (a level load runs every script again)
 namespace script_load_stats
 {
@@ -900,6 +945,12 @@ namespace script_load_stats
 	{
 		Msg("* [Script load] %u files since the last report: read %.0f ms, unlocalize %.0f ms (%u files, reading their lists %.0f ms),"
 			" compile %.0f ms, run %.0f ms", files, ms(t_read), ms(t_unlocal), unlocal_files, ms(t_unlocalizers), ms(t_compile), ms(t_run));
+#ifdef XRGAME_EXPORTS
+		Msg("* [Script load] file_list_open_ex: %u calls, rescanning their folders %.0f ms, listing %.0f ms", g_file_list_ex_calls,
+			ms(g_file_list_ex_rescan), ms(g_file_list_ex_list));
+		g_file_list_ex_calls = 0;
+		g_file_list_ex_rescan = g_file_list_ex_list = 0;
+#endif
 		std::sort(per_file.begin(), per_file.end(), [](const file_time& a, const file_time& b) { return a.total > b.total; });
 		for (size_t i = 0; i < per_file.size() && i < 25; i++)
 			Msg("*   %-48s %7.1f ms (unlocalize %.1f, run %.1f)", per_file[i].name.c_str(), ms(per_file[i].total),
