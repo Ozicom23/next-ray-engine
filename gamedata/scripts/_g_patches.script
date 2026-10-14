@@ -80,10 +80,24 @@ if trim_native and str_explode_native then
 		end
 		return l
 	end
+	-- With the file appdata\str_native_check present every call runs both versions and logs where they differ
+	local check = getFS():exist("$app_data_root$", "str_native_check") and { calls = 0, diffs = 0 }
+	local function report(what, a, b)
+		check.diffs = check.diffs + 1
+		if check.diffs <= 20 then
+			log(string_format("! [str_native_check] %s differs: native %s, lua %s", what, tostring(a), tostring(b)))
+		end
+	end
 	if lua_trim then
 		_G.trim = function(s)
 			if type(s) == "string" then
-				return trim_native(s)
+				local r = trim_native(s)
+				if check then
+					check.calls = check.calls + 1
+					local l = lua_trim(s)
+					if r ~= l then report(string_format("trim(%q)", s), r, l) end
+				end
+				return r
 			end
 			return lua_trim(s)
 		end
@@ -91,9 +105,24 @@ if trim_native and str_explode_native then
 	if lua_str_explode then
 		_G.str_explode = function(str, sep, plain)
 			if type(str) == "string" and type(sep) == "string" and (plain or is_literal(sep)) then
-				return str_explode_native(str, sep)
+				local r = str_explode_native(str, sep)
+				if check then
+					check.calls = check.calls + 1
+					local l = lua_str_explode(str, sep, plain)
+					local same = #r == #l
+					for i = 1, #r do
+						if r[i] ~= l[i] then same = false end
+					end
+					if not same then report(string_format("str_explode(%q, %q)", str, sep), table_concat(r, "|"), table_concat(l, "|")) end
+				end
+				return r
 			end
 			return lua_str_explode(str, sep, plain)
+		end
+	end
+	if check then
+		_G.str_native_check_report = function()
+			log(string_format("* [str_native_check] %d calls compared, %d differed", check.calls, check.diffs))
 		end
 	end
 end
