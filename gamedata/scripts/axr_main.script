@@ -434,6 +434,9 @@ function on_game_start()
 	local f	= getFS()
 	local flist = f:file_list_open_ex("$game_scripts$",bit_or(FS.FS_ListFiles,FS.FS_RootOnly),"*.script")
 	local f_cnt = flist:Size()
+	-- Load time on every level load (it runs all scripts again): loading them, then each one's on_game_start
+	local load_timer = profile_timer()
+	load_timer:start()
 	for	it=0, f_cnt-1 do
 		local file = flist:GetAt(it)
 		local file_name = file:NameShort()
@@ -446,10 +449,26 @@ function on_game_start()
 			end
 		end
 	end
+	load_timer:stop()
+	local start_timers = {}
+	local start_total = profile_timer()
+	start_total:start()
 	for i=1,#t do
 		--printf("%s.on_game_start()",t[i])
+		local timer = profile_timer()
+		timer:start()
 		_G[ t[i] ].on_game_start()
+		timer:stop()
+		start_timers[#start_timers + 1] = { name = t[i], us = timer:time() }
 	end
+	start_total:stop()
+	table.sort(start_timers, function(a, b) return a.us > b.us end)
+	local top = {}
+	for i = 1, math.min(8, #start_timers) do
+		top[#top + 1] = string.format("%s %.0f", start_timers[i].name, start_timers[i].us / 1000)
+	end
+	log(string.format("* [axr_main] scripts loaded in %.0f ms, %d on_game_start in %.0f ms, slowest (ms): %s",
+		load_timer:time() / 1000, #t, start_total:time() / 1000, table.concat(top, ", ")))
 end
 
 ------------------

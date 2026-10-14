@@ -821,8 +821,10 @@ namespace script_load_stats
 {
 	u64 t_read = 0, t_unlocal = 0, t_compile = 0, t_run = 0, t_unlocalizers = 0;
 	u32 files = 0, unlocal_files = 0;
+	// Times are the script's own: scripts it loads while it runs (first use of their names) count for them
 	struct file_time { xr_string name; u64 total, unlocal, run; };
 	xr_vector<file_time> per_file;
+	xr_vector<u64> nested; // per do_file on the stack: time of the do_files it ran
 
 	inline u64 now() { return CPU::QPC(); }
 	inline double ms(u64 t) { return double(t) * 1000.0 / double(CPU::qpc_freq); }
@@ -848,6 +850,7 @@ bool CScriptStorage::do_file(LPCSTR caScriptName, LPCSTR caNameSpaceName)
 {
 	using namespace script_load_stats;
 	const u64 t_begin = now();
+	nested.push_back(0);
 	if (!unlocalizerPassed) {
 		auto file_list = FS.file_list_open("$game_config$", "unlocalizers\\", FS_RootOnly | FS_ListFiles);
 		if (!file_list) {
@@ -913,6 +916,7 @@ bool CScriptStorage::do_file(LPCSTR caScriptName, LPCSTR caNameSpaceName)
 	if (!l_tpFileReader)
 	{
 		script_log(eLuaMessageTypeError, "Cannot open file \"%s\"", caScriptName);
+		nested.pop_back();
 		return (false);
 	}
 
@@ -1047,6 +1051,7 @@ bool CScriptStorage::do_file(LPCSTR caScriptName, LPCSTR caNameSpaceName)
 		//		VERIFY		(lua_gettop(lua()) == start - 3);
 		lua_settop(lua(), start);
 		FS.r_close(l_tpFileReader);
+		nested.pop_back();
 		return (false);
 	}
 	FS.r_close(l_tpFileReader);
@@ -1069,9 +1074,14 @@ bool CScriptStorage::do_file(LPCSTR caScriptName, LPCSTR caNameSpaceName)
 	int l_iErrorCode = lua_pcall(lua(), 0, 0, (-1 == errFuncId) ? 0 : errFuncId); // new_Andy
 	{
 		const u64 t_end = now();
-		t_run += t_end - t_compiled;
+		const u64 inner = nested.back();
+		nested.pop_back();
+		if (!nested.empty())
+			nested.back() += t_end - t_begin;
+		const u64 run = t_end - t_compiled > inner ? t_end - t_compiled - inner : 0;
+		t_run += run;
 		files++;
-		per_file.push_back({ xr_string(caNameSpaceName ? caNameSpaceName : caScriptName), t_end - t_begin, t_unlocalized - t_opened, t_end - t_compiled });
+		per_file.push_back({ xr_string(caNameSpaceName ? caNameSpaceName : caScriptName), t_end - t_begin - inner, t_unlocalized - t_opened, run });
 	}
 	//	luaJIT_setmode	(lua(),0,LUAJIT_MODE_ENGINE|LUAJIT_MODE_ON);						// Oles
 
