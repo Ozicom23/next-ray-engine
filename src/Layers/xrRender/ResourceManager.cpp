@@ -394,7 +394,8 @@ void CResourceManager::DeferredUpload()
 	xr_parallel_foreach(m_textures.begin(), m_textures.end(), [](auto& pair)
 	{
 		if (this_thread_id != GetCurrentThreadId()) { PROF_THREAD("X-Ray PPL Thread") }
-		pair.second->Load();
+		if (!pair.second->m_on_demand)
+			pair.second->Load();
 	});
 
 	Msg("texture loading time: %d", timer.GetElapsed_ms());

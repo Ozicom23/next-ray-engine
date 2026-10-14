@@ -167,8 +167,83 @@ void dxEnvDescriptorMixerRender::lerp(IEnvDescriptorRender* inA, IEnvDescriptorR
 	clouds_r_textures.push_back(mk_pair(1, pB->clouds_texture));
 }
 
+#ifdef USE_DX11
+// Weather sky textures on demand (r4_sky_on_demand): GAMMA's weathers have ~1.2 GB of uncompressed sky textures for
+// every weather and hour, and two keyframes are drawn at a time. They are created unloaded; each frame the current
+// keyframes' textures are made sure loaded (loaded now if they weren't: a short stall, as on a forced weather change),
+// the next keyframe's are loaded in the background, and ones not used for a while are unloaded.
+int ps_r4_sky_on_demand = 1;
+extern thread_local bool g_texture_create_on_demand;
+extern xr_task_group textures_load_tasks;
+
+namespace sky_on_demand
+{
+	static xr_vector<ref_texture> s_textures; // every weather texture, kept alive while the device is
+	static u32 s_next_sweep = 0;
+	const u32 kUnusedMs = 10000;
+
+	static void add(ref_texture& T)
+	{
+		if (!T)
+			return;
+		for (ref_texture& t : s_textures)
+		{
+			if (&*t == &*T)
+				return;
+		}
+		s_textures.push_back(T);
+	}
+
+	static void prefetch(ref_texture& T, u32 now)
+	{
+		if (!T)
+			return;
+		T->m_last_used = now;
+		if (!T->flags.bLoaded && !T->flags.bLoading)
+		{
+			CTexture* raw = &*T;
+			textures_load_tasks.run([raw]() { raw->Load(); });
+		}
+	}
+
+	static void ensure(ref_texture& T, u32 now)
+	{
+		if (!T)
+			return;
+		T->m_last_used = now;
+		if (!T->flags.bLoaded)
+			T->Load(); // returns at once when a background load runs; surface_get and Apply wait for it
+	}
+
+	static void sweep(u32 now)
+	{
+		if (now < s_next_sweep)
+			return;
+		s_next_sweep = now + 1000;
+		for (ref_texture& T : s_textures)
+		{
+			if (T->m_on_demand && T->flags.bLoaded && !T->flags.bLoading && now - T->m_last_used > kUnusedMs)
+				T->Unload();
+		}
+	}
+
+	static void clear()
+	{
+		s_textures.clear();
+	}
+}
+#endif
+
 void dxEnvDescriptorRender::OnDeviceCreate(CEnvDescriptor& owner)
 {
+#ifdef USE_DX11
+	struct on_demand_scope
+	{
+		bool prev;
+		on_demand_scope() : prev(g_texture_create_on_demand) { g_texture_create_on_demand = ps_r4_sky_on_demand != 0; }
+		~on_demand_scope() { g_texture_create_on_demand = prev; }
+	} on_demand;
+#endif
 	dxEnvDescriptorMixerRender& mixRen = *(dxEnvDescriptorMixerRender*)&*g_pGamePersistent
 	                                                                     ->Environment().CurrentEnv->m_pDescriptorMixer;
 
@@ -204,7 +279,31 @@ void dxEnvDescriptorRender::OnDeviceCreate(CEnvDescriptor& owner)
 			mixRen.clouds_r_textures.push_back(mk_pair(1, clouds_texture));
 		}
 	}
+
+#ifdef USE_DX11
+	sky_on_demand::add(sky_texture);
+	sky_on_demand::add(sky_texture_env);
+	sky_on_demand::add(clouds_texture);
+#endif
 }
+
+#ifdef USE_DX11
+void dxEnvDescriptorRender::residency(bool now_needed, u32 now)
+{
+	if (now_needed)
+	{
+		sky_on_demand::ensure(sky_texture, now);
+		sky_on_demand::ensure(sky_texture_env, now);
+		sky_on_demand::ensure(clouds_texture, now);
+	}
+	else
+	{
+		sky_on_demand::prefetch(sky_texture, now);
+		sky_on_demand::prefetch(sky_texture_env, now);
+		sky_on_demand::prefetch(clouds_texture, now);
+	}
+}
+#endif
 
 void dxEnvDescriptorRender::OnDeviceDestroy()
 {
@@ -242,6 +341,36 @@ void dxEnvironmentRender::OnFrame(CEnvironment& env)
 			mixRen.clouds_r_textures.push_back(mk_pair(2, tonemap)); //. hack
 		}
 	}
+
+#ifdef USE_DX11
+	// Weather textures on demand: the two keyframes drawn now loaded, the next one loading, unused ones unloaded
+	{
+		const u32 now = Device.dwTimeContinual;
+		for (int i = 0; i < 2; i++)
+		{
+			if (env.Current[i])
+				((dxEnvDescriptorRender*)&*env.Current[i]->m_pDescriptor)->residency(true, now);
+		}
+		if (env.CurrentWeather && env.Current[1] && !env.CurrentWeather->empty())
+		{
+			auto& list = *env.CurrentWeather;
+			for (size_t i = 0; i < list.size(); i++)
+			{
+				if (list[i] == env.Current[1])
+				{
+					CEnvDescriptor* next = list[(i + 1) % list.size()];
+					((dxEnvDescriptorRender*)&*next->m_pDescriptor)->residency(false, now);
+					break;
+				}
+			}
+		}
+		// The mixer's own textures (also set while paused or by other paths)
+		for (auto& it : mixRen.sky_r_textures) sky_on_demand::ensure(it.second, now);
+		for (auto& it : mixRen.sky_r_textures_env) sky_on_demand::ensure(it.second, now);
+		for (auto& it : mixRen.clouds_r_textures) sky_on_demand::ensure(it.second, now);
+		sky_on_demand::sweep(now);
+	}
+#endif
 
 	//. Setup skybox textures, somewhat ugly
 	ID3DBaseTexture* e0 = mixRen.sky_r_textures[0].second->surface_get();
@@ -419,6 +548,9 @@ void dxEnvironmentRender::OnDeviceCreate()
 
 void dxEnvironmentRender::OnDeviceDestroy()
 {
+#ifdef USE_DX11
+	sky_on_demand::clear();
+#endif
 	tsky0->surface_set(NULL);
 	tsky1->surface_set(NULL);
 

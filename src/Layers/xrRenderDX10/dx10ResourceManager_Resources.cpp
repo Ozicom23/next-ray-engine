@@ -621,6 +621,8 @@ void CResourceManager::DeleteGeom(const SGeometry* Geom)
 
 //--------------------------------------------------------------------------------------------------------------
 xr_task_group textures_load_tasks;
+// Textures created on this thread while set are left unloaded until used (CTexture::m_on_demand)
+thread_local bool g_texture_create_on_demand = false;
 CTexture* CResourceManager::_CreateTexture(LPCSTR _Name)
 {
 	PROF_EVENT("_CreateTexture");
@@ -642,7 +644,8 @@ CTexture* CResourceManager::_CreateTexture(LPCSTR _Name)
 		T->dwFlags |= xr_resource_flagged::RF_REGISTERED;
 		m_textures.insert(mk_pair(T->set_name(Name), T));
 		T->Preload();
-		if (Device.b_is_Ready)
+		T->m_on_demand = g_texture_create_on_demand;
+		if (Device.b_is_Ready && !T->m_on_demand)
 		{
 			static DWORD this_thread_id = 0;
 			this_thread_id = GetCurrentThreadId();

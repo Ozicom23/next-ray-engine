@@ -247,6 +247,7 @@ void CTexture::Apply(u32 dwStage)
 {
 #ifdef USE_DX11
 	tex_stream::note_bound(this);
+	m_last_used = Device.dwTimeContinual;
 #endif
 	while (flags.bLoading)
 	{

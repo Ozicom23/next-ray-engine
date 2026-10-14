@@ -55,6 +55,10 @@ public:
 	virtual void OnDeviceDestroy();
 
 	virtual void Copy(IEnvDescriptorRender& _in);
+#ifdef USE_DX11
+	// Weather textures on demand: now_needed loads them now, else in the background; marks them used
+	void residency(bool now_needed, u32 now);
+#endif
 private:
 	ref_texture sky_texture;
 	ref_texture sky_texture_env;

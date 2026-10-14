@@ -102,6 +102,8 @@ public: //	Public class members (must be encapsulated furthur)
 	bool m_is_hot = false;		//--DSR-- HeatVision
 	bool m_is_glowing = false;	//--DSR-- SilencerOverheat
 	u8 m_mip_skip = 0; // mip levels dropped when loading (texture_lod)
+	bool m_on_demand = false; // not loaded with the level, only when used (weather sky textures, r4_sky_on_demand)
+	u32 m_last_used = 0; // Device.dwTimeContinual of the last bind
 
 	union
 	{

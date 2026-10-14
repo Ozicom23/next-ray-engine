@@ -625,6 +625,7 @@ public:
 namespace hiz { void start_stats(float seconds); }
 extern int ps_r4_hiz_cull;
 namespace tex_stream { void start_stats(float seconds); }
+extern int ps_r4_sky_on_demand;
 class CCC_TexStreamStats : public IConsole_Command
 {
 public:
@@ -1461,6 +1462,7 @@ void xrRender_initconsole()
 	CMD4(CCC_Integer, "r4_hiz_cull", &ps_r4_hiz_cull, 0, 1);
 	CMD1(CCC_SunCasterStats, "stat_sun_casters");
 	CMD1(CCC_TexStreamStats, "stat_tex_stream");
+	CMD4(CCC_Integer, "r4_sky_on_demand", &ps_r4_sky_on_demand, 0, 1); // read when the weathers are created
 	CMD4(CCC_Integer, "r4_sun_caster_cull", &ps_r4_sun_caster_cull, 0, 1);
 	CMD4(CCC_Integer, "r4_sun_parallel_cull", &ps_r4_sun_parallel_cull, 0, 1);
 	CMD4(CCC_Integer, "r4_cbuffer_skip_unchanged", &ps_r4_cbuffer_skip_unchanged, 0, 1);
