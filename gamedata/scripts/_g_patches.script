@@ -65,6 +65,39 @@ _G.printf_xrscript = function(fmt, ...)
 end
 
 -- UTILS
+-- trim and str_explode from _g.script, done by the engine when it can (str_explode_native, trim_native): same
+-- results for string arguments and separators without pattern characters, which is nearly every call. Loading
+-- GAMMA's scripts on every level load spent most of its time in these two.
+if trim_native and str_explode_native then
+	local lua_trim = _G.trim
+	local lua_str_explode = _G.str_explode
+	local literal = {} -- separator -> true when it has no Lua pattern characters
+	local function is_literal(sep)
+		local l = literal[sep]
+		if l == nil then
+			l = not string_find(sep, "[%^%$%(%)%%%.%[%]%*%+%-%?]")
+			literal[sep] = l
+		end
+		return l
+	end
+	if lua_trim then
+		_G.trim = function(s)
+			if type(s) == "string" then
+				return trim_native(s)
+			end
+			return lua_trim(s)
+		end
+	end
+	if lua_str_explode then
+		_G.str_explode = function(str, sep, plain)
+			if type(str) == "string" and type(sep) == "string" and (plain or is_literal(sep)) then
+				return str_explode_native(str, sep)
+			end
+			return lua_str_explode(str, sep, plain)
+		end
+	end
+end
+
 -- str_explode with limit on items to split
 -- n is the amount of times to split
 -- str_explode("1,2,3,4", ",", 1) = {"1", "2,3,4"}
