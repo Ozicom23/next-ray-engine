@@ -490,6 +490,15 @@ function on_game_start()
 	local t = {}
 	local size_t = 0 
 	local f	= getFS()
+	-- Experiment, with the file appdata\lua_gc_pause_on_load: the garbage collector paused while the scripts load and
+	-- start, then restarted (how much of the load time is collecting garbage, and what it costs in memory)
+	local gc_marker = io.open(f:update_path("$app_data_root$", "lua_gc_pause_on_load"), "r")
+	local gc_paused_kb = nil
+	if gc_marker then
+		gc_marker:close()
+		gc_paused_kb = collectgarbage("count")
+		collectgarbage("stop")
+	end
 	local flist = f:file_list_open_ex("$game_scripts$",bit_or(FS.FS_ListFiles,FS.FS_RootOnly),"*.script")
 	local f_cnt = flist:Size()
 	-- Load time on every level load (it runs all scripts again): loading them, then each one's on_game_start
@@ -547,6 +556,11 @@ function on_game_start()
 	end
 	log(string.format("* [axr_main] scripts loaded in %.0f ms, %d on_game_start in %.0f ms, slowest (ms): %s",
 		load_timer:time() / 1000, #t, start_total:time() / 1000, table.concat(top, ", ")))
+	if gc_paused_kb then
+		local kb = collectgarbage("count")
+		collectgarbage("restart")
+		log(string.format("* [axr_main] garbage collector was paused: Lua memory %.0f -> %.0f MB", gc_paused_kb / 1024, kb / 1024))
+	end
 end
 
 ------------------
