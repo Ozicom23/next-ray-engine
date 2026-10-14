@@ -312,6 +312,71 @@ CScriptStorage::~CScriptStorage()
 }
 
 extern int luaopen_lua_extensions(lua_State* L, bool IsDebug = false);
+
+// Native versions of _g.script's trim and str_explode for literal separators, used by _g_patches.script.
+// Same results as the Lua code: Lua's %s whitespace, every piece trimmed, empty pieces kept, the string itself
+// (untrimmed) when the separator is empty or not in it. Loading GAMMA's scripts spends most of its time in these.
+namespace native_strings
+{
+	inline bool lua_space(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r'; }
+
+	inline void push_trimmed(lua_State* L, const char* s, size_t n)
+	{
+		size_t b = 0, e = n;
+		while (b < e && lua_space(s[b])) b++;
+		while (e > b && lua_space(s[e - 1])) e--;
+		lua_pushlstring(L, s + b, e - b);
+	}
+
+	inline const char* find(const char* s, size_t n, size_t from, const char* sep, size_t m)
+	{
+		if (m == 0 || from > n || n - from < m)
+			return nullptr;
+		const char* end = s + n - m;
+		for (const char* p = s + from; p <= end; p++)
+		{
+			if (*p == *sep && !memcmp(p, sep, m))
+				return p;
+		}
+		return nullptr;
+	}
+
+	int trim_native(lua_State* L)
+	{
+		size_t n;
+		const char* s = luaL_checklstring(L, 1, &n);
+		push_trimmed(L, s, n);
+		return 1;
+	}
+
+	int str_explode_native(lua_State* L)
+	{
+		size_t n, m;
+		const char* s = luaL_checklstring(L, 1, &n);
+		const char* sep = luaL_checklstring(L, 2, &m);
+		const char* hit = find(s, n, 0, sep, m);
+		if (!hit)
+		{
+			lua_createtable(L, 1, 0);
+			lua_pushlstring(L, s, n);
+			lua_rawseti(L, -2, 1);
+			return 1;
+		}
+		lua_createtable(L, 8, 0);
+		int i = 1;
+		size_t start = 0;
+		while (hit)
+		{
+			push_trimmed(L, s + start, size_t(hit - s) - start);
+			lua_rawseti(L, -2, i++);
+			start = size_t(hit - s) + m;
+			hit = find(s, n, start, sep, m);
+		}
+		push_trimmed(L, s + start, n - start);
+		lua_rawseti(L, -2, i);
+		return 1;
+	}
+}
 extern lua_CFunction luaopen_socket_core_init();
 extern void pdebug_init_init(lua_State* L);
 
@@ -444,6 +509,8 @@ void CScriptStorage::reinit()
 #endif //!USE_LUAJIT_ONE
 	bool isDebugEnabled = lua_debug;
 	luaopen_lua_extensions(lua(), isDebugEnabled);
+	lua_register(lua(), "trim_native", native_strings::trim_native);
+	lua_register(lua(), "str_explode_native", native_strings::str_explode_native);
 	disable_os_funcs(lua());
 
 	if (isDebugEnabled)

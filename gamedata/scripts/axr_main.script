@@ -437,6 +437,27 @@ function on_game_start()
 	-- Load time on every level load (it runs all scripts again): loading them, then each one's on_game_start
 	local load_timer = profile_timer()
 	load_timer:start()
+	-- With the file appdata\lua_load_profile present: where loading the scripts spends its time, by source line
+	-- and function (sampled every 1000 Lua instructions, the time since the last sample counted for the current place)
+	local sampler = nil
+	if (f:exist("$app_data_root$", "lua_load_profile") and debug and debug.sethook) then
+		sampler = { lines = {}, funcs = {}, clock = profile_timer(), last = 0 }
+		sampler.clock:start()
+		debug.sethook(function()
+			sampler.clock:stop()
+			local now = sampler.clock:time()
+			sampler.clock:start()
+			local dt = now - sampler.last
+			sampler.last = now
+			local info = debug.getinfo(2, "Sln")
+			if info then
+				local line = info.short_src .. ":" .. tostring(info.currentline)
+				local func = info.short_src .. ":" .. tostring(info.linedefined) .. " " .. tostring(info.name)
+				sampler.lines[line] = (sampler.lines[line] or 0) + dt
+				sampler.funcs[func] = (sampler.funcs[func] or 0) + dt
+			end
+		end, "", 1000)
+	end
 	for	it=0, f_cnt-1 do
 		local file = flist:GetAt(it)
 		local file_name = file:NameShort()
@@ -450,6 +471,20 @@ function on_game_start()
 		end
 	end
 	load_timer:stop()
+	if sampler then
+		debug.sethook()
+		local function top(tbl, title)
+			local list = {}
+			for k, v in pairs(tbl) do list[#list + 1] = { k = k, v = v } end
+			table.sort(list, function(a, b) return a.v > b.v end)
+			log(string.format("* [axr_main] load profile, %s:", title))
+			for i = 1, math.min(30, #list) do
+				log(string.format("*   %8.1f ms  %s", list[i].v / 1000, list[i].k))
+			end
+		end
+		top(sampler.funcs, "by function")
+		top(sampler.lines, "by line")
+	end
 	local start_timers = {}
 	local start_total = profile_timer()
 	start_total:start()
