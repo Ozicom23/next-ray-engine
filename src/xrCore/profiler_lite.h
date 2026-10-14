@@ -49,6 +49,11 @@ namespace xr_prof
 	// Main thread, once per frame
 	void frame();
 	void start_capture(float seconds);
+	// A capture of one long stretch (a level load with its precache frames): totals instead of averages per frame,
+	// ended by stop_capture() or after three minutes
+	void start_total_capture(const char* what);
+	void stop_capture();
+	bool total_capture_active();
 }
 
 #define PROF_LITE_CONCAT_(a, b) a##b

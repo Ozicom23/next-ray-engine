@@ -1541,6 +1541,8 @@ void CApplication::OnEvent(EVENT E, u64 P1, u64 P2)
 }
 
 static CTimer phase_timer;
+int ps_stat_memory_on_load = 0;
+bool g_stat_next_load = false;
 extern ENGINE_API BOOL g_appLoaded = FALSE;
 //AVO: used by SPAWN_ANTIFREEZE (by alpet)
 extern ENGINE_API BOOL g_bootComplete = FALSE;
@@ -1564,6 +1566,13 @@ void CApplication::LoadBegin()
 #endif
 		phase_timer.Start();
 		load_stage = 0;
+#if XRCORE_PROFILER == PROFILER_NONE
+		if (g_stat_next_load)
+		{
+			g_stat_next_load = false;
+			xr_prof::start_total_capture("load to the end of the precache frames");
+		}
+#endif
 	}
 }
 
@@ -1573,8 +1582,11 @@ void CApplication::LoadEnd()
 	if (0 == ll_dwReference)
 	{
 		Msg("* phase time: %d ms", phase_timer.GetElapsed_ms());
-		Msg("* phase cmem: %lld K", Memory.mem_usage() / 1024);
-		Console->Execute("stat_memory");
+		if (ps_stat_memory_on_load)
+		{
+			Msg("* phase cmem: %lld K", Memory.mem_usage() / 1024);
+			Console->Execute("stat_memory");
+		}
 		g_appLoaded = TRUE;
 		// DUMP_PHASE;
 	}

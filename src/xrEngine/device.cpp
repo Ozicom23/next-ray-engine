@@ -146,6 +146,10 @@ void CRenderDevice::End(void)
 
 			Msg("* [x-ray]: Handled Necessary Textures Destruction");
 			Memory.mem_compact();
+#if XRCORE_PROFILER == PROFILER_NONE
+			if (xr_prof::total_capture_active()) // stat_next_load
+				xr_prof::stop_capture();
+#endif
 			//Msg("* MEMORY USAGE: %lld K", Memory.mem_usage() / 1024);
 			//Msg("* End of synchronization A[%d] R[%d]", b_is_Active, b_is_Ready);
 

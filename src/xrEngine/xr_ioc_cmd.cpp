@@ -99,7 +99,25 @@ public:
 		xr_prof::start_capture(_min(seconds, 60.f));
 	}
 };
+
+// stat_next_load: the CPU passes of the next load, from its start to the end of its precache frames, as totals
+extern bool g_stat_next_load;
+class CCC_NextLoadStats : public IConsole_Command
+{
+public:
+	CCC_NextLoadStats(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; };
+
+	virtual void Execute(LPCSTR args)
+	{
+		g_stat_next_load = true;
+		Msg("* [CPU passes] the next load will be measured");
+	}
+};
 #endif
+
+// The full memory report (stat_memory) at the end of every load: walking the heap and every shared string took
+// ~1.4 s of each level load on the Deck
+extern int ps_stat_memory_on_load;
 
 //-----------------------------------------------------------------------
 #ifdef DEBUG_MEMORY_MANAGER
@@ -1036,7 +1054,9 @@ void CCC_Register()
 	CMD1(CCC_Quit, "quit");
 #if XRCORE_PROFILER == PROFILER_NONE
 	CMD1(CCC_CpuPassStats, "stat_cpu_passes");
+	CMD1(CCC_NextLoadStats, "stat_next_load");
 #endif
+	CMD4(CCC_Integer, "stat_memory_on_load", &ps_stat_memory_on_load, 0, 1);
 	CMD1(CCC_Start, "start");
 	CMD1(CCC_Disconnect, "disconnect");
 	CMD1(CCC_SaveCFG, "cfg_save");

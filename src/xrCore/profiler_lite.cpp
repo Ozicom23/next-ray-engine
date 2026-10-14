@@ -21,6 +21,8 @@ namespace xr_prof
 		u64 s_start = 0;
 		u64 s_end = 0;
 		u32 s_frames = 0;
+		bool s_totals = false; // start_total_capture: totals, not averages per frame
+		xr_string s_what;
 
 		struct sum
 		{
@@ -61,10 +63,15 @@ namespace xr_prof
 			for (auto& it : by_name)
 				sums.push_back(it.second);
 
-			const double ms = 1000.0 / double(CPU::clk_per_second) / double(s_frames);
-			const double per_frame = 1.0 / double(s_frames);
-			Msg("* [CPU passes] average per frame over %.1f s (%u frames), frame %.2f ms",
-				double(elapsed) / double(CPU::clk_per_second), s_frames, double(elapsed) * ms);
+			const u32 frames = s_totals ? 1 : _max(1u, s_frames);
+			const double ms = 1000.0 / double(CPU::clk_per_second) / double(frames);
+			const double per_frame = 1.0 / double(frames);
+			if (s_totals)
+				Msg("* [CPU passes] %s: total %.2f s, %u frames; times below are totals (ms), calls are counts",
+					s_what.c_str(), double(elapsed) / double(CPU::clk_per_second), s_frames);
+			else
+				Msg("* [CPU passes] average per frame over %.1f s (%u frames), frame %.2f ms",
+					double(elapsed) / double(CPU::clk_per_second), s_frames, double(elapsed) * ms);
 
 			std::sort(sums.begin(), sums.end(), [](const sum& a, const sum& b) { return a.main_self > b.main_self; });
 			Msg("*   main thread                                   self ms  incl ms  calls");
@@ -162,6 +169,7 @@ namespace xr_prof
 			{
 				g_active = false;
 				report(now - s_start);
+				s_totals = false;
 			}
 			return;
 		}
@@ -175,6 +183,34 @@ namespace xr_prof
 			s_pending_seconds = 0.f;
 			g_active = true;
 		}
+	}
+
+	void start_total_capture(const char* what)
+	{
+		if (g_active)
+			return;
+		reset();
+		s_what = what;
+		s_totals = true;
+		s_start = ticks();
+		s_end = s_start + u64(180.0 * double(CPU::clk_per_second));
+		s_frames = 0;
+		s_pending_seconds = 0.f;
+		g_active = true;
+	}
+
+	void stop_capture()
+	{
+		if (!g_active)
+			return;
+		g_active = false;
+		report(ticks() - s_start);
+		s_totals = false;
+	}
+
+	bool total_capture_active()
+	{
+		return g_active && s_totals;
 	}
 
 	void start_capture(float seconds)
