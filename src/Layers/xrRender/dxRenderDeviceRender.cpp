@@ -451,7 +451,7 @@ void dxRenderDeviceRender::End()
 #ifdef USE_DX11
 		g_PerfOverlay.PresentEnd();
 		m_presented = true;
-		frame_pacing::present_done(present_timer.GetElapsed_sec() * 1000.f, g_PerfOverlay.LastGpuMs());
+		frame_pacing::present_done(present_timer.GetElapsed_sec() * 1000.f, g_PerfOverlay.LastGpuMs(), g_PerfOverlay.LastGpuEndMs(), g_PerfOverlay.GpuResults());
 #endif
 	}
 #else //!USE_DX10 || USE_DX11

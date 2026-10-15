@@ -18,6 +18,10 @@ public:
 
 	// The last GPU frame time the queries returned (ms, a few frames old), 0 when the queries are not running
 	float LastGpuMs() const { return m_last_gpu_ms; }
+	// The GPU timestamp at the end of that frame (ms on the GPU clock) and the number of results so far:
+	// consecutive results one apart give the GPU-side frame interval
+	double LastGpuEndMs() const { return m_gpu_end_ms; }
+	u32 GpuResults() const { return m_gpu_results; }
 
 	// Builds the ImGui window in the render pass, just before the engine renders ImGui (seqRender priority
 	// -4, ImGui is -5). Recording earlier in the frame is unsafe: a vid_restart later in the same frame
@@ -56,6 +60,8 @@ private:
 	CTimer m_present_timer;
 	float m_present_ms = 0.f; // last frame
 	float m_last_gpu_ms = 0.f;
+	double m_gpu_end_ms = 0.0;
+	u32 m_gpu_results = 0;
 
 	CTimer m_frame_timer;
 	bool m_frame_timer_started = false;

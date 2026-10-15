@@ -69,6 +69,8 @@ void CPerfOverlay::CollectGpuTimes()
 			m_sum.gpu += ms;
 			++m_sum.gpu_n;
 			m_last_gpu_ms = ms;
+			m_gpu_end_ms = double(t1) * 1000.0 / double(dj.Frequency);
+			++m_gpu_results;
 		}
 	}
 }

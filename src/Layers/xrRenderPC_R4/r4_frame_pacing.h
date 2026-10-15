@@ -11,13 +11,16 @@
 //   r4_frame_latency 1..3: frames the CPU may run ahead of the display (2); 1 serializes the CPU and the GPU work
 //     and costs frame rate when their sum is above the frame time; applied with vid_restart
 //   stat_frame_pacing [seconds]: each frame's interval, latency wait, CPU, Present and GPU time to
-//     logs/frame_pacing_<time>.csv and a summary (average, median, 1% low, stutters) to the log (10 s)
+//     logs/frame_pacing_<time>.csv and a summary (average, median, 1% low, stutters) to the log (10 s). The CPU-side
+//     interval is between the ends of consecutive Presents; the GPU-side interval between the GPU's completion of
+//     consecutive frames, which is what the display gets (the CPU side is decoupled from it by the frames in flight)
 namespace frame_pacing
 {
 	void start(float seconds);
 	bool recording();
 	// At the start of a frame that follows a Present, after the latency wait (the ms spent in it)
 	void frame_begin(float wait_ms);
-	// After Present: its duration and the last GPU frame time the overlay's queries returned (0 when none)
-	void present_done(float present_ms, float gpu_ms);
+	// After Present: its duration and the last GPU frame time the overlay's queries returned (0 when none), with the
+	// GPU timestamp at that frame's end and the count of results (the GPU-side interval between consecutive results)
+	void present_done(float present_ms, float gpu_ms, double gpu_end_ms, u32 gpu_results);
 }

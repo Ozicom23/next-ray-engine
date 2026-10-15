@@ -761,7 +761,14 @@ void CHW::SetupFrameLatency()
             m_hFrameLatency = swapchain2->GetFrameLatencyWaitableObject();
             _RELEASE(swapchain2);
         }
-        if (!m_hFrameLatency)
+        if (m_hFrameLatency)
+        {
+            // The object is a semaphore with one slot per frame of latency, taken by a wait before each Present and
+            // given back when that frame leaves the display queue. The first frame presents without passing the
+            // frame start, so its slot is taken here; otherwise the CPU runs one frame further ahead than asked
+            WaitForSingleObject(m_hFrameLatency, 0);
+        }
+        else
             Msg("! DXGI: the frame latency waitable object is not available, the frame latency applies in Present");
     }
     if (!m_hFrameLatency)
@@ -871,10 +878,10 @@ void CHW::Reset(HWND hwnd)
     BOOL bWindowed = (g_screenmode != 2);
 
 #if defined(USE_DX11)
-    // The frame latency waitable object exists on windowed swap chains only: when the mode or r4_swap_wait changed
-    // that, the swap chain is created anew below instead of resized
+    // The frame latency waitable object exists on windowed swap chains only. A swap chain with it, or one that has to
+    // get or lose it, is created anew below instead of resized: the frame latency and the object's count start fresh
     const bool want_waitable = ps_r4_swap_wait && bWindowed;
-    if (want_waitable != m_FrameLatencyWaitable)
+    if (want_waitable || m_FrameLatencyWaitable)
     {
         if (!cd_fs.Windowed)
             m_pSwapChain->SetFullscreenState(FALSE, NULL);
