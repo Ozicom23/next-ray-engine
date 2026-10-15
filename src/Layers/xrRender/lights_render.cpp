@@ -421,6 +421,9 @@ void CRender::render_lights(light_Package& LP)
 					L = source.back();
 					if (L->vis.smap_ID != sid)	break;
 					source.pop_back();
+#ifdef USE_DX11
+					L->m_smap_keep_srv = nullptr; // set below when its kept shadow map is used this frame
+#endif
 					// render
 					phase = PHASE_SMAP;
 #if defined(USE_DX10) || defined(USE_DX11)
@@ -463,7 +466,6 @@ void CRender::render_lights(light_Package& LP)
 						L_spot_s.push_back(L);
 #ifdef USE_DX11
 						// Kept shadow map (light_smap_keep): the lamp's own texture, drawn only when something changed
-						L->m_smap_keep_srv = nullptr;
 						const bool grass = Details && Details->dtFS && check_grass_shadow(L, ViewBase) && L->flags.bShadow && !decorative_light;
 						bool keep_fresh = false;
 						if (light_smap_keep::entry* keep = light_smap_keep::get(L, decorative_light, bForward_Shadows, grass, keep_fresh))
