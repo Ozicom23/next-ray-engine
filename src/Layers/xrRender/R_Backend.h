@@ -58,6 +58,7 @@ struct R_statistics
 class ECORE_API CBackend
 {
 public:
+	u32 constants_epoch = 0; // one per frame and per scene render: per-frame constant handlers run once in it
 #if defined(USE_DX10) || defined(USE_DX11)
 	enum MaxTextures
 	{
@@ -111,7 +112,6 @@ public:
 	// The buffers bound by the current constant table (set_Constants), flushed before each draw
 	dx10ConstantBuffer* m_bound_cbuffers[6 * MaxCBuffers];
 	u32 m_bound_cbuffers_count = 0;
-	u32 constants_epoch = 0; // one per render of the scene (CRender::Render): per-frame constant handlers run once in it
 	D3D_PRIMITIVE_TOPOLOGY m_PrimitiveTopology;
 	ID3DInputLayout* m_pInputLayout;
 	DWORD dummy0; //	Padding to avoid warning	
