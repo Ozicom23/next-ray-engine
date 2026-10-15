@@ -154,6 +154,29 @@ void CDLSS::GetRenderSize(u32 out_w, u32 out_h, u32 quality, u32& render_w, u32&
 	render_h = _max(render_h, 1u);
 }
 
+void CDLSS::ClampRenderSize(u32 out_w, u32 out_h, u32 quality, u32& render_w, u32& render_h)
+{
+	if (!m_available || !m_params || quality == upscaler_quality_native)
+		return;
+	unsigned int opt_w = 0, opt_h = 0, max_w = 0, max_h = 0, min_w = 0, min_h = 0;
+	float sharpness = 0.f;
+	NVSDK_NGX_Result res = NGX_DLSS_GET_OPTIMAL_SETTINGS((NVSDK_NGX_Parameter*)m_params, out_w, out_h,
+	                                                     to_ngx_quality(quality), &opt_w, &opt_h, &max_w, &max_h,
+	                                                     &min_w, &min_h, &sharpness);
+	if (!NVSDK_NGX_SUCCEED(res))
+		return;
+	if (min_w && min_h)
+	{
+		render_w = _max(render_w, u32(min_w));
+		render_h = _max(render_h, u32(min_h));
+	}
+	if (max_w && max_h)
+	{
+		render_w = _min(render_w, u32(max_w));
+		render_h = _min(render_h, u32(max_h));
+	}
+}
+
 bool CDLSS::CreateFeature(u32 render_w, u32 render_h, u32 out_w, u32 out_h, u32 quality)
 {
 	ReleaseFeature();
@@ -248,6 +271,7 @@ void CDLSS::GetRenderSize(u32 out_w, u32 out_h, u32, u32& render_w, u32& render_
 	render_h = out_h;
 }
 
+void CDLSS::ClampRenderSize(u32, u32, u32, u32&, u32&) {}
 bool CDLSS::CreateFeature(u32, u32, u32, u32, u32) { return false; }
 void CDLSS::ReleaseFeature() {}
 bool CDLSS::Evaluate(const UpscalerEvalParams&) { return false; }

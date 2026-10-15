@@ -15,6 +15,7 @@ public:
 	bool IsAvailable() const override { return m_available; }
 
 	void GetRenderSize(u32 out_w, u32 out_h, u32 quality, u32& render_w, u32& render_h) override;
+	void ClampRenderSize(u32 out_w, u32 out_h, u32 quality, u32& render_w, u32& render_h) override;
 
 	bool CreateFeature(u32 render_w, u32 render_h, u32 out_w, u32 out_h, u32 quality) override;
 	void ReleaseFeature() override;

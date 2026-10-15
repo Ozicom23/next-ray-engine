@@ -378,7 +378,11 @@ void CPerfOverlay::Draw()
 		if (target && upscaler && target->upscale_enabled())
 		{
 			const u32 q = _min(ps_r4_upscaler_quality, u32(upscaler_quality_native));
-			ImGui::Text("%s %s   %ux%u -> %ux%u", upscaler->Name(), s_quality_names[q],
+			extern float ps_r4_upscaler_scale;
+			string32 custom;
+			if (ps_r4_upscaler_scale > 0.f && q != upscaler_quality_native)
+				xr_sprintf(custom, "Custom %.2f", float(target->upscale_render_width()) / float(_max(Device.dwWidth, 1u)));
+			ImGui::Text("%s %s   %ux%u -> %ux%u", upscaler->Name(), ps_r4_upscaler_scale > 0.f && q != upscaler_quality_native ? custom : s_quality_names[q],
 			            target->upscale_render_width(), target->upscale_render_height(), Device.dwWidth, Device.dwHeight);
 		}
 		else

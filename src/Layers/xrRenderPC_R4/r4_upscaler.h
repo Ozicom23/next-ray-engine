@@ -57,6 +57,12 @@ public:
 	// Render resolution for the output resolution and quality mode
 	virtual void GetRenderSize(u32 out_w, u32 out_h, u32 quality, u32& render_w, u32& render_h) = 0;
 
+	// The render resolution and the mode to create the feature with: the quality mode's own, or with a custom scale
+	// (r4_upscaler_scale, render size per output axis, 0 = the mode's) that size, and the mode nearest to it
+	void GetRenderSizeAndMode(u32 out_w, u32 out_h, u32& quality, u32& render_w, u32& render_h);
+	// Keeps a custom render size within what the upscaler accepts for the mode (DLSS: its dynamic range)
+	virtual void ClampRenderSize(u32 out_w, u32 out_h, u32 quality, u32& render_w, u32& render_h) {}
+
 	virtual bool CreateFeature(u32 render_w, u32 render_h, u32 out_w, u32 out_h, u32 quality) = 0;
 	virtual void ReleaseFeature() = 0;
 

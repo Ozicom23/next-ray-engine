@@ -389,8 +389,9 @@ CRenderTarget::CRenderTarget()
 
 	if (m_upscaler)
 	{
-		m_upscaler->GetRenderSize(m_upscale_output_w, m_upscale_output_h, ps_r4_upscaler_quality, m_upscale_render_w, m_upscale_render_h);
-		if (m_upscaler->CreateFeature(m_upscale_render_w, m_upscale_render_h, m_upscale_output_w, m_upscale_output_h, ps_r4_upscaler_quality))
+		u32 quality = ps_r4_upscaler_quality;
+		m_upscaler->GetRenderSizeAndMode(m_upscale_output_w, m_upscale_output_h, quality, m_upscale_render_w, m_upscale_render_h);
+		if (m_upscaler->CreateFeature(m_upscale_render_w, m_upscale_render_h, m_upscale_output_w, m_upscale_output_h, quality))
 		{
 			m_upscale_enabled = true;
 			m_upscale_jitter_phases = CUpscaler::GetJitterPhaseCount(m_upscale_render_w, m_upscale_output_w);
@@ -1373,6 +1374,21 @@ void CRenderTarget::post_chain_begin()
 	m_post_swaps = 0;
 }
 
+// Exchanges the GPU resources (and sizes) of two render targets; their names, and so the shaders that bind them by
+// name, stay. The backend forgets both textures' bindings so their next use binds the exchanged views
+static void swap_rt_resources(CRT* a, CRT* b)
+{
+	std::swap(a->pSurface, b->pSurface);
+	std::swap(a->pRT, b->pRT);
+	std::swap(a->pZRT, b->pZRT);
+	std::swap(a->pUAView, b->pUAView);
+	std::swap(a->dwWidth, b->dwWidth);
+	std::swap(a->dwHeight, b->dwHeight);
+	a->pTexture->surface_swap(*b->pTexture);
+	RCache.forget_texture(&*a->pTexture);
+	RCache.forget_texture(&*b->pTexture);
+}
+
 void CRenderTarget::post_result(ref_rt& dest)
 {
 	if (!m_post_chain || &dest != &rt_Color)
@@ -1380,16 +1396,37 @@ void CRenderTarget::post_result(ref_rt& dest)
 		HW.pContext->CopyResource(rt_Generic_0->pSurface, dest->pSurface);
 		return;
 	}
-	CRT* a = &*rt_Generic_0;
-	CRT* b = &*rt_Color;
-	std::swap(a->pSurface, b->pSurface);
-	std::swap(a->pRT, b->pRT);
-	std::swap(a->pZRT, b->pZRT);
-	std::swap(a->pUAView, b->pUAView);
-	a->pTexture->surface_swap(*b->pTexture);
-	RCache.forget_texture(&*a->pTexture);
-	RCache.forget_texture(&*b->pTexture);
+	swap_rt_resources(&*rt_Generic_0, &*rt_Color);
 	m_post_swaps++;
+}
+
+int ps_r4_upscaler_nvg_blur = 1;
+
+bool CRenderTarget::upscale_blur_targets()
+{
+	const u32 w = m_upscale_output_w, h = m_upscale_output_h;
+	if (w < 16 || h < 16)
+		return false;
+	if (m_blur_out[0] && m_blur_out_w == w && m_blur_out_h == h)
+		return true;
+	static const char* names[6] = { "$user$blur_h_2_out", "$user$blur_2_out", "$user$blur_h_4_out", "$user$blur_4_out",
+		"$user$blur_h_8_out", "$user$blur_8_out" };
+	for (u32 i = 0; i < 6; i++)
+	{
+		const u32 div = 2u << (i / 2);
+		m_blur_out[i].destroy();
+		m_blur_out[i].create(names[i], w / div, h / div, D3DFMT_A8R8G8B8);
+	}
+	m_blur_out_w = w;
+	m_blur_out_h = h;
+	return true;
+}
+
+void CRenderTarget::swap_blur_targets()
+{
+	ref_rt* blur[6] = { &rt_blur_h_2, &rt_blur_2, &rt_blur_h_4, &rt_blur_4, &rt_blur_h_8, &rt_blur_8 };
+	for (u32 i = 0; i < 6; i++)
+		swap_rt_resources(&**blur[i], &*m_blur_out[i]);
 }
 
 // Both targets end the chain holding the result, on their own resources (the same state as after the copies)

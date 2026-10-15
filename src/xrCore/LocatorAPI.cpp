@@ -804,6 +804,12 @@ void CLocatorAPI::_initialize(u32 flags, LPCSTR target_folder, LPCSTR fs_name)
 	else
 	{
 		IReader* pFSltx = setup_fs_ltx(fs_name);
+		// Folders already listed with their subfolders. fsgame.ltx names many folders inside others ($game_data$, then
+		// its textures, meshes, sounds, configs and their subfolders again): listing those again only registers the
+		// same files a second time. Under Mod Organizer's virtual file system every listing merges all mod folders,
+		// so GAMMA's start spent most of its 108 s file index listing gamedata up to four times
+		xr_vector<xr_string> listed_roots;
+		u32 skipped_lists = 0;
 		// append all pathes    
 		string_path id, root, add, def, capt;
 		const char *lp_add, *lp_def, *lp_capt;
@@ -858,7 +864,22 @@ void CLocatorAPI::_initialize(u32 flags, LPCSTR target_folder, LPCSTR fs_name)
 
 			FS_Path* P = new FS_Path((p_it != pathes.end()) ? p_it->second->m_Path : root, lp_add, lp_def, lp_capt, fl);
 			bNoRecurse = !(fl & FS_Path::flRecurse);
-			Recurse(P->m_Path);
+			bool listed = false;
+			for (const xr_string& r : listed_roots)
+				if (0 == _strnicmp(P->m_Path, r.c_str(), r.size()))
+				{
+					listed = true;
+					break;
+				}
+			if (listed)
+				skipped_lists++;
+			else
+			{
+				Recurse(P->m_Path);
+				const size_t len = xr_strlen(P->m_Path);
+				if (!bNoRecurse && len && (P->m_Path[len - 1] == '\\' || P->m_Path[len - 1] == '/'))
+					listed_roots.push_back(P->m_Path);
+			}
 			auto I = pathes.insert(std::make_pair(xr_strdup(id), P));
 #ifndef DEBUG
 			m_Flags.set(flCacheFiles, FALSE);
@@ -868,6 +889,7 @@ void CLocatorAPI::_initialize(u32 flags, LPCSTR target_folder, LPCSTR fs_name)
 		}
 		r_close(pFSltx);
 		R_ASSERT(path_exist("$app_data_root$"));
+		Msg("* FS: %u folders inside an already listed folder not listed again", skipped_lists);
 	};
 
 

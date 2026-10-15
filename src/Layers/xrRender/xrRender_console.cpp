@@ -325,6 +325,7 @@ xr_token upscaler_token[] = {
 	{ 0, 0 }
 };
 u32   ps_r4_upscaler_quality      = 3;      // r4-only, applied with vid_restart
+float ps_r4_upscaler_scale        = 0.f;    // r4-only: custom render scale per axis (0 = the quality mode's), vid_restart
 xr_token upscaler_quality_token[] = {
 	{ "ultra_performance", 0 },
 	{ "performance", 1 },
@@ -669,6 +670,7 @@ extern int ps_r4_swap_wait;
 extern int ps_r4_frame_latency;
 extern int ps_r4_frame_jit;
 extern int ps_r4_post_pingpong;
+extern int ps_r4_upscaler_nvg_blur;
 extern int ps_r4_shader_warmup;
 extern float ps_r4_frame_jit_margin;
 class CCC_FramePacingStats : public IConsole_Command
@@ -1505,6 +1507,7 @@ void xrRender_initconsole()
 
 	CMD3(CCC_Token,   "r4_upscaler",              &ps_r4_upscaler,                   upscaler_token);
 	CMD3(CCC_Token,   "r4_upscaler_quality",      &ps_r4_upscaler_quality,           upscaler_quality_token);
+	CMD4(CCC_Float,   "r4_upscaler_scale",        &ps_r4_upscaler_scale,             0.f, 0.95f); // 0 = the quality mode's; vid_restart
 	CMD4(CCC_Float,   "r4_fsr_sharpness",         &ps_r4_fsr_sharpness,              0.f, 1.f);
 	CMD4(CCC_Vector4, "r4_fsr_tuning",            &ps_r4_fsr_tuning, Fvector4().set(0, 0, 0, -1), Fvector4().set(1, 8, 1, 1));
 	CMD4(CCC_Integer, "r4_fsr_debug_view",        &ps_r4_fsr_debug_view,             0, 1);
@@ -1534,6 +1537,7 @@ void xrRender_initconsole()
 	CMD4(CCC_Integer, "r4_frame_jit", &ps_r4_frame_jit, 0, 1);
 	CMD4(CCC_Float, "r4_frame_jit_margin", &ps_r4_frame_jit_margin, 0.f, 10.f);
 	CMD4(CCC_Integer, "r4_post_pingpong", &ps_r4_post_pingpong, 0, 1); // post passes exchange targets instead of copying
+	CMD4(CCC_Integer, "r4_upscaler_nvg_blur", &ps_r4_upscaler_nvg_blur, 0, 1); // night vision blur at output resolution
 	CMD4(CCC_Integer, "r4_shader_warmup", &ps_r4_shader_warmup, 0, 1); // cached shaders created at the game start
 	CMD1(CCC_FramePacingStats, "stat_frame_pacing");
 	CMD1(CCC_TexStreamStats, "stat_tex_stream");

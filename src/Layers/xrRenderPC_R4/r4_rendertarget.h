@@ -39,6 +39,12 @@ private:
 	// rt_Generic_0 exchange the two targets' resources instead; post_chain_end copies once so both hold the result
 	bool m_post_chain = false;
 	u32 m_post_swaps = 0;
+	// Night vision after an upscaler (r4_upscaler_nvg_blur): its blur buffers built again from the upscaled image at
+	// output resolution, in these targets exchanged with rt_blur_h_2..rt_blur_8 for the overlay passes
+	ref_rt m_blur_out[6];
+	u32 m_blur_out_w = 0, m_blur_out_h = 0;
+	bool upscale_blur_targets();
+	void swap_blur_targets();
 public:
 	enum eStencilOptimizeMode
 	{

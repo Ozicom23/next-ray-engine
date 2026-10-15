@@ -955,7 +955,23 @@ void CRenderTarget::phase_screen_overlays_upscaled()
 	m_overlay_target = &rt_upscale_overlay;
 	set_viewport_size(HW.pContext, float(m_upscale_output_w), float(m_upscale_output_h));
 
+	// Night vision samples blur buffers of the scene (s_blur_2/4/8). Built again here from the upscaled image, at output
+	// resolution: the quads stay in render pixels (screen_res) and the output-sized viewport scales them, so the blur
+	// covers the same part of the screen as before, from a sharper image (r4_upscaler_nvg_blur)
+	extern int ps_r4_upscaler_nvg_blur;
+	const bool nvg_blur = ps_r2_nightvision > 0 && ps_r4_upscaler_nvg_blur && !Device.m_SecondViewport.IsSVPFrame() &&
+		upscale_blur_targets();
+	if (nvg_blur)
+	{
+		swap_blur_targets();
+		PIX_EVENT(phase_blur_upscaled);
+		phase_blur();
+	}
+
 	phase_screen_overlays();
+
+	if (nvg_blur)
+		swap_blur_targets();
 
 	m_overlay_target = nullptr;
 	rt_Generic_0->pTexture->surface_set(own);
