@@ -116,6 +116,10 @@ public:
 	void r_dsgraph_capture_lights();
 	void r_dsgraph_capture_static();
 	void r_dsgraph_capture_dynamic(CObject* O = nullptr);
+	// r_dsgraph_capture_dynamic's spatial query run ahead of it: it only reads the spatial database (shared lock) and
+	// fills this graph's own list, so the lamps' queries run in parallel (r4_lights_parallel_query)
+	void r_dsgraph_prefetch_dynamic();
+	bool m_dynamic_prefetched = false;
 
 	void clear()
 	{

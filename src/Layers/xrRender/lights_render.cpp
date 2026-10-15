@@ -49,6 +49,19 @@ IC void hud_light_restore(xr_map<light*, std::pair<Fvector, Fvector>>& saved_pos
 	}
 }
 
+// A lamp drawn with its decorative objects instead of the level's geometry
+static bool light_has_decor(light* L)
+{
+	for (int f = 0; f < 6; f++)
+		if (L->decor_object[f] && !L->decor_object[f]->getDestroy())
+			return true;
+	return false;
+}
+
+#ifdef USE_DX11
+int ps_r4_lights_parallel_query = 1; // lamps that don't move: their dynamic objects' spatial queries in parallel
+#endif
+
 void CRender::render_lights(light_Package& LP)
 {
 	xr_map<light*, std::pair<Fvector, Fvector>> saved_pos;
@@ -155,6 +168,20 @@ void CRender::render_lights(light_Package& LP)
 		//	}
 		//	if (left_some_lights_that_doesn't cast shadows)
 		//		accumulate them
+#ifdef USE_DX11
+		// Lamps that don't move (their static geometry is kept): the spatial queries of their dynamic objects in
+		// parallel, ahead of the loop below. Each fills its lamp's own list and only reads the spatial database
+		if (ps_r4_lights_parallel_query)
+		{
+			PROF_EVENT("Lights: parallel dynamic queries");
+			static xr_vector<light*> query;
+			query.clear();
+			for (light* L : LP.v_shadowed)
+				if (L->m_moving_frames >= 32u && !light_has_decor(L))
+					query.push_back(L);
+			xr_parallel_for(0u, u32(query.size()), [](u32 i) { query[i]->GMLight.r_dsgraph_prefetch_dynamic(); });
+		}
+#endif
 		while (!LP.v_shadowed.empty())
 		{
 			// if (has_spot_shadowed)
@@ -191,11 +218,13 @@ void CRender::render_lights(light_Package& LP)
 									decorative_light = true;
 								}
 							}
+							L->GMLight.m_dynamic_prefetched = false;
 						}
 						else
 						{
 							if (L->m_moving_frames<32u)
 							{
+								L->GMLight.m_dynamic_prefetched = false; // moved since: queried after the traverse
 								L->GMLight.RGraph.clear_static<false>();
 								L->GMLight.traverse((CSector*)L->SpatialComponent->spatial.sector, L->X.S.frustum, L->position, L->X.S.combine);
 								L->GMLight.r_dsgraph_capture_static();

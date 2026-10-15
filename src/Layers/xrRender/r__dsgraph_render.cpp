@@ -543,6 +543,16 @@ void CDSGraphManager::r_dsgraph_capture_lights()
 	}
 }
 
+void CDSGraphManager::r_dsgraph_prefetch_dynamic()
+{
+	m_dynamic_prefetched = false;
+	if (i_start && psDeviceFlags.test(rsDrawDynamic))
+	{
+		g_SpatialSpace->q_frustum(lstRenderables, ISpatial_DB::O_ORDERED, i_doptions, i_frustum);
+		m_dynamic_prefetched = true;
+	}
+}
+
 void CDSGraphManager::r_dsgraph_capture_dynamic(CObject* O)
 {
 	PROF_EVENT("r_dsgraph_capture_dynamic")
@@ -554,14 +564,17 @@ void CDSGraphManager::r_dsgraph_capture_dynamic(CObject* O)
 	{
 		if (psDeviceFlags.test(rsDrawDynamic))
 		{
-			// Traverse object database
-			g_SpatialSpace->q_frustum
-			(
-				lstRenderables,
-				ISpatial_DB::O_ORDERED,
-				i_doptions,
-				i_frustum
-			);
+			// Traverse object database (unless r_dsgraph_prefetch_dynamic did)
+			if (m_dynamic_prefetched)
+				m_dynamic_prefetched = false;
+			else
+				g_SpatialSpace->q_frustum
+				(
+					lstRenderables,
+					ISpatial_DB::O_ORDERED,
+					i_doptions,
+					i_frustum
+				);
 			if (dbg)
 			{
 				const u32 spatial_count = u32(lstRenderables.size());
