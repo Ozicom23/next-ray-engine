@@ -585,6 +585,7 @@ IC void CBackend::set_Constants(R_constant_table* C)
 
 		ID3DBuffer* tempBuffer[MaxCBuffers];
 		m_bound_cbuffers_count = 0;
+		PROF_EVENT("set_Constants: slots");
 		for (int stage = 0; stage < stages; ++stage)
 		{
 			ref_cbuffer* cur = current[stage];
@@ -650,6 +651,7 @@ IC void CBackend::set_Constants(R_constant_table* C)
 	}
 
 	// process constant-loaders
+	PROF_EVENT("set_Constants: handlers");
 	R_constant_table::c_table::iterator it = C->table.begin();
 	R_constant_table::c_table::iterator end = C->table.end();
 	for (; it != end; it++)
