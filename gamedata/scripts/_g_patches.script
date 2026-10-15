@@ -95,6 +95,21 @@ _G.str_explode_lim = function(str, sep, n, plain)
 	return t
 end
 
+-- alife_object(id) for ids without an object: nil from the engine at once (alife_object_exists_native). Many mods
+-- scan every id on a load ("for i = 1, 65534 do alife_object(i)"), and most ids have no object; those went through
+-- alife() and its object method only to return nil. Any other case (no simulator yet, an id that isn't a plain
+-- number, an existing object) goes to _g.script's alife_object exactly as before
+if alife_object_exists_native and _G.alife_object then
+	local lua_alife_object = _G.alife_object
+	local exists = alife_object_exists_native
+	_G.alife_object = function(id)
+		if exists(id) == false then
+			return nil
+		end
+		return lua_alife_object(id)
+	end
+end
+
 -- trim and str_explode from _g.script, done by the engine when it can (str_explode_native, trim_native): same
 -- results for string arguments and separators without pattern characters, which is nearly every call. Loading
 -- GAMMA's scripts on every level load spent most of its time in these two.

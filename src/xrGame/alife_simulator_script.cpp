@@ -593,8 +593,31 @@ xr_vector<u16>& get_children(const CALifeSimulator *self, CSE_Abstract *object)
 }
 
 #pragma optimize("s",on)
+// alife_object_exists_native(id): true or false when the simulator exists and id is a valid object id (0..65534), nil
+// otherwise. A raw Lua C function: _g_patches' alife_object returns nil through it for ids without an object, the
+// part of mods' "for i = 1, 65534 do alife_object(i)" scans (dozens of GAMMA scripts, one per load each) that went
+// through alife() and the luabind method only to return nil. Every other case goes to alife_object as before
+static int alife_object_exists_native(lua_State* L)
+{
+	const CALifeSimulator* sim = ai().get_alife();
+	if (!sim || lua_type(L, 1) != LUA_TNUMBER)
+	{
+		lua_pushnil(L);
+		return 1;
+	}
+	const lua_Number n = lua_tonumber(L, 1);
+	if (!(n >= 0 && n < 65535) || n != lua_Number(s64(n)))
+	{
+		lua_pushnil(L);
+		return 1;
+	}
+	lua_pushboolean(L, sim->objects().object(ALife::_OBJECT_ID(n), true) != nullptr);
+	return 1;
+}
+
 void CALifeSimulator::script_register(lua_State* L)
 {
+	lua_register(L, "alife_object_exists_native", alife_object_exists_native);
 	module(L)
 	[
 		class_<alife_object_iterator>("alife_object_iterator")

@@ -5,6 +5,8 @@
 -- 1. Dynamic Anomalies (drx_da_main): every anomaly registers its own actor_on_update closure, which returns at once
 --    unless the anomaly's own timer (binder.on_update_time) is due. Some 200 closures are called every frame only to
 --    return. One dispatcher calls a closure only when its anomaly's timer is due; the closure checks it itself again.
+--    The due time is kept next to the closure: only the anomaly's spawn and the closure itself write it (read back
+--    after each call), and reading it from the binder every frame is what cost the time.
 -- 2. Useful Idiots (illish.lib.surge): the emission cover cache, built on the first update of every load (about 1.6 s
 --    of raycasts behind the loading screen), is built by the mod's own code spread over the first frames, ~2 ms each.
 --    Anything that needs the cache sooner gets it finished on the spot; with an emission running it builds at once.
@@ -12,7 +14,7 @@
 local log_prefix = "* [neXt-Ray perf] "
 
 local function msg(fmt, ...)
-	printf(log_prefix .. fmt, ...)
+	log(log_prefix .. string.format(fmt, ...))
 end
 
 ---------------------------------------------------------------------------------------------------------------------
@@ -34,7 +36,7 @@ local function da_patch()
 		if cb and cb.callback == "actor_on_update" and type(cb.func) == "function" and type(self.on_update_time) == "number" then
 			UnregisterScriptCallback("actor_on_update", cb.func)
 			if not da_sched[key] then da_count = da_count + 1 end
-			da_sched[key] = { binder = self, func = cb.func }
+			da_sched[key] = { binder = self, func = cb.func, due = self.on_update_time }
 		end
 		return result
 	end
@@ -55,13 +57,16 @@ local function da_update()
 	local tg = time_global()
 	local callbacks = drx_da_main.callbacks
 	for key, e in pairs(da_sched) do
-		local cb = callbacks[key]
-		if not cb or cb.func ~= e.func then
-			-- The mod removed or registered the closure again: from now on it is the mod's own registration
-			da_sched[key] = nil
-			da_count = da_count - 1
-		elseif tg >= (e.binder.on_update_time or 0) then
-			e.func()
+		if tg >= e.due then
+			local cb = callbacks[key]
+			if not cb or cb.func ~= e.func then
+				-- The mod removed or registered the closure again: from now on it is the mod's own registration
+				da_sched[key] = nil
+				da_count = da_count - 1
+			else
+				e.func()
+				e.due = e.binder.on_update_time or tg
+			end
 		end
 	end
 end
@@ -71,7 +76,7 @@ end
 
 local surge_co = nil          -- the mod's buildCovers running as a coroutine
 local surge_timer = nil       -- time spent in it this frame
-local surge_budget_us = 2000
+local surge_budget_us = 1500
 local surge_load_window = true -- until the first actor_on_update: the call from the first update
 local surge_frames = 0
 
@@ -97,13 +102,14 @@ end
 local function surge_patch()
 	local ok, SURGE = pcall(require, "illish.lib.surge")
 	if not (ok and type(SURGE) == "table" and type(SURGE.buildCovers) == "function") then return false end
-	local okr, RAY = pcall(require, "illish.lib.ray")
-	if not (okr and type(RAY) == "table" and type(RAY.cast) == "function") then return false end
+	local okp, POS = pcall(require, "illish.lib.pos")
+	if not (okp and type(POS) == "table" and type(POS.snap) == "function") then return false end
 
 	local build = SURGE.buildCovers
-	local cast = RAY.cast
+	local snap = POS.snap
 
-	RAY.cast = function(...)
+	-- nearbyCovers snaps each sample point to the AI grid, then tests it for cover: the step to yield between
+	POS.snap = function(...)
 		if surge_co and surge_timer and coroutine.running() == surge_co then
 			surge_timer:stop()
 			if surge_timer:time() >= surge_budget_us then
@@ -111,7 +117,7 @@ local function surge_patch()
 			end
 			surge_timer:start()
 		end
-		return cast(...)
+		return snap(...)
 	end
 
 	SURGE.buildCovers = function(force)
