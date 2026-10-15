@@ -808,6 +808,8 @@ void CDSGraphManager::add_leaf_Static(dxRender_Visual* pVisual)
 
 #ifdef USE_DX11
 int ps_r4_main_parallel_cull = 1;
+// HOM's recheck delay on the worker threads (::Random is not thread-safe)
+static thread_local CRandom s_static_rnd(s32(GetCurrentThreadId()));
 
 // r_dsgraph_insert_static's rejects that don't depend on the graph (object size, depth of a recent frame): the same
 // tests in the same order, so a visual it passes is one r_dsgraph_insert_static would not reject for these reasons
@@ -857,12 +859,12 @@ void CDSGraphManager::collect_Static(dxRender_Visual* pVisual, const CFrustum& f
 		if (fcvPartial == VIS)
 		{
 			for (auto V : pV->children)
-				collect_Static(V, frustum, planes, out, rnd);
+				collect_Static((dxRender_Visual*)V, frustum, planes, out, rnd);
 		}
 		else
 		{
 			for (auto V : pV->children)
-				collect_leaf_Static(V, out, rnd);
+				collect_leaf_Static((dxRender_Visual*)V, out, rnd);
 		}
 	}break;
 
@@ -880,7 +882,7 @@ void CDSGraphManager::collect_Static(dxRender_Visual* pVisual, const CFrustum& f
 		if (ssa > r_ssaLOD_B)
 		{
 			for (auto V : pV->children)
-				collect_leaf_Static(V, out, rnd);
+				collect_leaf_Static((dxRender_Visual*)V, out, rnd);
 		}
 	}break;
 
@@ -904,7 +906,7 @@ void CDSGraphManager::collect_leaf_Static(dxRender_Visual* pVisual, xr_vector<st
 	{
 		FHierrarhyVisual* pV = (FHierrarhyVisual*)pVisual;
 		for (auto V : pV->children)
-			collect_leaf_Static(V, out, rnd);
+			collect_leaf_Static((dxRender_Visual*)V, out, rnd);
 	}break;
 
 	case MT_LOD:
@@ -921,7 +923,7 @@ void CDSGraphManager::collect_leaf_Static(dxRender_Visual* pVisual, xr_vector<st
 		if (ssa > r_ssaLOD_B)
 		{
 			for (auto V : pV->children)
-				collect_leaf_Static(V, out, rnd);
+				collect_leaf_Static((dxRender_Visual*)V, out, rnd);
 		}
 	}break;
 
@@ -970,9 +972,9 @@ bool CDSGraphManager::add_Static_parallel(IRenderVisual* piRoot, CFrustum& frust
 			for (auto V : pV->children)
 			{
 				if (fcvPartial == VIS)
-					split(V, planes, depth + 1);
+					split((dxRender_Visual*)V, planes, depth + 1);
 				else if (V)
-					works.push_back({ V, 0, true });
+					works.push_back({ (dxRender_Visual*)V, 0, true });
 			}
 		}
 	} splitter_{ frustum };
@@ -985,7 +987,7 @@ bool CDSGraphManager::add_Static_parallel(IRenderVisual* piRoot, CFrustum& frust
 		PROF_EVENT("main view: parallel static visibility");
 		xr_parallel_for(0u, count, [this, &frustum](u32 i)
 		{
-			thread_local CRandom rnd(s32(GetCurrentThreadId()));
+			CRandom& rnd = s_static_rnd;
 			xr_vector<static_item>& out = results[i];
 			out.clear();
 			const work& w = works[i];
