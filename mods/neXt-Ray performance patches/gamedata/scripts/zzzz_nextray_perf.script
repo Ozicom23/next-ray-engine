@@ -1,0 +1,184 @@
+-- neXt-Ray performance patches. The original mods stay untouched: this script wraps their functions at runtime, and
+-- what they compute and show stays the same; only when the work runs changes. Remove this mod to undo all of it.
+--   nextray_perf_off: a file in appdata turns every patch off (for comparisons).
+--
+-- 1. Dynamic Anomalies (drx_da_main): every anomaly registers its own actor_on_update closure, which returns at once
+--    unless the anomaly's own timer (binder.on_update_time) is due. Some 200 closures are called every frame only to
+--    return. One dispatcher calls a closure only when its anomaly's timer is due; the closure checks it itself again.
+-- 2. Useful Idiots (illish.lib.surge): the emission cover cache, built on the first update of every load (about 1.6 s
+--    of raycasts behind the loading screen), is built by the mod's own code spread over the first frames, ~2 ms each.
+--    Anything that needs the cache sooner gets it finished on the spot; with an emission running it builds at once.
+
+local log_prefix = "* [neXt-Ray perf] "
+
+local function msg(fmt, ...)
+	printf(log_prefix .. fmt, ...)
+end
+
+---------------------------------------------------------------------------------------------------------------------
+-- 1. Dynamic Anomalies: one dispatcher for the anomalies' timed update closures
+
+local da_sched = {} -- update key -> { binder = anomaly binder, func = the mod's closure }
+local da_count = 0
+
+local function da_patch()
+	if not (drx_da_main and type(drx_da_main.callbacks) == "table") then return false end
+	local abf = bind_anomaly_field and bind_anomaly_field.anomaly_field_binder
+	if not (abf and abf.net_spawn and abf.net_destroy) then return false end
+
+	local spawn = abf.net_spawn
+	abf.net_spawn = function(self, se_abstract)
+		local result = spawn(self, se_abstract)
+		local key = self.update_key
+		local cb = key and drx_da_main.callbacks[key]
+		if cb and cb.callback == "actor_on_update" and type(cb.func) == "function" and type(self.on_update_time) == "number" then
+			UnregisterScriptCallback("actor_on_update", cb.func)
+			if not da_sched[key] then da_count = da_count + 1 end
+			da_sched[key] = { binder = self, func = cb.func }
+		end
+		return result
+	end
+
+	local destroy = abf.net_destroy
+	abf.net_destroy = function(self)
+		local key = self.update_key
+		if key and da_sched[key] then
+			da_sched[key] = nil
+			da_count = da_count - 1
+		end
+		return destroy(self)
+	end
+	return true
+end
+
+local function da_update()
+	local tg = time_global()
+	local callbacks = drx_da_main.callbacks
+	for key, e in pairs(da_sched) do
+		local cb = callbacks[key]
+		if not cb or cb.func ~= e.func then
+			-- The mod removed or registered the closure again: from now on it is the mod's own registration
+			da_sched[key] = nil
+			da_count = da_count - 1
+		elseif tg >= (e.binder.on_update_time or 0) then
+			e.func()
+		end
+	end
+end
+
+---------------------------------------------------------------------------------------------------------------------
+-- 2. Useful Idiots: the emission cover cache built over the first frames
+
+local surge_co = nil          -- the mod's buildCovers running as a coroutine
+local surge_timer = nil       -- time spent in it this frame
+local surge_budget_us = 2000
+local surge_load_window = true -- until the first actor_on_update: the call from the first update
+local surge_frames = 0
+
+local function surge_finish()
+	local co = surge_co
+	surge_timer = nil -- no yields from here on
+	while co and coroutine.status(co) ~= "dead" do
+		local okc, err = coroutine.resume(co)
+		if not okc then
+			msg("cover cache build failed: %s", tostring(err))
+			break
+		end
+	end
+	surge_co = nil
+end
+
+local function surge_active()
+	local s = surge_manager and surge_manager.is_started and surge_manager.is_started()
+	local p = psi_storm_manager and psi_storm_manager.is_started and psi_storm_manager.is_started()
+	return s or p
+end
+
+local function surge_patch()
+	local ok, SURGE = pcall(require, "illish.lib.surge")
+	if not (ok and type(SURGE) == "table" and type(SURGE.buildCovers) == "function") then return false end
+	local okr, RAY = pcall(require, "illish.lib.ray")
+	if not (okr and type(RAY) == "table" and type(RAY.cast) == "function") then return false end
+
+	local build = SURGE.buildCovers
+	local cast = RAY.cast
+
+	RAY.cast = function(...)
+		if surge_co and surge_timer and coroutine.running() == surge_co then
+			surge_timer:stop()
+			if surge_timer:time() >= surge_budget_us then
+				coroutine.yield()
+			end
+			surge_timer:start()
+		end
+		return cast(...)
+	end
+
+	SURGE.buildCovers = function(force)
+		if surge_co then
+			if force then
+				surge_co = nil -- abandoned: the forced build starts over below
+			else
+				surge_finish()
+			end
+		elseif surge_load_window and not force and not surge_active() then
+			surge_load_window = false
+			surge_frames = 0
+			surge_co = coroutine.create(function() build() end)
+			return {}, {} -- the first update ignores the result
+		end
+		return build(force)
+	end
+	return true
+end
+
+local function surge_update()
+	surge_load_window = false
+	if not surge_co then return end
+	if surge_active() then
+		-- An emission started while the cache was still building: finish it now, as the mod would have had it
+		surge_finish()
+		msg("emission started: cover cache finished at once")
+		return
+	end
+	surge_timer = profile_timer()
+	surge_timer:start()
+	local okc, err = coroutine.resume(surge_co)
+	surge_frames = surge_frames + 1
+	if not okc then
+		msg("cover cache build failed: %s", tostring(err))
+		surge_co = nil
+	elseif coroutine.status(surge_co) == "dead" then
+		msg("emission cover cache built over %d frames", surge_frames)
+		surge_co = nil
+	end
+	surge_timer = nil
+end
+
+---------------------------------------------------------------------------------------------------------------------
+
+local da_on, surge_on = false, false
+local reported = false
+
+local function actor_on_update()
+	if da_on then da_update() end
+	if surge_on then surge_update() end
+	if not reported then
+		reported = true
+		msg("Dynamic Anomalies dispatcher %s (%d anomalies), emission cover cache %s", da_on and "on" or "off", da_count,
+			surge_on and "spread over frames" or "off")
+	end
+end
+
+function on_game_start()
+	local f = getFS()
+	local off = io.open(f:update_path("$app_data_root$", "nextray_perf_off"), "r")
+	if off then
+		off:close()
+		msg("off (appdata\\nextray_perf_off)")
+		return
+	end
+	da_on = da_patch()
+	surge_on = surge_patch()
+	RegisterScriptCallback("actor_on_update", actor_on_update)
+end

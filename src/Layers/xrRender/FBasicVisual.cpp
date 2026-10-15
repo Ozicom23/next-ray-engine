@@ -123,6 +123,26 @@ void dxRender_Visual::MarkAsGlowing(bool is_glowing)
 
 void dxRender_Visual::SetShaderTexture(LPCSTR s_shader, LPCSTR s_texture)
 {
+	// The same shader and texture again (scripts re-apply them, e.g. 3DSS on every slot change, 63 calls and 1.4 s per
+	// load): the shader would be compiled anew only to resolve to the resource already set, so nothing to do. The
+	// creation uses the visual's own skinning and hud flags, which a call doesn't change
+	if (shader)
+	{
+		const bool same_texture = !(s_texture && s_texture[0]) || dbg_texture.equal(shared_str(s_texture));
+		bool same_shader = !(s_shader && s_shader[0]);
+		if (!same_shader)
+		{
+			string_path name;
+			xr_strcpy(name, s_shader);
+			char* no_shadow = strstr(name, "$no_shadows");
+			if (no_shadow)
+				*no_shadow = 0;
+			same_shader = dbg_shader.equal(shared_str(name)) && !!flags.test(IRenderVisualFlags::eNoShadow) == (no_shadow != nullptr);
+		}
+		if (same_shader && same_texture)
+			return;
+	}
+
 	if (s_shader && strlen(s_shader))
 	{
 		char* shader = xr_strdup(s_shader);
