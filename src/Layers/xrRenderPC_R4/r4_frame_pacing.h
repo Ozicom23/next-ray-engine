@@ -8,7 +8,7 @@
 //     game logic instead of inside Present; windowed and borderless modes only, DXGI does not allow it on exclusive
 //     fullscreen swap chains. Needs vid_restart
 //   r4_frame_latency 1..3: frames the CPU may run ahead of the display (2); applied with vid_restart
-//   r4_frame_jit 0/1: just-in-time frame start (1). The frame also sleeps at its start so that its first GPU work
+//   r4_frame_jit 0/1: just-in-time frame start (0). The frame also sleeps at its start so that its first GPU work
 //     reaches the GPU just as the GPU finishes the frame before it: the GPU stays busy, but a frame's commands no
 //     longer wait in the queue, and the input it sampled is that much younger when it is shown. A feedback loop sets
 //     the sleep from two measurements per frame: how long the frame's first commands waited before the GPU began them

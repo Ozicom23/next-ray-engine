@@ -9,7 +9,7 @@ extern int ps_framelimiter; // r__framelimit (xrEngine)
 
 int ps_r4_swap_wait = 1;              // the swap chain's frame latency waitable object, waited at the frame start (vid_restart)
 int ps_r4_frame_latency = 2;          // frames the CPU may run ahead of the display (vid_restart)
-int ps_r4_frame_jit = 1;              // just-in-time frame start
+int ps_r4_frame_jit = 0;              // just-in-time frame start (off until it proves itself on more scenes)
 float ps_r4_frame_jit_margin = 1.f;   // ms of queued work kept ahead of the GPU
 
 namespace frame_pacing
@@ -82,8 +82,10 @@ namespace frame_pacing
 	static u32 s_win_n = 0;
 	static double s_offsets[16];      // CPU ms minus GPU ms at frame ends (fence time minus end timestamp)
 	static u32 s_offsets_n = 0, s_offsets_pos = 0;
-	static float s_gaps[16];          // GPU time between a frame's end and the next one's begin (the present blit and idle)
+	static float s_gaps[128];         // GPU time between a frame's end and the next one's begin (the present blit and idle)
 	static u32 s_gaps_n = 0, s_gaps_pos = 0;
+	static float s_floor = -1.f;      // queue time of a frame's first commands while the GPU waited for them (DXVK's
+	                                  // command thread and submission): the part of the queue no sleep removes
 	static HANDLE s_timer = nullptr;
 	static bool s_timer_tried = false;
 
@@ -126,7 +128,7 @@ namespace frame_pacing
 	}
 
 	static double offset_ms() { return s_offsets_n ? ring_min(s_offsets, s_offsets_n) : 0.0; }
-	static float blit_ms() { return s_gaps_n ? clampr(ring_min(s_gaps, s_gaps_n), 0.f, 2.f) : 0.f; }
+	static float blit_ms() { return s_gaps_n ? clampr(ring_min(s_gaps, s_gaps_n), 0.f, 1.5f) : 0.f; }
 
 	// ------------------------------------------------------------------------------------------------------------
 	// Completion fence
@@ -292,10 +294,20 @@ namespace frame_pacing
 			const float mq = median(s_win_q, 4);
 			const float mi = median(s_win_idle, 4);
 			if (mi > 0.3f)
-				s_jit_ms -= _max(mi, 0.5f); // late: the GPU waited for this frame
+			{
+				// Late: the GPU waited for these frames. Back off by half, and learn the queue floor from them
+				s_floor = s_floor < 0.f ? mq : 0.8f * s_floor + 0.2f * mq;
+				s_jit_ms = _max(0.f, 0.5f * s_jit_ms - 0.25f);
+			}
+			else if (s_floor < 0.f)
+				s_jit_ms += 0.1f; // the floor is not known yet: probe slowly towards the first idle GPU
 			else
-				s_jit_ms += 0.5f * (mq - ps_r4_frame_jit_margin); // early: the frame waited for the GPU
-			s_jit_ms = _max(s_jit_ms, 0.f);
+			{
+				// Early by the queue time above the floor and the margin: close a quarter of it per window
+				const float slack = mq - s_floor - ps_r4_frame_jit_margin;
+				if (slack > 0.f)
+					s_jit_ms += clampr(0.25f * slack, 0.05f, 1.f);
+			}
 		}
 	}
 
@@ -485,9 +497,9 @@ namespace frame_pacing
 		Msg("*   per frame: latency wait %.2f ms, sleep %.2f ms, CPU %.2f ms, Present %.2f ms, GPU %.2f ms, GPU idle %.2f ms, queued %.2f ms",
 			float(wait / n), float(sleep / n), float(cpu / n), float(present / n), gpu_n ? float(gpu / gpu_n) : 0.f,
 			idle_n ? float(idle / idle_n) : 0.f, queue_n ? float(queue / queue_n) : 0.f);
-		Msg("*   %s, max frame latency %d, just-in-time start %s (margin %.1f ms), vsync %s, r__framelimit %d",
+		Msg("*   %s, max frame latency %d, just-in-time start %s (margin %.1f ms, queue floor %.2f ms), vsync %s, r__framelimit %d",
 			HW.m_hFrameLatency ? "waitable swap chain" : "frame latency limited in Present", ps_r4_frame_latency,
-			ps_r4_frame_jit ? (s_fence ? "on" : "unavailable") : "off", ps_r4_frame_jit_margin,
+			ps_r4_frame_jit ? (s_fence ? "on" : "unavailable") : "off", ps_r4_frame_jit_margin, s_floor,
 			psDeviceFlags.test(rsVSync) ? "on" : "off", ps_framelimiter);
 
 		string64 stamp;
@@ -660,6 +672,7 @@ namespace frame_pacing
 		s_win_n = 0;
 		s_offsets_n = s_offsets_pos = 0;
 		s_gaps_n = s_gaps_pos = 0;
+		s_floor = -1.f;
 		s_recording = s_rec_open = false;
 	}
 }
