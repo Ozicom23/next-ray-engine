@@ -197,10 +197,10 @@ public:
 
 	// CBackend::set_Constants: the constants with a handler, built at the first bind (after parse, merge, copy);
 	// handlers_always holds the ones that register the constant for later writes (transforms, tree, hemi...), run at
-	// every bind; the per-frame ones (R_constant_setup::per_frame) run once per render (frame_setup == epoch)
+	// every bind; the per-frame ones (R_constant_setup::per_frame) only when a buffer of the table wasn't written
+	// in this render yet (dx10ConstantBuffer::frame_written)
 	xr_vector<R_constant*> handlers_all, handlers_always;
 	bool handlers_built = false;
-	u32 frame_setup = u32(-1);
 
 #if defined(USE_DX10) || defined(USE_DX11)
 	typedef std::pair<u32, ref_cbuffer> cb_table_record;

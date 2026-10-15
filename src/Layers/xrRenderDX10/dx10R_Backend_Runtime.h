@@ -667,10 +667,18 @@ IC void CBackend::set_Constants(R_constant_table* C)
 		}
 		C->handlers_built = true;
 	}
-	// Bound again in the same render: the per-frame values are in the buffers already, only the registering
-	// handlers run
-	const bool all = !ps_r4_constants_per_frame || C->frame_setup != constants_epoch;
-	C->frame_setup = constants_epoch;
+	// Every buffer of the table written by per-frame handlers in this render already (shared with other tables of
+	// the same layout): only the registering handlers run
+	bool all = !ps_r4_constants_per_frame;
+	for (u32 i = 0; i < m_bound_cbuffers_count; ++i)
+	{
+		dx10ConstantBuffer* buffer = m_bound_cbuffers[i];
+		if (buffer->frame_written != constants_epoch)
+		{
+			buffer->frame_written = constants_epoch;
+			all = true;
+		}
+	}
 	for (R_constant* Cs : all ? C->handlers_all : C->handlers_always)
 		Cs->handler->setup(Cs);
 }

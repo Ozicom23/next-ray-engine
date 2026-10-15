@@ -13,6 +13,10 @@ public:
 
 	bool Similar(dx10ConstantBuffer& _in);
 	ID3DBuffer* GetBuffer() { return m_pBuffer; }
+	// The render (CBackend::constants_epoch) the per-frame constant handlers last wrote this buffer in. Buffers with
+	// one layout are shared by every shader using it, so a table whose buffers were all written in this render skips
+	// its per-frame handlers (CBackend::set_Constants)
+	u32 frame_written = u32(-1);
 
 	void Flush();
 
