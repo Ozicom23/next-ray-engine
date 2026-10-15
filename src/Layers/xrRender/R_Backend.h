@@ -111,6 +111,7 @@ public:
 	// The buffers bound by the current constant table (set_Constants), flushed before each draw
 	dx10ConstantBuffer* m_bound_cbuffers[6 * MaxCBuffers];
 	u32 m_bound_cbuffers_count = 0;
+	u32 constants_epoch = 0; // one per render of the scene (CRender::Render): per-frame constant handlers run once in it
 	D3D_PRIMITIVE_TOPOLOGY m_PrimitiveTopology;
 	ID3DInputLayout* m_pInputLayout;
 	DWORD dummy0; //	Padding to avoid warning	

@@ -39,6 +39,7 @@ void CBackend::OnFrameEnd()
 
 void CBackend::OnFrameBegin()
 {
+	constants_epoch++; // per-frame constant handlers run once per frame (and once per scene render, CRender::Render)
 	//#ifndef DEDICATED_SERVER
 #ifndef _EDITOR
 	if (!g_dedicated_server)

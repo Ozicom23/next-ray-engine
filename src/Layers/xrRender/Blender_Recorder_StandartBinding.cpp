@@ -1373,6 +1373,10 @@ static class vignette_control : public R_constant_setup
 void CBlender_Compile::SetMapping()
 {
 	// matrices
+	// Values that hold for a whole render: written once per render, not at every shader change (R_constant_setup::per_frame).
+	// Not among them: anything a render phase sets by name as well (fog_color, L_ambient, vignette_control), the
+	// script-driven HUD and blender parameters, and the handlers that only register the constant for later writes
+	auto r_Constant_per_frame = [this](LPCSTR name, R_constant_setup* binder) { binder->per_frame = true; r_Constant(name, binder); };
 	r_Constant("m_W", &binder_w);
 	r_Constant("m_invW", &binder_invw);
 	r_Constant("m_V", &binder_v);
@@ -1380,7 +1384,7 @@ void CBlender_Compile::SetMapping()
 	r_Constant("m_WV", &binder_wv);
 	r_Constant("m_VP", &binder_vp);
 	r_Constant("m_WVP", &binder_wvp);
-	r_Constant("m_inv_V", &binder_inv_v);
+	r_Constant_per_frame("m_inv_V", &binder_inv_v);
 
 	r_Constant("m_v_prev", &binder_v_prev);
 	r_Constant("m_p_prev", &binder_p_prev);
@@ -1408,35 +1412,35 @@ void CBlender_Compile::SetMapping()
 
 #ifndef _EDITOR
 	// fog-params
-	r_Constant("fog_plane", &binder_fog_plane);
-	r_Constant("fog_params", &binder_fog_params);
+	r_Constant_per_frame("fog_plane", &binder_fog_plane);
+	r_Constant_per_frame("fog_params", &binder_fog_params);
 	r_Constant("fog_color", &binder_fog_color);
-	r_Constant("wind_params", &binder_wind_params);
+	r_Constant_per_frame("wind_params", &binder_wind_params);
 #endif
 	// time
-	r_Constant("timers", &binder_times);
-	r_Constant("timers_game", &binder_game_times);
+	r_Constant_per_frame("timers", &binder_times);
+	r_Constant_per_frame("timers_game", &binder_game_times);
 
 	// eye-params
-	r_Constant("eye_position", &binder_eye_P);
-	r_Constant("eye_position_lerp", &binder_eye_PL); // crookr
-	r_Constant("eye_direction", &binder_eye_D);
-	r_Constant("eye_direction_lerp", &binder_eye_DL); // crookr
-	r_Constant("eye_normal", &binder_eye_N);
+	r_Constant_per_frame("eye_position", &binder_eye_P);
+	r_Constant_per_frame("eye_position_lerp", &binder_eye_PL); // crookr
+	r_Constant_per_frame("eye_direction", &binder_eye_D);
+	r_Constant_per_frame("eye_direction_lerp", &binder_eye_DL); // crookr
+	r_Constant_per_frame("eye_normal", &binder_eye_N);
 
 #ifndef _EDITOR
 	// global-lighting (env params)
-	r_Constant("L_sun_color", &binder_sun0_color);
-	r_Constant("L_sun_dir_w", &binder_sun0_dir_w);
-	r_Constant("L_sun_dir_e", &binder_sun0_dir_e);
+	r_Constant_per_frame("L_sun_color", &binder_sun0_color);
+	r_Constant_per_frame("L_sun_dir_w", &binder_sun0_dir_w);
+	r_Constant_per_frame("L_sun_dir_e", &binder_sun0_dir_e);
 	//	r_Constant				("L_lmap_color",	&binder_lm_color);
-	r_Constant("L_hemi_color", &binder_hemi_color);
+	r_Constant_per_frame("L_hemi_color", &binder_hemi_color);
 	r_Constant("L_ambient", &binder_amb_color);
 #endif
 
-	r_Constant("screen_res", &binder_screen_res);
-	r_Constant("ogse_c_screen", &binder_screen_params);
-	r_Constant("near_far_plane", &binder_near_far_plane);
+	r_Constant_per_frame("screen_res", &binder_screen_res);
+	r_Constant_per_frame("ogse_c_screen", &binder_screen_params);
+	r_Constant_per_frame("near_far_plane", &binder_near_far_plane);
 	// misc
 	r_Constant("m_hud_params", &binder_hud_params);	//--#SM+#--
 	r_Constant("m_hud_fov_params", &binder_hud_fov_params);
@@ -1444,13 +1448,13 @@ void CBlender_Compile::SetMapping()
 	r_Constant("m_blender_mode", &binder_blend_mode);	//--#SM+#--
 	
 	// Rain
-	r_Constant("rain_params", &binder_rain_params);
+	r_Constant_per_frame("rain_params", &binder_rain_params);
 	//Actor data
-	r_Constant("actor_data", &binder_actor_data);
+	r_Constant_per_frame("actor_data", &binder_actor_data);
 	//Image corrections
-	r_Constant("pp_img_corrections", &pp_image_corrections);
+	r_Constant_per_frame("pp_img_corrections", &pp_image_corrections);
 	//Image corrections
-	r_Constant("pp_img_cg", &pp_color_grading);
+	r_Constant_per_frame("pp_img_cg", &pp_color_grading);
 	
 	// detail
 	//if (bDetail	&& detail_scaler)
@@ -1461,78 +1465,78 @@ void CBlender_Compile::SetMapping()
 		r_Constant("dt_params", detail_scaler);
 
 	// PDA
-	r_Constant("pda_params", &binder_pda_params);
+	r_Constant_per_frame("pda_params", &binder_pda_params);
 
 	// Screen Space Shaders	
-	r_Constant("ssfx_floravariation", &ssfx_floravariation);
-	r_Constant("ssfx_fog", &ssfx_fog);
-	r_Constant("ssfx_timedelta", &ssfx_fTimeDelta);
-	r_Constant("ssfx_motionblur", &ssfx_motionblur);
-	r_Constant("ssfx_jitter", &ssfx_jitter);
-	r_Constant("ssfx_pom", &ssfx_pom);
+	r_Constant_per_frame("ssfx_floravariation", &ssfx_floravariation);
+	r_Constant_per_frame("ssfx_fog", &ssfx_fog);
+	r_Constant_per_frame("ssfx_timedelta", &ssfx_fTimeDelta);
+	r_Constant_per_frame("ssfx_motionblur", &ssfx_motionblur);
+	r_Constant_per_frame("ssfx_jitter", &ssfx_jitter);
+	r_Constant_per_frame("ssfx_pom", &ssfx_pom);
 
-	r_Constant("ssfx_terrain_pom", &ssfx_terrain_pom);
-	r_Constant("ssfx_bloom_1", &ssfx_bloom_1);
-	r_Constant("ssfx_bloom_2", &ssfx_bloom_2);
+	r_Constant_per_frame("ssfx_terrain_pom", &ssfx_terrain_pom);
+	r_Constant_per_frame("ssfx_bloom_1", &ssfx_bloom_1);
+	r_Constant_per_frame("ssfx_bloom_2", &ssfx_bloom_2);
 
-	r_Constant("ssfx_issvp", &ssfx_issvp);
-	r_Constant("ssfx_hud_hemi", &ssfx_hud_hemi);
-	r_Constant("ssfx_il_setup", &ssfx_il);
-	r_Constant("ssfx_il_setup2", &ssfx_il_setup1);
-	r_Constant("ssfx_ao_setup", &ssfx_ao);
-	r_Constant("ssfx_ao_setup2", &ssfx_ao_setup1);
-	r_Constant("ssfx_water", &ssfx_water);
-	r_Constant("ssfx_water_setup1", &ssfx_water_setup1);
-	r_Constant("ssfx_water_setup2", &ssfx_water_setup2);
+	r_Constant_per_frame("ssfx_issvp", &ssfx_issvp);
+	r_Constant_per_frame("ssfx_hud_hemi", &ssfx_hud_hemi);
+	r_Constant_per_frame("ssfx_il_setup", &ssfx_il);
+	r_Constant_per_frame("ssfx_il_setup2", &ssfx_il_setup1);
+	r_Constant_per_frame("ssfx_ao_setup", &ssfx_ao);
+	r_Constant_per_frame("ssfx_ao_setup2", &ssfx_ao_setup1);
+	r_Constant_per_frame("ssfx_water", &ssfx_water);
+	r_Constant_per_frame("ssfx_water_setup1", &ssfx_water_setup1);
+	r_Constant_per_frame("ssfx_water_setup2", &ssfx_water_setup2);
 
-	r_Constant("ssfx_volumetric", &ssfx_volumetric);
-	r_Constant("ssfx_ssr_2", &ssfx_ssr_2);
-	r_Constant("ssfx_terrain_offset", &ssfx_terrain_offset);
-	r_Constant("ssfx_shadow_bias", &ssfx_shadow_bias);
-	r_Constant("ssfx_wind_anim", &ssfx_wind_anim);
-	r_Constant("ssfx_wind_anim_prev", &ssfx_wind_anim_prev);
-	r_Constant("sky_color", &binder_sky_color);
-	r_Constant("ssfx_wpn_dof_1", &ssfx_wpn_dof_1);
-	r_Constant("ssfx_wpn_dof_2", &ssfx_wpn_dof_2);
-	r_Constant("ssfx_blood_decals", &ssfx_blood_decals);
-	r_Constant("ssfx_hud_drops_1", &ssfx_hud_drops_1);
-	r_Constant("ssfx_hud_drops_2", &ssfx_hud_drops_2);
-	r_Constant("ssfx_lightsetup_1", &ssfx_lightsetup_1);
-	r_Constant("ssfx_is_underground", &ssfx_is_underground);
-	r_Constant("ssfx_wetsurfaces_1", &ssfx_wetsurfaces_1);
-	r_Constant("ssfx_wetsurfaces_2", &ssfx_wetsurfaces_2);
-	r_Constant("ssfx_gloss", &ssfx_gloss);
-	r_Constant("ssfx_florafixes_1", &ssfx_florafixes_1);
-	r_Constant("ssfx_florafixes_2", &ssfx_florafixes_2);
-	r_Constant("ssfx_wsetup_grass", &ssfx_wind_grass);
-	r_Constant("ssfx_wsetup_trees", &ssfx_wind_trees);
-	r_Constant("ssfx_lut", &ssfx_lut);
+	r_Constant_per_frame("ssfx_volumetric", &ssfx_volumetric);
+	r_Constant_per_frame("ssfx_ssr_2", &ssfx_ssr_2);
+	r_Constant_per_frame("ssfx_terrain_offset", &ssfx_terrain_offset);
+	r_Constant_per_frame("ssfx_shadow_bias", &ssfx_shadow_bias);
+	r_Constant_per_frame("ssfx_wind_anim", &ssfx_wind_anim);
+	r_Constant_per_frame("ssfx_wind_anim_prev", &ssfx_wind_anim_prev);
+	r_Constant_per_frame("sky_color", &binder_sky_color);
+	r_Constant_per_frame("ssfx_wpn_dof_1", &ssfx_wpn_dof_1);
+	r_Constant_per_frame("ssfx_wpn_dof_2", &ssfx_wpn_dof_2);
+	r_Constant_per_frame("ssfx_blood_decals", &ssfx_blood_decals);
+	r_Constant_per_frame("ssfx_hud_drops_1", &ssfx_hud_drops_1);
+	r_Constant_per_frame("ssfx_hud_drops_2", &ssfx_hud_drops_2);
+	r_Constant_per_frame("ssfx_lightsetup_1", &ssfx_lightsetup_1);
+	r_Constant_per_frame("ssfx_is_underground", &ssfx_is_underground);
+	r_Constant_per_frame("ssfx_wetsurfaces_1", &ssfx_wetsurfaces_1);
+	r_Constant_per_frame("ssfx_wetsurfaces_2", &ssfx_wetsurfaces_2);
+	r_Constant_per_frame("ssfx_gloss", &ssfx_gloss);
+	r_Constant_per_frame("ssfx_florafixes_1", &ssfx_florafixes_1);
+	r_Constant_per_frame("ssfx_florafixes_2", &ssfx_florafixes_2);
+	r_Constant_per_frame("ssfx_wsetup_grass", &ssfx_wind_grass);
+	r_Constant_per_frame("ssfx_wsetup_trees", &ssfx_wind_trees);
+	r_Constant_per_frame("ssfx_lut", &ssfx_lut);
 
 	// Shader stuff
-	r_Constant("shader_param_1", &dev_param_1);
-	r_Constant("shader_param_2", &dev_param_2);
-	r_Constant("shader_param_3", &dev_param_3);
-	r_Constant("shader_param_4", &dev_param_4);
-	r_Constant("shader_param_5", &dev_param_5);
-	r_Constant("shader_param_6", &dev_param_6);
-	r_Constant("shader_param_7", &dev_param_7);
-	r_Constant("shader_param_8", &dev_param_8);
+	r_Constant_per_frame("shader_param_1", &dev_param_1);
+	r_Constant_per_frame("shader_param_2", &dev_param_2);
+	r_Constant_per_frame("shader_param_3", &dev_param_3);
+	r_Constant_per_frame("shader_param_4", &dev_param_4);
+	r_Constant_per_frame("shader_param_5", &dev_param_5);
+	r_Constant_per_frame("shader_param_6", &dev_param_6);
+	r_Constant_per_frame("shader_param_7", &dev_param_7);
+	r_Constant_per_frame("shader_param_8", &dev_param_8);
 	
 	// Mark Switch
-	r_Constant("markswitch_current", &markswitch_current);
-	r_Constant("markswitch_count", &markswitch_count);
-	r_Constant("markswitch_color", &markswitch_color);
+	r_Constant_per_frame("markswitch_current", &markswitch_current);
+	r_Constant_per_frame("markswitch_count", &markswitch_count);
+	r_Constant_per_frame("markswitch_color", &markswitch_color);
 
 	// Shader 3D Scopes
-	r_Constant("s3ds_param_1", &s3ds_param_1);
-	r_Constant("s3ds_param_2", &s3ds_param_2);
-	r_Constant("s3ds_param_3", &s3ds_param_3);
-	r_Constant("s3ds_param_4", &s3ds_param_4);
+	r_Constant_per_frame("s3ds_param_1", &s3ds_param_1);
+	r_Constant_per_frame("s3ds_param_2", &s3ds_param_2);
+	r_Constant_per_frame("s3ds_param_3", &s3ds_param_3);
+	r_Constant_per_frame("s3ds_param_4", &s3ds_param_4);
 
 	// crookr
-	r_Constant("fakescope_params1", &binder_fakescope_params);
-	r_Constant("fakescope_params2", &binder_fakescope_ca);
-	r_Constant("fakescope_params3", &binder_fakescope_params3);
+	r_Constant_per_frame("fakescope_params1", &binder_fakescope_params);
+	r_Constant_per_frame("fakescope_params2", &binder_fakescope_ca);
+	r_Constant_per_frame("fakescope_params3", &binder_fakescope_params3);
 
 	// other common
 	for (u32 it = 0; it < DEV->v_constant_setup.size(); it++)
@@ -1545,23 +1549,23 @@ void CBlender_Compile::SetMapping()
 	r_Constant("L_glowing", &binder_silencer_glowing);		//--DSR-- SilencerOverheat
 	//--DSR-- HeatVision_start
 	r_Constant("L_hotness", &binder_heatvision_hotness);
-	r_Constant("heatvision_params1", &binder_heatvision_params1);
-	r_Constant("heatvision_params2", &binder_heatvision_params2);
-	r_Constant("heatvision_params3", &binder_heatvision_args1);
-	r_Constant("heatvision_params4", &binder_heatvision_args2);
+	r_Constant_per_frame("heatvision_params1", &binder_heatvision_params1);
+	r_Constant_per_frame("heatvision_params2", &binder_heatvision_params2);
+	r_Constant_per_frame("heatvision_params3", &binder_heatvision_args1);
+	r_Constant_per_frame("heatvision_params4", &binder_heatvision_args2);
 	//--DSR-- HeatVision_end
 
 	// HDR10 parameters
-    r_Constant("hdr10_parameters1",  &binder_hdr10_parameters1);
-    r_Constant("hdr10_parameters2",  &binder_hdr10_parameters2);
-    r_Constant("hdr10_parameters3",  &binder_hdr10_parameters3);
-	r_Constant("hdr10_parameters4",  &binder_hdr10_parameters4);
-	r_Constant("hdr10_parameters5",  &binder_hdr10_parameters5);
-	r_Constant("hdr10_parameters6",  &binder_hdr10_parameters6);
-	r_Constant("hdr10_parameters7",  &binder_hdr10_parameters7);
-	r_Constant("hdr10_parameters8",  &binder_hdr10_parameters8);
-	r_Constant("hdr10_parameters9",  &binder_hdr10_parameters9);
-	r_Constant("hdr10_parameters10", &binder_hdr10_parameters10);
+    r_Constant_per_frame("hdr10_parameters1", &binder_hdr10_parameters1);
+    r_Constant_per_frame("hdr10_parameters2", &binder_hdr10_parameters2);
+    r_Constant_per_frame("hdr10_parameters3", &binder_hdr10_parameters3);
+	r_Constant_per_frame("hdr10_parameters4", &binder_hdr10_parameters4);
+	r_Constant_per_frame("hdr10_parameters5", &binder_hdr10_parameters5);
+	r_Constant_per_frame("hdr10_parameters6", &binder_hdr10_parameters6);
+	r_Constant_per_frame("hdr10_parameters7", &binder_hdr10_parameters7);
+	r_Constant_per_frame("hdr10_parameters8", &binder_hdr10_parameters8);
+	r_Constant_per_frame("hdr10_parameters9", &binder_hdr10_parameters9);
+	r_Constant_per_frame("hdr10_parameters10", &binder_hdr10_parameters10);
 
 	r_Constant("vignette_control", &vignette_control);
 }

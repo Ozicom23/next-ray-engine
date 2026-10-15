@@ -74,6 +74,7 @@ extern u32 g_r;
 
 void CRender::Render()
 {
+	RCache.constants_epoch++; // per-frame constant handlers run once per render (R_constant_setup::per_frame)
 	PIX_EVENT(CRender_Render);
 
 	rmNormal();

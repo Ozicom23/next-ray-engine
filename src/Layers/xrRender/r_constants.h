@@ -129,6 +129,7 @@ struct ECORE_API R_constant : public xr_resource
 #endif	//	USE_DX10
 	R_constant_load samp;
 	R_constant_setup* handler;
+	u32 frame_setup = u32(-1); // the render (CBackend::constants_epoch) a per-frame handler last ran for it
 
 	R_constant() : type(u16(-1)), destination(0), handler(nullptr) {};
 	//R_constant& operator=(const R_constant& Other) = delete;
@@ -178,6 +179,10 @@ typedef resptr_core<R_constant, resptr_base<R_constant>> ref_constant;
 class ECORE_API R_constant_setup
 {
 public:
+	// The value it writes holds for a whole render (environment, camera, console values): set once per render per
+	// constant instead of at every shader change (r4_constants_per_frame, CBackend::set_Constants)
+	bool per_frame = false;
+
 	virtual void setup(R_constant* C) = 0;
 
 	virtual ~R_constant_setup()

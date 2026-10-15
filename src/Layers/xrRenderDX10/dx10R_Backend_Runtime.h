@@ -525,6 +525,7 @@ IC bool CBackend::CBuffersNeedUpdate(ref_cbuffer buf1[MaxCBuffers], ref_cbuffer 
 	return bRes;
 }
 
+extern int ps_r4_constants_per_frame;
 IC void CBackend::set_Constants(R_constant_table* C)
 {
 	PROF_EVENT("CBackend::set_Constants");
@@ -656,7 +657,16 @@ IC void CBackend::set_Constants(R_constant_table* C)
 		R_constant* Cs = &**it;
 		VERIFY(Cs);
 		if (Cs && Cs->handler)
+		{
+			// A per-frame value already written in this render: the buffer is shared, the value holds
+			if (Cs->handler->per_frame && ps_r4_constants_per_frame)
+			{
+				if (Cs->frame_setup == constants_epoch)
+					continue;
+				Cs->frame_setup = constants_epoch;
+			}
 			Cs->handler->setup(Cs);
+		}
 	}
 }
 
