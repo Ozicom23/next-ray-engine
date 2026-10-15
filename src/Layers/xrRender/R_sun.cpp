@@ -7,8 +7,17 @@
 
 #ifdef USE_DX11
 #include "../xrRenderPC_R4/r4_sun_receivers.h"
+#include "../xrRenderPC_R4/r4_sun_cache.h"
 extern Fvector3 ps_r4_sun_smap_scale;
 extern int ps_r4_sun_parallel_cull;
+
+// Far cascades can render into a corner of the shadow map (r4_sun_smap_scale): the pixels a cascade uses
+static u32 sun_smap_used(u32 cascade_ind)
+{
+	const u32 smap_size = RImplementation.o.smapsize;
+	const float smap_scale = cascade_ind < 3 ? clampr((&ps_r4_sun_smap_scale.x)[cascade_ind], 0.25f, 1.f) : 1.f;
+	return _min(smap_size, u32(iFloor(float(smap_size) * smap_scale)));
+}
 #endif
 
 // render_sun_cascade in steps, for culling the cascades' static geometry in parallel (r4_sun_parallel_cull)
@@ -114,6 +123,22 @@ void CRender::render_sun_cascades()
 			xr_parallel_for(0u, count, [this](u32 i)
 			{
 				sun::cascade& cascade = m_sun_cascades[i];
+				if (cascade.cache_mode == sun_cache::m_window)
+				{
+					// Kept map: no statics; the dynamic casters are queried with the frame's frustum
+					cascade.GMCascade.i_vBase = cascade.cull_COP;
+					cascade.GMCascade.i_frustum = cascade.cull_frustum;
+					cascade.GMCascade.i_mXFORM = cascade.cull_xform;
+					return;
+				}
+				if (cascade.cache_mode == sun_cache::m_refresh)
+				{
+					// The kept map's grown box; the receivers of later frames are unknown: no caster culling
+					cascade.GMCascade.i_sun_cascade = -1;
+					cascade.GMCascade.traverse(pOutdoorSector, sun_cache::big_frustum(i), cascade.cull_COP, sun_cache::big_xform(i));
+					cascade.GMCascade.r_dsgraph_capture_static();
+					return;
+				}
 				cascade.GMCascade.traverse(pOutdoorSector, cascade.cull_frustum, cascade.cull_COP, cascade.cull_xform);
 				cascade.GMCascade.r_dsgraph_capture_static();
 			});
@@ -328,6 +353,20 @@ void CRender::render_sun_cascade(u32 cascade_ind)
 
 			cascade.xform = cull_xform;
 
+#ifdef USE_DX11
+			// A far cascade kept between frames (r4_sun_cache.h): the window's transform draws and accumulates
+			{
+				Fmatrix window;
+				cascade.cache_mode = sun_cache::frame(cascade_ind, u32(m_sun_cascades.size()), cull_xform, sun_smap_used(cascade_ind),
+					map_size, dist + map_size, L_dir, window);
+				if (cascade.cache_mode != sun_cache::m_off)
+				{
+					cull_xform = window;
+					cascade.xform = window;
+				}
+			}
+#endif
+
 			s32 limit = o.smapsize - 1;
 			fuckingsun->X.D.minX = 0;
 			fuckingsun->X.D.maxX = limit;
@@ -353,8 +392,26 @@ void CRender::render_sun_cascade(u32 cascade_ind)
     {
         PROF_EVENT("Render Cascade: SMAP traverse");
         phase = PHASE_SMAP;
-        cascade.GMCascade.traverse(pOutdoorSector, cascade.cull_frustum, cascade.cull_COP, cascade.cull_xform);
-        cascade.GMCascade.r_dsgraph_capture(false, true);
+#ifdef USE_DX11
+        if (cascade.cache_mode != sun_cache::m_off)
+        {
+            if (cascade.cache_mode == sun_cache::m_refresh)
+            {
+                cascade.GMCascade.i_sun_cascade = -1;
+                cascade.GMCascade.traverse(pOutdoorSector, sun_cache::big_frustum(cascade_ind), cascade.cull_COP, sun_cache::big_xform(cascade_ind));
+                cascade.GMCascade.r_dsgraph_capture_static();
+            }
+            cascade.GMCascade.i_vBase = cascade.cull_COP;
+            cascade.GMCascade.i_frustum = cascade.cull_frustum;
+            cascade.GMCascade.i_mXFORM = cascade.cull_xform;
+            cascade.GMCascade.r_dsgraph_capture_dynamic();
+        }
+        else
+#endif
+        {
+            cascade.GMCascade.traverse(pOutdoorSector, cascade.cull_frustum, cascade.cull_COP, cascade.cull_xform);
+            cascade.GMCascade.r_dsgraph_capture(false, true);
+        }
     }
 
     // Finalize & Cleanup
@@ -372,8 +429,7 @@ void CRender::render_sun_cascade(u32 cascade_ind)
         // Far cascades can render into a corner of the shadow map: its pixel cost (mostly alpha tested tree leaves)
         // goes down with the area, and far shadows are small on screen. accum_direct_cascade scales the lookup to it.
         const u32 smap_size = RImplementation.o.smapsize;
-        const float smap_scale = cascade_ind < 3 ? clampr((&ps_r4_sun_smap_scale.x)[cascade_ind], 0.25f, 1.f) : 1.f;
-        const u32 smap_used = _min(smap_size, u32(iFloor(float(smap_size) * smap_scale)));
+        const u32 smap_used = sun_smap_used(cascade_ind);
         Target->m_sun_smap_scale = float(smap_used) / float(smap_size);
         auto set_smap_viewport = [smap_used, smap_size]()
         {
@@ -391,6 +447,36 @@ void CRender::render_sun_cascade(u32 cascade_ind)
         {
             bool bDeffered_Shadows = cascade.GMCascade.RGraph.mapStaticPasses[0][0].size() || cascade.GMCascade.RGraph.mapDynamicPasses[0][0].size();
             bool bForward_Shadows = cascade.GMCascade.RGraph.mapStaticPasses[1][0].size() || cascade.GMCascade.RGraph.mapDynamicPasses[1][0].size() || cascade.GMCascade.RGraph.mapStaticSorted.Sorted.size() || cascade.GMCascade.RGraph.mapDynamicSorted.Sorted.size();
+#ifdef USE_DX11
+            if (cascade.cache_mode != sun_cache::m_off)
+            {
+                // A kept cascade (r4_sun_cache.h): the statics into the kept map when it is refreshed, its window
+                // into the atlas, the dynamic casters and grass over it
+                if (cascade.cache_mode == sun_cache::m_refresh)
+                {
+                    dxPixEventWrapper refresh_event(L"SUN_SHADOWMAP_KEPT_REFRESH");
+                    sun_cache::begin_refresh(cascade_ind);
+                    RCache.set_xform_world(Fidentity);
+                    RCache.set_xform_view(Fidentity);
+                    RCache.set_xform_project(sun_cache::big_xform(cascade_ind));
+                    cascade.GMCascade.r_dsgraph_render_static(0);
+                }
+                sun_cache::draw_window(cascade_ind, Target->rt_smap_depth->pZRT, smap_used);
+                Target->phase_smap_direct(fuckingsun, SE_SUN_FAR, false);
+                set_smap_viewport();
+                RCache.set_xform_world(Fidentity);
+                RCache.set_xform_view(Fidentity);
+                RCache.set_xform_project(fuckingsun->X.D.combine);
+                cascade.GMCascade.r_dsgraph_render_dynamic(0);
+                if (psDeviceFlags2.test(rsGrassShadow) && cascade_ind <= ps_ssfx_grass_shadows.x)
+                {
+                    Details->fade_distance = dm_fade * dm_fade * ps_ssfx_grass_shadows.y;
+                    Details->Render();
+                }
+                fuckingsun->X.D.transluent = FALSE;
+            }
+            else
+#endif
             if (bDeffered_Shadows || bForward_Shadows)
             {
                 Target->phase_smap_direct(fuckingsun, SE_SUN_FAR);

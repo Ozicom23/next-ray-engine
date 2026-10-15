@@ -649,6 +649,20 @@ public:
 };
 namespace sun_receivers { void start_stats(float seconds); }
 extern int ps_r4_sun_caster_cull;
+namespace sun_cache { void start_stats(float seconds); }
+extern int ps_r4_sun_cascade_cache;
+extern float ps_r4_sun_cascade_cache_drift;
+class CCC_SunCacheStats : public IConsole_Command
+{
+public:
+	CCC_SunCacheStats(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; }
+	virtual void Execute(LPCSTR args)
+	{
+		const float seconds = float(atof(args));
+		sun_cache::start_stats(seconds > 0.f ? _min(seconds, 60.f) : 5.f);
+	}
+};
+
 class CCC_SunCasterStats : public IConsole_Command
 {
 public:
@@ -1489,6 +1503,9 @@ void xrRender_initconsole()
 	CMD1(CCC_HizStats, "stat_hiz");
 	CMD4(CCC_Integer, "r4_hiz_cull", &ps_r4_hiz_cull, 0, 1);
 	CMD1(CCC_SunCasterStats, "stat_sun_casters");
+	CMD4(CCC_Integer, "r4_sun_cascade_cache", &ps_r4_sun_cascade_cache, 0, 2);
+	CMD4(CCC_Float, "r4_sun_cascade_cache_drift", &ps_r4_sun_cascade_cache_drift, 0.1f, 4.f);
+	CMD1(CCC_SunCacheStats, "stat_sun_cache");
 	CMD1(CCC_TexStreamStats, "stat_tex_stream");
 	CMD4(CCC_Integer, "r4_sky_on_demand", &ps_r4_sky_on_demand, 0, 1); // read when the weathers are created
 	CMD4(CCC_Integer, "r4_tex_stream", &ps_r4_tex_stream, 0, 1); // read when textures load (next level load)

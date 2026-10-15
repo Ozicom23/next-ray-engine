@@ -555,6 +555,7 @@ void CRender::create()
 }
 
 namespace hiz { void destroy(); }
+namespace sun_cache { void destroy(); }
 
 namespace tex_streaming { void update(); void clear(); } // dx10SH_Texture.cpp
 
@@ -563,6 +564,7 @@ void CRender::destroy()
 	tex_streaming::clear();
 	hiz::destroy();
 	light_smap_keep::destroy();
+	sun_cache::destroy();
 	m_bMakeAsyncSS = false;
 	FluidManager.Destroy();
 	GMBase.destroy();

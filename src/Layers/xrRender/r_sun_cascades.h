@@ -34,6 +34,7 @@ namespace sun
 		CFrustum cull_frustum;
 		Fvector3 cull_COP;
 		Fmatrix cull_xform;
+		int cache_mode = 0; // sun_cache::mode for the frame (r4_sun_cache.h)
 
 		CDSGraphManager GMCascade = CDSGraphManager(u32(0), u32(STYPE_RENDERABLE + STYPE_RENDERABLESHADOW), { true,false,false,false,true,false,false });
 	};

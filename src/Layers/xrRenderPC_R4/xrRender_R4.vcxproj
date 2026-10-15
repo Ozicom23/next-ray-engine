@@ -568,6 +568,7 @@
     <ClInclude Include="r4_hiz.h" />
     <ClInclude Include="r4_tex_stream.h" />
     <ClInclude Include="r4_sun_receivers.h" />
+    <ClInclude Include="r4_sun_cache.h" />
     <ClInclude Include="r4_upscaler.h" />
     <ClInclude Include="r4_rendertarget.h" />
     <ClInclude Include="r4_rendertarget_wallmarks.h" />
@@ -799,6 +800,7 @@
     <ClCompile Include="r4_hiz.cpp" />
     <ClCompile Include="r4_tex_stream.cpp" />
     <ClCompile Include="r4_sun_receivers.cpp" />
+    <ClCompile Include="r4_sun_cache.cpp" />
     <ClCompile Include="r4_upscaler.cpp" />
     <ClCompile Include="..\..\3rd party\FidelityFX-FSR3\src\components\fsr3upscaler\ffx_fsr3upscaler.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>

@@ -465,7 +465,7 @@ public:
 	void phase_hdao();
 	void phase_downsamp();
 	void phase_wallmarks();
-	void phase_smap_direct(light* L, u32 sub_phase);
+	void phase_smap_direct(light* L, u32 sub_phase, bool clear = true); // clear: false keeps a kept cascade's window (r4_sun_cache.h)
 	void phase_smap_direct_tsh(light* L, u32 sub_phase);
 	void phase_smap_spot_clear();
 	void phase_smap_spot(light* L);
