@@ -355,6 +355,7 @@ xr_token perf_overlay_token[] = {
 };
 u32 ps_perf_overlay_pos = 1; // screen corner
 int ps_r4_dbg_shadow_skip = 0; // measuring only: 1 trees, 2 other static, 4 dynamic objects left out of shadow maps
+int ps_r4_dbg_main_skip = 0; // measuring only: the same for the main view
 Fvector3 ps_r4_sun_smap_scale = { 1.f, 1.f, 1.f }; // sun cascades 0, 1, 2: part of the shadow map size each renders at
 int ps_r4_smap_order = 2; // shadow map draw order: 0 shaders only, 1 trees last, 2 + trees front to back, 3 + all casters (r__dsgraph_build.cpp)
 int ps_r4_sun_parallel_cull = 1; // sun cascades: static geometry of all three culled at once on worker threads
@@ -1483,6 +1484,7 @@ void xrRender_initconsole()
 	CMD1(CCC_GpuMemoryStats,    "stat_gpu_memory");
 	CMD1(CCC_GpuPassStats,      "stat_gpu_passes");
 	CMD4(CCC_DbgShadowSkip, "r4_dbg_shadow_skip", &ps_r4_dbg_shadow_skip, 0, 7);
+	CMD4(CCC_DbgShadowSkip, "r4_dbg_main_skip", &ps_r4_dbg_main_skip, 0, 7);
 	CMD1(CCC_TreeBatchStats, "stat_tree_batches");
 	CMD1(CCC_HizStats, "stat_hiz");
 	CMD4(CCC_Integer, "r4_hiz_cull", &ps_r4_hiz_cull, 0, 1);

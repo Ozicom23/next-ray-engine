@@ -35,6 +35,8 @@ ICF float CalcSSA(float& distSQ, Fvector& C, dxRender_Visual* V)
 // r4_dbg_shadow_skip: leave kinds of objects out of all shadow maps to measure their cost with stat_gpu_passes.
 // 1 trees, 2 other static objects, 4 dynamic objects
 extern int ps_r4_dbg_shadow_skip;
+// r4_dbg_main_skip: the same for the main view (g-buffer), 1 trees, 2 other static objects, 4 dynamic objects
+extern int ps_r4_dbg_main_skip;
 // r4_smap_order: draw order inside a shadow map. Trees and bushes (alpha tested leaves, the bulk of its pixel work)
 // go after the opaque casters, so their leaves behind a wall or the ground fail the depth test before shading;
 // 2 also orders the trees front to back from the light (depth in 16 steps of the map's range), 3 orders every
@@ -48,6 +50,8 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 {
 #ifdef USE_DX11
 	if ((ps_r4_dbg_shadow_skip & 4) && i_mask[fl_shmap])
+		return;
+	if ((ps_r4_dbg_main_skip & 4) && i_mask[fl_normal])
 		return;
 #endif
 
@@ -239,10 +243,11 @@ extern float ps_r__ssaDISCARD_fade_k;
 void CDSGraphManager::r_dsgraph_insert_static(dxRender_Visual *pVisual, bool prefiltered)
 {
 #ifdef USE_DX11
-	if (ps_r4_dbg_shadow_skip && i_mask[fl_shmap])
+	if ((ps_r4_dbg_shadow_skip && i_mask[fl_shmap]) || (ps_r4_dbg_main_skip && i_mask[fl_normal]))
 	{
 		const bool tree = pVisual->Type == MT_TREE_ST || pVisual->Type == MT_TREE_PM;
-		if (ps_r4_dbg_shadow_skip & (tree ? 1 : 2))
+		const int skip = i_mask[fl_shmap] ? ps_r4_dbg_shadow_skip : ps_r4_dbg_main_skip;
+		if (skip & (tree ? 1 : 2))
 			return;
 	}
 #endif
