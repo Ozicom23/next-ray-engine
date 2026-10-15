@@ -551,9 +551,10 @@ namespace frame_pacing
 			collect_queries();
 		}
 		const bool jit = ps_r4_frame_jit && game_frame && s_fence;
+		if (wanted())
+			update_controller(); // the clock offset and the GPU gaps, for the log too; the sleep moves on jit frames only
 		if (jit)
 		{
-			update_controller();
 			const float ms = _min(s_jit_ms, sleep_cap());
 			if (ms > 0.2f)
 			{
