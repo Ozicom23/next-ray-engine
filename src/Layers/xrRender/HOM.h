@@ -45,6 +45,7 @@ public:
 	void __stdcall MT_RENDER();
 
 	BOOL visible(vis_data& vis);
+	BOOL visible(vis_data& vis, CRandom& rnd); // with the caller's random generator (worker threads)
 	BOOL visible(Fbox3& B);
 	BOOL visible(Fsphere& S);
 	BOOL visible(sPoly& P);

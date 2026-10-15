@@ -354,6 +354,11 @@ BOOL CHOM::visible(Fsphere& S)
 
 BOOL CHOM::visible(vis_data& vis)
 {
+	return visible(vis, ::Random);
+}
+
+BOOL CHOM::visible(vis_data& vis, CRandom& rnd)
+{
 	if (Device.dwFrame < vis.hom_frame) return TRUE; // not at this time :)
 	if (!bEnabled) return TRUE; // return - everything visible
 
@@ -372,7 +377,7 @@ BOOL CHOM::visible(vis_data& vis)
 	if (result)
 	{
 		// visible	- delay next test
-		delay = ::Random.randI(5 * 2, 5 * 5);
+		delay = rnd.randI(5 * 2, 5 * 5);
 	}
 	else
 	{

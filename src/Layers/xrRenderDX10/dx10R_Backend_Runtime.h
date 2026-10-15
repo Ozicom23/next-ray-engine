@@ -531,14 +531,18 @@ IC void CBackend::set_Constants(R_constant_table* C)
 	// caching
 	if (ctable == C) return;
 	ctable = C;
-	xforms.unmap();
-	hemi.unmap();
-	tree.unmap();
+	{
+		PROF_EVENT("set_Constants: unmap");
+		xforms.unmap();
+		hemi.unmap();
+		tree.unmap();
 #ifdef USE_DX11
-	LOD.unmap		();
+		LOD.unmap		();
 #endif
-	StateManager.UnmapConstants();
+		StateManager.UnmapConstants();
+	}
 	if (0 == C) return;
+	PROF_EVENT("set_Constants: tables");
 
 	PGO(Msg("PGO:c-table"));
 
@@ -601,6 +605,7 @@ IC void CBackend::set_Constants(R_constant_table* C)
 			for (int i = lo; i <= hi; ++i)
 				tempBuffer[i] = next[stage][i] ? next[stage][i]->GetBuffer() : 0;
 			const UINT count = UINT(hi - lo + 1);
+			PROF_EVENT("set_Constants: bind");
 			switch (stage)
 			{
 			case 0: HW.pContext->PSSetConstantBuffers(lo, count, &tempBuffer[lo]); break;

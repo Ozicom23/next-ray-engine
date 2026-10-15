@@ -231,7 +231,7 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 
 extern float ps_r__ssaDISCARD_exp;
 extern float ps_r__ssaDISCARD_fade_k;
-void CDSGraphManager::r_dsgraph_insert_static(dxRender_Visual *pVisual)
+void CDSGraphManager::r_dsgraph_insert_static(dxRender_Visual *pVisual, bool prefiltered)
 {
 #ifdef USE_DX11
 	if (ps_r4_dbg_shadow_skip && i_mask[fl_shmap])
@@ -278,7 +278,8 @@ void CDSGraphManager::r_dsgraph_insert_static(dxRender_Visual *pVisual)
 	float SSA = CalcSSA(distSQ, pVisual->vis.sphere.P, pVisual);
     Flags16& flags = pVisual->flags;
     ShaderElement* sh_d = &*pVisual->shader->E[4];
-    if (!(flags.test(IRenderVisualFlags::eIgnoreOptimization) || (sh_d && sh_d->flags.bEmissive)))
+    // prefiltered: prefilter_static made the size and depth tests below already
+    if (!prefiltered && !(flags.test(IRenderVisualFlags::eIgnoreOptimization) || (sh_d && sh_d->flags.bEmissive)))
     {
         if (SSA < r_ssaDISCARD)
             return;
@@ -311,7 +312,7 @@ void CDSGraphManager::r_dsgraph_insert_static(dxRender_Visual *pVisual)
 
 #ifdef USE_DX11
 	// Hidden in a recent frame's depth (r4_hiz.h)
-	if (i_mask[fl_normal] && hiz::test_static(pVisual->vis.box, pVisual->Type == MT_TREE_ST || pVisual->Type == MT_TREE_PM))
+	if (!prefiltered && i_mask[fl_normal] && hiz::test_static(pVisual->vis.box, pVisual->Type == MT_TREE_ST || pVisual->Type == MT_TREE_PM))
 		return;
 #endif
 
@@ -804,6 +805,212 @@ void CDSGraphManager::add_leaf_Static(dxRender_Visual* pVisual)
 	}break;
 	}
 }
+
+#ifdef USE_DX11
+int ps_r4_main_parallel_cull = 1;
+
+// r_dsgraph_insert_static's rejects that don't depend on the graph (object size, depth of a recent frame): the same
+// tests in the same order, so a visual it passes is one r_dsgraph_insert_static would not reject for these reasons
+bool CDSGraphManager::prefilter_static(dxRender_Visual* pVisual)
+{
+	float distSQ;
+	const float SSA = CalcSSA(distSQ, pVisual->vis.sphere.P, pVisual);
+	Flags16& flags = pVisual->flags;
+	ShaderElement* sh_d = &*pVisual->shader->E[4];
+	if (!(flags.test(IRenderVisualFlags::eIgnoreOptimization) || (sh_d && sh_d->flags.bEmissive)))
+	{
+		if (SSA < r_ssaDISCARD)
+			return false;
+		const float fade_start = r_ssaDISCARD * ps_r__ssaDISCARD_fade_k;
+		if (SSA < fade_start)
+		{
+			const float survival_chance = (SSA - r_ssaDISCARD) / (fade_start - r_ssaDISCARD);
+			const u32 hash = GetFvectorHash(pVisual->vis.sphere.P);
+			constexpr float hash_to_float = 1.0f / 4294967296.0f;
+			const float val = hash * hash_to_float;
+			if (val > _powf(survival_chance, ps_r__ssaDISCARD_exp))
+				return false;
+		}
+	}
+	if (hiz::test_static(pVisual->vis.box, pVisual->Type == MT_TREE_ST || pVisual->Type == MT_TREE_PM))
+		return false;
+	return true;
+}
+
+// add_Static for the main view (fl_normal), collecting instead of inserting
+void CDSGraphManager::collect_Static(dxRender_Visual* pVisual, const CFrustum& frustum, u32 planes, xr_vector<static_item>& out, CRandom& rnd)
+{
+	if (!pVisual)
+		return;
+	vis_data& vis = pVisual->vis;
+	const EFC_Visible VIS = frustum.testSAABB(vis.sphere.P, vis.sphere.R, vis.box.data(), planes);
+	if (fcvNone == VIS)
+		return;
+	if (!RImplementation.HOM.visible(vis, rnd))
+		return;
+
+	switch (pVisual->Type)
+	{
+	case MT_HIERRARHY:
+	{
+		FHierrarhyVisual* pV = (FHierrarhyVisual*)pVisual;
+		if (fcvPartial == VIS)
+		{
+			for (auto V : pV->children)
+				collect_Static(V, frustum, planes, out, rnd);
+		}
+		else
+		{
+			for (auto V : pV->children)
+				collect_leaf_Static(V, out, rnd);
+		}
+	}break;
+
+	case MT_LOD:
+	{
+		FLOD* pV = (FLOD*)pVisual;
+		float D;
+		const float ssa = CalcSSA(D, pV->vis.sphere.P, pV) * pV->lod_factor;
+		if (ssa < r_ssaLOD_A)
+		{
+			if (ssa < r_ssaDISCARD)
+				return;
+			out.push_back({ pVisual, D, ssa, true });
+		}
+		if (ssa > r_ssaLOD_B)
+		{
+			for (auto V : pV->children)
+				collect_leaf_Static(V, out, rnd);
+		}
+	}break;
+
+	default:
+		if (prefilter_static(pVisual))
+			out.push_back({ pVisual, 0.f, 0.f, false });
+	}
+}
+
+// add_leaf_Static for the main view, collecting instead of inserting
+void CDSGraphManager::collect_leaf_Static(dxRender_Visual* pVisual, xr_vector<static_item>& out, CRandom& rnd)
+{
+	if (!pVisual)
+		return;
+	if (!RImplementation.HOM.visible(pVisual->vis, rnd))
+		return;
+
+	switch (pVisual->Type)
+	{
+	case MT_HIERRARHY:
+	{
+		FHierrarhyVisual* pV = (FHierrarhyVisual*)pVisual;
+		for (auto V : pV->children)
+			collect_leaf_Static(V, out, rnd);
+	}break;
+
+	case MT_LOD:
+	{
+		FLOD* pV = (FLOD*)pVisual;
+		float D;
+		const float ssa = CalcSSA(D, pV->vis.sphere.P, pV) * pV->lod_factor;
+		if (ssa < r_ssaLOD_A)
+		{
+			if (ssa < r_ssaDISCARD)
+				break;
+			out.push_back({ pVisual, D, ssa, true });
+		}
+		if (ssa > r_ssaLOD_B)
+		{
+			for (auto V : pV->children)
+				collect_leaf_Static(V, out, rnd);
+		}
+	}break;
+
+	default:
+		if (prefilter_static(pVisual))
+			out.push_back({ pVisual, 0.f, 0.f, false });
+	}
+}
+
+// The top two levels of the hierarchy tested here, as add_Static does; what is below them is collected in parallel,
+// one list per subtree, and inserted afterwards in add_Static's order. False: not done (not the main view)
+bool CDSGraphManager::add_Static_parallel(IRenderVisual* piRoot, CFrustum& frustum, u32 planes)
+{
+	if (!ps_r4_main_parallel_cull || !i_mask[fl_normal] || i_mask[fl_shmap] || i_sun_cascade >= 0)
+		return false;
+
+	struct work
+	{
+		dxRender_Visual* visual;
+		u32 planes;
+		bool leaf; // a child of a fully visible hierarchy: add_leaf_Static, else add_Static
+	};
+	static xr_vector<work> works;
+	static xr_vector<xr_vector<static_item>> results;
+	works.clear();
+
+	struct splitter
+	{
+		const CFrustum& frustum;
+		void split(dxRender_Visual* pVisual, u32 planes, int depth)
+		{
+			if (!pVisual)
+				return;
+			if (depth >= 2 || pVisual->Type != MT_HIERRARHY)
+			{
+				works.push_back({ pVisual, planes, false });
+				return;
+			}
+			vis_data& vis = pVisual->vis;
+			const EFC_Visible VIS = frustum.testSAABB(vis.sphere.P, vis.sphere.R, vis.box.data(), planes);
+			if (fcvNone == VIS)
+				return;
+			if (!RImplementation.HOM.visible(vis))
+				return;
+			FHierrarhyVisual* pV = (FHierrarhyVisual*)pVisual;
+			for (auto V : pV->children)
+			{
+				if (fcvPartial == VIS)
+					split(V, planes, depth + 1);
+				else if (V)
+					works.push_back({ V, 0, true });
+			}
+		}
+	} splitter_{ frustum };
+	splitter_.split((dxRender_Visual*)piRoot, planes, 0);
+
+	const u32 count = u32(works.size());
+	if (results.size() < count)
+		results.resize(count);
+	{
+		PROF_EVENT("main view: parallel static visibility");
+		xr_parallel_for(0u, count, [this, &frustum](u32 i)
+		{
+			thread_local CRandom rnd(s32(GetCurrentThreadId()));
+			xr_vector<static_item>& out = results[i];
+			out.clear();
+			const work& w = works[i];
+			if (w.leaf)
+				collect_leaf_Static(w.visual, out, rnd);
+			else
+				collect_Static(w.visual, frustum, w.planes, out, rnd);
+		});
+	}
+	{
+		PROF_EVENT("main view: static insert");
+		for (u32 i = 0; i < count; ++i)
+		{
+			for (const static_item& it : results[i])
+			{
+				if (it.lod)
+					RGraph.mapLOD.emplace_back(it.D, it.ssa, nullptr, it.visual, nullptr, nullptr, false);
+				else
+					r_dsgraph_insert_static(it.visual, true);
+			}
+		}
+	}
+	return true;
+}
+#endif
 
 void CDSGraphManager::add_leafs_Static(xr_vector<dxRender_Visual*>& children)
 {

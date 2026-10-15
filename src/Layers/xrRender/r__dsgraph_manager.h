@@ -66,7 +66,21 @@ public:
 	void add_leaf_Static(dxRender_Visual* pVisual);
 	void add_leafs_Static(xr_vector<dxRender_Visual*>& children);
 	void add_leafs_Static(xr_vector<IRenderVisual*>& children);
-	void r_dsgraph_insert_static(dxRender_Visual* pVisual);
+	void r_dsgraph_insert_static(dxRender_Visual* pVisual, bool prefiltered = false);
+#ifdef USE_DX11
+	// Main view static geometry in parallel (r4_main_parallel_cull): the visibility tests on worker threads, then the
+	// visible visuals inserted on this thread in the order add_Static would have inserted them
+	struct static_item
+	{
+		dxRender_Visual* visual;
+		float D, ssa;
+		bool lod; // a LOD's far version (mapLOD), else a visual for r_dsgraph_insert_static
+	};
+	bool add_Static_parallel(IRenderVisual* root, CFrustum& frustum, u32 planes);
+	void collect_Static(dxRender_Visual* pVisual, const CFrustum& frustum, u32 planes, xr_vector<static_item>& out, CRandom& rnd);
+	void collect_leaf_Static(dxRender_Visual* pVisual, xr_vector<static_item>& out, CRandom& rnd);
+	bool prefilter_static(dxRender_Visual* pVisual);
+#endif
 
 	virtual void add_Dynamic(IRenderVisual* piVisual, Fmatrix* xform);
 	void add_Dynamic(dxRender_Visual* pVisual, Fmatrix* xform);

@@ -466,6 +466,10 @@ void CDSGraphManager::r_dsgraph_capture_static()
 							++dbg->static_add_root_calls_noopt;
 						}
 					}
+#ifdef USE_DX11
+					if (add_Static_parallel((IRenderVisual*)pair.key->root(), frustums.front(), frustums.front().getMask()))
+						continue;
+#endif
 					add_Static((IRenderVisual*)pair.key->root(), frustums.front(), frustums.front().getMask());
 					continue;
 				}
