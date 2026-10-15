@@ -178,7 +178,7 @@ void start_stats(float seconds)
 	Msg("* [Sun cascade cache] measuring for %.0f s...", seconds);
 }
 
-mode frame(u32 cascade, u32 cascade_count, const Fmatrix& xform, u32 used, float size, float far, const Fvector& sun_dir, Fmatrix& window_xform)
+mode frame(u32 cascade, u32 cascade_count, const Fmatrix& xform, u32 used, float size, float far_plane, const Fvector& sun_dir, Fmatrix& window_xform)
 {
 	if (s_stats && Device.dwTimeGlobal >= s_end_time)
 		finish_stats();
@@ -277,7 +277,7 @@ mode frame(u32 cascade, u32 cascade_count, const Fmatrix& xform, u32 used, float
 		grow.identity();
 		grow._11 = 1.f / k;
 		grow._22 = 1.f / k;
-		grow._33 = (far - 0.1f) / (far + z_margin - 0.1f);
+		grow._33 = (far_plane - 0.1f) / (far_plane + z_margin - 0.1f);
 		e.xform.mul(grow, xform);
 		e.frustum.CreateFromMatrix(e.xform, FRUSTUM_P_ALL);
 		e.dir = sun_dir;

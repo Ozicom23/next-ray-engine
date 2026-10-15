@@ -16,10 +16,10 @@ namespace sun_cache
 	enum mode { m_off = 0, m_window, m_refresh };
 
 	// After a cascade's transform is computed for the frame. xform: the cascade's transform, used: the atlas pixels
-	// it renders to (r4_sun_smap_scale), size: the box side, far: its ortho far distance. Returns m_off (render as
+	// it renders to (r4_sun_smap_scale), size: the box side, far_plane: its ortho far distance. Returns m_off (render as
 	// usual), m_window (the kept map's window into the atlas) or m_refresh (draw the statics into the kept map first);
 	// window_xform is then the transform to draw the dynamic casters and accumulate with.
-	mode frame(u32 cascade, u32 cascade_count, const Fmatrix& xform, u32 used, float size, float far, const Fvector& sun_dir, Fmatrix& window_xform);
+	mode frame(u32 cascade, u32 cascade_count, const Fmatrix& xform, u32 used, float size, float far_plane, const Fvector& sun_dir, Fmatrix& window_xform);
 	// The kept map's transform and caster frustum, for capturing the statics on a refresh
 	Fmatrix& big_xform(u32 cascade);
 	CFrustum& big_frustum(u32 cascade);
