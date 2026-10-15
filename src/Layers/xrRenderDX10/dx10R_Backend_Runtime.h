@@ -652,24 +652,27 @@ IC void CBackend::set_Constants(R_constant_table* C)
 
 	// process constant-loaders
 	PROF_EVENT("set_Constants: handlers");
-	R_constant_table::c_table::iterator it = C->table.begin();
-	R_constant_table::c_table::iterator end = C->table.end();
-	for (; it != end; it++)
+	if (!C->handlers_built)
 	{
-		R_constant* Cs = &**it;
-		VERIFY(Cs);
-		if (Cs && Cs->handler)
+		C->handlers_all.clear();
+		C->handlers_always.clear();
+		for (ref_constant& rc : C->table)
 		{
-			// A per-frame value already written in this render: the buffer is shared, the value holds
-			if (Cs->handler->per_frame && ps_r4_constants_per_frame)
-			{
-				if (Cs->frame_setup == constants_epoch)
-					continue;
-				Cs->frame_setup = constants_epoch;
-			}
-			Cs->handler->setup(Cs);
+			R_constant* Cs = &*rc;
+			if (!Cs || !Cs->handler)
+				continue;
+			C->handlers_all.push_back(Cs);
+			if (!Cs->handler->per_frame)
+				C->handlers_always.push_back(Cs);
 		}
+		C->handlers_built = true;
 	}
+	// Bound again in the same render: the per-frame values are in the buffers already, only the registering
+	// handlers run
+	const bool all = !ps_r4_constants_per_frame || C->frame_setup != constants_epoch;
+	C->frame_setup = constants_epoch;
+	for (R_constant* Cs : all ? C->handlers_all : C->handlers_always)
+		Cs->handler->setup(Cs);
 }
 
 ICF void CBackend::ApplyRTandZB()

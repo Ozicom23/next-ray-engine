@@ -32,6 +32,7 @@ void R_constant_table::fatal(LPCSTR S)
 
 void R_constant_table::_copy(const R_constant_table& Other)
 {
+	handlers_built = false;
 	table = Other.table;
 #if defined(USE_DX10) || defined(USE_DX11)
 	m_CBTable = Other.m_CBTable;
@@ -211,6 +212,7 @@ BOOL R_constant_table::parse(void* _desc, u32 destination)
 /// !!!!!!!!FIX THIS FOR DX11!!!!!!!!!
 void R_constant_table::merge(R_constant_table* T)
 {
+	handlers_built = false;
 	if (0 == T) return;
 
 	// Real merge
@@ -271,6 +273,7 @@ void R_constant_table::merge(R_constant_table* T)
 
 void R_constant_table::clear()
 {
+	handlers_built = false;
 	//.
 	for (u32 it = 0; it < table.size(); it++)
 		table[it] = 0; //.g_constant_allocator.destroy(table[it]);
