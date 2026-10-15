@@ -51,7 +51,7 @@ static void smap_keep_apply(CTexture* T)
 {
 	for (u32 stage = 0; stage < CBackend::mtMaxPixelShaderTextures; ++stage)
 		if (RCache.get_ActiveTexture(stage) == T)
-			T->Apply(stage);
+			T->apply_view(stage);
 }
 
 static ID3DShaderResourceView* s_smap_keep_saved = nullptr;

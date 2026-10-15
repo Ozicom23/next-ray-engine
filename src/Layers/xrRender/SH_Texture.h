@@ -97,6 +97,7 @@ public:
 	// The view the texture binds, without ownership: a kept lamp shadow map in place of the atlas (light_smap_keep).
 	// The caller restores the texture's own view afterwards
 	void								set_SRView(ID3DShaderResourceView* v) { m_pSRView = v; }
+	void								apply_view(u32 stage) { Apply(stage); } // bind the current view on that stage
 #endif	//	USE_DX10
 
 private:
