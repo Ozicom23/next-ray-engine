@@ -55,6 +55,7 @@ BOOL g_bLoaded = FALSE;
 ref_light precache_light = 0;
 
 BOOL mt_calc_bones = TRUE;
+BOOL mt_calc_bones_parallel = TRUE; // the bones of the models in view on all cores (EngineThreading.cpp)
 BOOL psLua_ParallelGC = TRUE;
 BOOL psLua_ParallelGC_debug = FALSE;
 

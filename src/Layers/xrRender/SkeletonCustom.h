@@ -280,6 +280,7 @@ public:
 	// Main functionality
 	virtual void CalculateBones(BOOL bForceExact = FALSE); // Recalculate skeleton
 	void CalculateBones_Invalidate();
+	virtual void CalculateTracks();
 
 	void Callback(UpdateCallback C, void* Param)
 	{

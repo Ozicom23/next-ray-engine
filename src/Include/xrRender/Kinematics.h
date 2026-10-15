@@ -89,6 +89,9 @@ public:
 	// Main functionality
 	virtual void CalculateBones(BOOL bForceExact = FALSE) = 0; // Recalculate skeleton
 	virtual void CalculateBones_Invalidate() = 0;
+	// Advances the animation tracks under the model's lock (their end callbacks run game code), as CalculateBones
+	// does first; the bones thread runs these one after another, then the bones of all models in parallel
+	virtual void CalculateTracks() = 0;
 	virtual void Callback(UpdateCallback C, void* Param) = 0;
 
 	//	Callback: data manipulation

@@ -174,6 +174,7 @@ extern BOOL interruptFireOnAimToggle;
 extern BOOL mt_UpdateWeaponSounds;
 extern BOOL mt_Scheduler;
 extern BOOL mt_calc_bones;
+extern BOOL mt_calc_bones_parallel;
 extern BOOL mt_ph_commander;
 extern BOOL mt_TaskManager;
 extern BOOL mt_ui;
@@ -3107,6 +3108,7 @@ void CCC_RegisterCommands()
 	CMD4(CCC_Integer, "mt_scheduler", &mt_Scheduler, 0, 1);
 	CMD4(CCC_Integer, "mt_level_call", &mt_ph_commander, 0, 1);
     CMD4(CCC_Integer, "mt_calc_bones", &mt_calc_bones, 0, 1);
+    CMD4(CCC_Integer, "mt_calc_bones_parallel", &mt_calc_bones_parallel, 0, 1);
     CMD4(CCC_Integer, "mt_task_manager", &mt_TaskManager, 0, 1);
     CMD4(CCC_Integer, "mt_ui", &mt_ui, 0, 1);
 

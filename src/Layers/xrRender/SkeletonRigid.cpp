@@ -20,6 +20,12 @@ BOOL r_optimize_calculate_bones = TRUE;
 
 class IRenderable;
 
+void CKinematics::CalculateTracks()
+{
+	xrCriticalSectionGuard g(UCalc_Mutex);
+	OnCalculateBones();
+}
+
 void CKinematics::CalculateBones(BOOL bForceExact)
 {
 	PROF_EVENT("CKinematics::CalculateBones");

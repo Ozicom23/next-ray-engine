@@ -11,6 +11,7 @@
 #include "../../Include/xrRender/Kinematics.h"
 
 BOOL mt_Scheduler = TRUE;
+extern BOOL mt_calc_bones_parallel;
 
 void XRay::Engine::PreRenderThread()
 {
@@ -114,8 +115,26 @@ void XRay::Engine::CalculateBonesThread()
 	};
 	std::sort(spatialsSnapshot.begin(), spatialsSnapshot.end(), sortFunc);
 
-    for (const auto& snapshot : spatialsSnapshot)
-        snapshot.pKin->CalculateBones(TRUE);
+	if (!mt_calc_bones_parallel || spatialsSnapshot.size() < 4)
+	{
+		for (const auto& snapshot : spatialsSnapshot)
+			snapshot.pKin->CalculateBones(TRUE);
+		return;
+	}
+
+	// The animation tracks first, one model after another as before: their end callbacks run game code, some of it
+	// Lua (script-controlled creatures), which must not run on two threads at once
+	{
+		PROF_EVENT("CalculateBones: tracks");
+		for (const auto& snapshot : spatialsSnapshot)
+			snapshot.pKin->CalculateTracks();
+	}
+	// Then the bones of the models on all cores. A model's bones are its own state, calculated under its own lock;
+	// the bone callbacks (head and aim turning, ragdolls, attachments) read their own object only
+	{
+		PROF_EVENT("CalculateBones: bones");
+		xr_parallel_for(0u, u32(spatialsSnapshot.size()), [](u32 i) { spatialsSnapshot[i].pKin->CalculateBones(TRUE); });
+	}
 }
 
 extern BOOL psLua_ParallelGC;
