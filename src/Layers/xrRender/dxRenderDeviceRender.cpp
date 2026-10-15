@@ -436,6 +436,13 @@ void dxRenderDeviceRender::End()
 
 	if (!Device.m_SecondViewport.IsSVPFrame() && !Device.m_SecondViewport.isCamReady) {
 #ifdef USE_DX11
+		// One wait per Present keeps the waitable object's count: a frame drawn outside the frame loop (the loading
+		// screen draws from the loading steps) waits here instead
+		if (m_presented)
+		{
+			m_presented = false;
+			HW.WaitFrameLatency();
+		}
 		g_PerfOverlay.PresentBegin();
 		CTimer present_timer;
 		present_timer.Start();
