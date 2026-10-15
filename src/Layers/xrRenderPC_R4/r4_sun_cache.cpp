@@ -48,7 +48,7 @@ namespace
 	bool s_failed = false;
 
 	bool s_stats = false;
-	u32 s_end_time = 0;
+	u32 s_end_time = 0, s_debug_time = 0;
 
 	void release(entry& e)
 	{
@@ -223,6 +223,12 @@ mode frame(u32 cascade, u32 cascade_count, const Fmatrix& xform, u32 used, float
 			// A margin for rounding: on a refresh frame the near corners sit right on the kept range's edge
 			const float eps = 1e-4f;
 			inside = l.x >= -1.f - eps && l.x <= 1.f + eps && l.y >= -1.f - eps && l.y <= 1.f + eps && l.z >= -eps && l.z <= 1.f + eps;
+			if (!inside && s_stats && Device.dwTimeGlobal >= s_debug_time)
+			{
+				s_debug_time = Device.dwTimeGlobal + 1000;
+				Msg("* [Sun cascade cache] cascade %u corner %u outside the kept box: %.4f %.4f %.4f (sun dot %.7f, window %d %d, kept %u used %u)",
+					cascade, i, l.x, l.y, l.z, e.dir.dotproduct(sun_dir), e.ox, e.oy, big, used);
+			}
 		}
 		if (inside)
 		{
