@@ -353,11 +353,15 @@ u32 dxRenderDeviceRender::GetCacheStatPolys()
 	return RCache.stat.polys;
 }
 
-void dxRenderDeviceRender::WaitFrame()
+void dxRenderDeviceRender::WaitFrame(bool game_frame)
 {
 #ifdef USE_DX11
-	PROF_EVENT("Frame latency wait");
-	frame_pacing::frame_begin(HW.WaitFrameLatency());
+	float wait_ms;
+	{
+		PROF_EVENT("Frame latency wait");
+		wait_ms = HW.WaitFrameLatency();
+	}
+	frame_pacing::frame_begin(wait_ms, game_frame);
 #endif
 }
 
@@ -369,6 +373,7 @@ void dxRenderDeviceRender::Begin()
 
 #ifdef USE_DX11
 	g_PerfOverlay.GpuFrameBegin();
+	frame_pacing::render_begin();
 #endif
 
 	RCache.OnFrameBegin();
@@ -435,15 +440,14 @@ void dxRenderDeviceRender::End()
 #ifdef USE_DX11
 		// A frame drawn outside the frame loop (the loading screen draws from the loading steps) takes its wait here
 		HW.WaitFrameLatency();
+		frame_pacing::present_begin();
 		g_PerfOverlay.PresentBegin();
-		CTimer present_timer;
-		present_timer.Start();
 #endif
 		HW.m_pSwapChain->Present(present_interval, present_flags);
 #ifdef USE_DX11
 		g_PerfOverlay.PresentEnd();
 		HW.m_FrameWaitOwed = true;
-		frame_pacing::present_done(present_timer.GetElapsed_sec() * 1000.f, g_PerfOverlay.LastGpuMs(), g_PerfOverlay.LastGpuEndMs(), g_PerfOverlay.GpuResults());
+		frame_pacing::present_end();
 #endif
 	}
 #else //!USE_DX10 || USE_DX11

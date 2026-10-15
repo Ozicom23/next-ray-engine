@@ -20,6 +20,7 @@
 #include "D3DX10Core.h"
 #include "r4_upscaler.h"
 #include "r4_perf_overlay.h"
+#include "r4_frame_pacing.h"
 
 CRender RImplementation;
 
@@ -576,6 +577,7 @@ void CRender::destroy()
 		GetUpscaler(type)->Shutdown();
 	Device.seqRender.Remove(&g_PerfOverlay);
 	g_PerfOverlay.Destroy();
+	frame_pacing::destroy();
 	PSLibrary.OnDestroy();
 	Device.seqFrame.Remove(this);
 	Device.ModelDefferClear = nullptr;

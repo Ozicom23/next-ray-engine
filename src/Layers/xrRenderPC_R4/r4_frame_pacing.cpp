@@ -2,58 +2,427 @@
 #include "r4_frame_pacing.h"
 #include "../xrRender/HW.h"
 #include <algorithm>
+#include <atomic>
+#include <thread>
 
 extern int ps_framelimiter; // r__framelimit (xrEngine)
 
-int ps_r4_swap_wait = 1;     // the swap chain's frame latency waitable object, waited at the frame start (vid_restart)
-int ps_r4_frame_latency = 2; // frames the CPU may run ahead of the display (vid_restart)
+int ps_r4_swap_wait = 1;              // the swap chain's frame latency waitable object, waited at the frame start (vid_restart)
+int ps_r4_frame_latency = 2;          // frames the CPU may run ahead of the display (vid_restart)
+int ps_r4_frame_jit = 1;              // just-in-time frame start
+float ps_r4_frame_jit_margin = 1.f;   // ms of queued work kept ahead of the GPU
 
 namespace frame_pacing
 {
-	struct sample
+	static double qpc_ms(u64 qpc) { return double(qpc) * 1000.0 / double(CPU::qpc_freq); }
+
+	// Frames by present id: the frame being built has id s_id; its Present signals the fence with that id
+	static const u32 kRing = 32;
+	struct frame_info
 	{
-		float t;        // ms since the start of the recording, at the end of Present
-		float interval; // ms since the previous Present ended
-		float wait;     // ms in the frame latency wait at the frame start
-		float cpu;      // ms from the frame start (after the wait) to Present
-		float present;  // ms inside Present
-		float gpu;      // the last GPU frame time returned by the timestamp queries (a few frames old)
-		float gpu_interval; // ms between the GPU's completion of that frame and of the one before it, 0 when unknown
+		u64 id;
+		u64 start;      // frame start after the latency wait and the sleep (CPU QPC); input and game logic follow
+		u64 begin;      // the first render Begin
+		u64 present0;   // Present called
+		u64 present1;   // Present returned
+		u64 done;       // the GPU finished the frame (fence, CPU QPC); 1 when the wait timed out
+		double gpu_begin, gpu_end; // GPU timestamps (ms on the GPU clock), 0 until known
+		float wait, sleep;
+		bool jit;       // went through the just-in-time path
 	};
-	static double s_gpu_end = 0.0;
-	static u32 s_gpu_results = 0;
-
-	static xr_vector<sample> s_samples;
-	static bool s_recording = false;
-	static float s_end_ms = 0.f;
-	static CTimer s_timer;
-	static float s_frame_begin = -1.f;
-	static float s_wait = 0.f;
-	static float s_last_present = -1.f;
-
-	bool recording() { return s_recording; }
-
-	void start(float seconds)
+	static frame_info s_frames[kRing];
+	static u64 s_id = 1;
+	static frame_info& frame(u64 id) { return s_frames[id % kRing]; }
+	static frame_info& cur()
 	{
-		s_samples.clear();
-		s_samples.reserve(u32(seconds * 300.f));
-		s_end_ms = seconds * 1000.f;
-		s_frame_begin = -1.f;
-		s_last_present = -1.f;
-		s_wait = 0.f;
-		s_gpu_end = 0.0;
-		s_gpu_results = 0;
-		s_timer.Start();
-		s_recording = true;
-		Msg("* [Frame pacing] recording %.0f s...", seconds);
+		frame_info& f = frame(s_id);
+		if (f.id != s_id)
+		{
+			f = frame_info();
+			f.id = s_id;
+		}
+		return f;
 	}
 
-	void frame_begin(float wait_ms)
+	// GPU timestamps: frame begin (first render commands) and end (before Present)
+	static const u32 kQueries = 8;
+	struct query
 	{
-		if (!s_recording)
+		ID3D11Query* disjoint;
+		ID3D11Query* begin;
+		ID3D11Query* end;
+		u64 id;
+		bool pending;
+	};
+	static query s_q[kQueries] = {};
+	static u32 s_q_write = 0;
+	static bool s_q_active = false;
+	static bool s_q_failed = false;
+
+	// GPU completion: a fence signalled before each Present, a thread that stamps the CPU time each value completes
+	static ID3D11Fence* s_fence = nullptr;
+	static ID3D11DeviceContext4* s_ctx4 = nullptr;
+	static bool s_fence_failed = false;
+	static HANDLE s_done_event = nullptr;
+	static HANDLE s_work_sem = nullptr;
+	static std::thread s_worker;
+	static std::atomic<bool> s_quit{false};
+	static const u32 kWork = 64;
+	static u64 s_work_ids[kWork];
+	static u64 s_work_tail = 0; // main thread
+	static u64 s_work_head = 0; // worker thread
+	static std::atomic<u64> s_done_id[kRing];
+	static u64 s_done_qpc[kRing];
+	static u64 s_last_signaled = 0;
+
+	// The sleep controller
+	static float s_jit_ms = 0.f;      // the current sleep at the frame start
+	static u64 s_fb_id = 0;           // the last frame fed to the controller
+	static float s_win_q[8], s_win_idle[8];
+	static u32 s_win_n = 0;
+	static double s_offsets[16];      // CPU ms minus GPU ms at frame ends (fence time minus end timestamp)
+	static u32 s_offsets_n = 0, s_offsets_pos = 0;
+	static float s_gaps[16];          // GPU time between a frame's end and the next one's begin (the present blit and idle)
+	static u32 s_gaps_n = 0, s_gaps_pos = 0;
+	static HANDLE s_timer = nullptr;
+	static bool s_timer_tried = false;
+
+	// stat_frame_pacing
+	struct sample
+	{
+		float t, interval, wait, sleep, cpu, present, gpu, gpu_interval, gpu_idle, queue, latency;
+	};
+	static xr_vector<sample> s_samples;
+	static bool s_recording = false;
+	static bool s_rec_open = false;   // frames still being added
+	static u64 s_rec_first = 0, s_rec_last = 0;
+	static u64 s_rec_start_qpc = 0;
+	static float s_rec_seconds = 0.f;
+	static u64 s_prev_present1 = 0;
+	static double s_prev_gpu_end = 0.0;
+	static u64 s_prev_retired = 0;
+
+	static bool wanted() { return ps_r4_frame_jit || s_recording; }
+
+	template <typename T, u32 N>
+	static void ring_push(T (&v)[N], u32& n, u32& pos, T x)
+	{
+		v[pos] = x;
+		pos = (pos + 1) % N;
+		n = _min(n + 1, N);
+	}
+	template <typename T, u32 N>
+	static T ring_min(const T (&v)[N], u32 n)
+	{
+		T r = v[0];
+		for (u32 i = 0; i < n; i++)
+			r = _min(r, v[i]);
+		return r;
+	}
+	static float median(float* v, u32 n)
+	{
+		std::sort(v, v + n);
+		return n & 1 ? v[n / 2] : 0.5f * (v[n / 2 - 1] + v[n / 2]);
+	}
+
+	static double offset_ms() { return s_offsets_n ? ring_min(s_offsets, s_offsets_n) : 0.0; }
+	static float blit_ms() { return s_gaps_n ? clampr(ring_min(s_gaps, s_gaps_n), 0.f, 2.f) : 0.f; }
+
+	// ------------------------------------------------------------------------------------------------------------
+	// Completion fence
+
+	static void worker()
+	{
+		for (;;)
+		{
+			WaitForSingleObject(s_work_sem, INFINITE);
+			if (s_quit)
+				return;
+			const u64 id = s_work_ids[s_work_head % kWork];
+			s_work_head++;
+			s_fence->SetEventOnCompletion(id, s_done_event);
+			const bool ok = WaitForSingleObject(s_done_event, 2000) == WAIT_OBJECT_0;
+			if (s_quit)
+				return;
+			const u32 slot = u32(id % kRing);
+			s_done_qpc[slot] = ok ? CPU::QPC() : 1;
+			s_done_id[slot].store(id, std::memory_order_release);
+		}
+	}
+
+	static bool create_fence()
+	{
+		if (s_fence)
+			return true;
+		if (s_fence_failed)
+			return false;
+		ID3D11Device5* device5 = nullptr;
+		if (SUCCEEDED(HW.pDevice->QueryInterface(__uuidof(ID3D11Device5), (void**)&device5)) && device5)
+		{
+			device5->CreateFence(0, D3D11_FENCE_FLAG_NONE, __uuidof(ID3D11Fence), (void**)&s_fence);
+			_RELEASE(device5);
+		}
+		if (s_fence)
+			HW.pContext->QueryInterface(__uuidof(ID3D11DeviceContext4), (void**)&s_ctx4);
+		if (!s_fence || !s_ctx4)
+		{
+			Msg("! Frame pacing: D3D11 fences are not available, no just-in-time frame start");
+			_RELEASE(s_fence);
+			_RELEASE(s_ctx4);
+			s_fence_failed = true;
+			return false;
+		}
+		s_done_event = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+		s_work_sem = CreateSemaphore(nullptr, 0, LONG(kWork), nullptr);
+		for (auto& d : s_done_id)
+			d.store(0);
+		s_work_tail = s_work_head = 0;
+		s_last_signaled = 0;
+		s_quit = false;
+		s_worker = std::thread(worker);
+		return true;
+	}
+
+	static void harvest_done()
+	{
+		for (u32 slot = 0; slot < kRing; slot++)
+		{
+			const u64 id = s_done_id[slot].load(std::memory_order_acquire);
+			if (!id)
+				continue;
+			frame_info& f = s_frames[slot];
+			if (f.id == id && !f.done)
+				f.done = s_done_qpc[slot];
+		}
+	}
+
+	// ------------------------------------------------------------------------------------------------------------
+	// GPU timestamps
+
+	static bool create_queries()
+	{
+		if (s_q[0].disjoint)
+			return true;
+		if (s_q_failed)
+			return false;
+		D3D11_QUERY_DESC disjoint = { D3D11_QUERY_TIMESTAMP_DISJOINT, 0 };
+		D3D11_QUERY_DESC stamp = { D3D11_QUERY_TIMESTAMP, 0 };
+		for (query& q : s_q)
+		{
+			if (FAILED(HW.pDevice->CreateQuery(&disjoint, &q.disjoint)) || FAILED(HW.pDevice->CreateQuery(&stamp, &q.begin)) ||
+				FAILED(HW.pDevice->CreateQuery(&stamp, &q.end)))
+			{
+				Msg("! Frame pacing: GPU timestamp queries are not available");
+				for (query& r : s_q)
+				{
+					_RELEASE(r.disjoint);
+					_RELEASE(r.begin);
+					_RELEASE(r.end);
+				}
+				s_q_failed = true;
+				return false;
+			}
+			q.pending = false;
+		}
+		s_q_write = 0;
+		return true;
+	}
+
+	static void collect_queries()
+	{
+		for (u32 n = 0; n < kQueries; n++)
+		{
+			query& q = s_q[(s_q_write + n) % kQueries]; // oldest first
+			if (!q.pending)
+				continue;
+			D3D11_QUERY_DATA_TIMESTAMP_DISJOINT dj;
+			if (HW.pContext->GetData(q.disjoint, &dj, sizeof(dj), D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK)
+				break;
+			UINT64 t0 = 0, t1 = 0;
+			if (HW.pContext->GetData(q.begin, &t0, sizeof(t0), D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK ||
+				HW.pContext->GetData(q.end, &t1, sizeof(t1), D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK)
+				break;
+			q.pending = false;
+			frame_info& f = frame(q.id);
+			if (f.id == q.id && !dj.Disjoint && dj.Frequency && t1 >= t0)
+			{
+				f.gpu_begin = double(t0) * 1000.0 / double(dj.Frequency);
+				f.gpu_end = double(t1) * 1000.0 / double(dj.Frequency);
+			}
+		}
+	}
+
+	// ------------------------------------------------------------------------------------------------------------
+	// The controller
+
+	// Feeds the frames whose GPU times and completion arrived, oldest first
+	static void update_controller()
+	{
+		const u64 newest = s_id - 1;
+		u64 id = _max(s_fb_id + 1, newest > 16 ? newest - 16 : 1);
+		for (; id <= newest; id++)
+		{
+			const frame_info& f = frame(id);
+			if (f.id != id)
+				continue;
+			const bool timed = f.gpu_end > 0.0;
+			if (!f.done || (!timed && id + 6 > newest))
+				break; // not complete yet (timestamps may still come)
+			s_fb_id = id;
+			if (!timed || f.done <= 1)
+				continue;
+
+			ring_push(s_offsets, s_offsets_n, s_offsets_pos, qpc_ms(f.done) - f.gpu_end);
+			const frame_info& prev = frame(id - 1);
+			if (prev.id != id - 1 || prev.gpu_end <= 0.0)
+				continue;
+			const float gap = float(f.gpu_begin - prev.gpu_end);
+			ring_push(s_gaps, s_gaps_n, s_gaps_pos, gap);
+			if (!f.jit || !f.begin)
+				continue;
+
+			// How long the frame's first commands waited before the GPU began them, and how long the GPU idled before
+			const float queue = float(f.gpu_begin + offset_ms() - qpc_ms(f.begin));
+			const float idle = gap - blit_ms();
+			s_win_q[s_win_n] = queue;
+			s_win_idle[s_win_n] = idle;
+			if (++s_win_n < 4)
+				continue;
+			s_win_n = 0;
+			const float mq = median(s_win_q, 4);
+			const float mi = median(s_win_idle, 4);
+			if (mi > 0.3f)
+				s_jit_ms -= _max(mi, 0.5f); // late: the GPU waited for this frame
+			else
+				s_jit_ms += 0.5f * (mq - ps_r4_frame_jit_margin); // early: the frame waited for the GPU
+			s_jit_ms = _max(s_jit_ms, 0.f);
+		}
+	}
+
+	// The sleep limit: three quarters of the recent frame interval (never a frame rate drop by itself), at most 40 ms
+	static float sleep_cap()
+	{
+		float v[8];
+		u32 n = 0;
+		for (u64 id = s_id - 1; id > 1 && n < 8 && id + kRing > s_id; id--)
+		{
+			const frame_info& f = frame(id);
+			const frame_info& p = frame(id - 1);
+			if (f.id == id && p.id == id - 1 && f.present1 && p.present1)
+				v[n++] = float(qpc_ms(f.present1) - qpc_ms(p.present1));
+		}
+		return n >= 3 ? _min(0.75f * median(v, n), 40.f) : 0.f;
+	}
+
+	static void sleep_ms(float ms)
+	{
+		if (!s_timer_tried)
+		{
+			s_timer_tried = true;
+			s_timer = CreateWaitableTimerExW(nullptr, nullptr, 0x00000002 /*CREATE_WAITABLE_TIMER_HIGH_RESOLUTION*/, TIMER_ALL_ACCESS);
+			if (!s_timer)
+				s_timer = CreateWaitableTimerExW(nullptr, nullptr, 0, TIMER_ALL_ACCESS);
+		}
+		const u64 target = CPU::QPC() + u64(double(ms) * double(CPU::qpc_freq) / 1000.0);
+		for (;;)
+		{
+			const u64 now = CPU::QPC();
+			if (now >= target)
+				return;
+			const double left = double(target - now) * 1000.0 / double(CPU::qpc_freq);
+			if (left > 1.0 && s_timer)
+			{
+				LARGE_INTEGER due;
+				due.QuadPart = -LONGLONG((left - 0.5) * 10000.0); // 100 ns units, relative
+				if (SetWaitableTimer(s_timer, &due, 0, nullptr, nullptr, FALSE))
+					WaitForSingleObject(s_timer, DWORD(left) + 10);
+				else
+					Sleep(DWORD(left - 1.0));
+			}
+			else if (left > 2.0)
+				Sleep(DWORD(left - 1.5));
+			else
+				SwitchToThread();
+		}
+	}
+
+	// ------------------------------------------------------------------------------------------------------------
+	// stat_frame_pacing
+
+	static void retire(const frame_info& f)
+	{
+		if (!s_recording || f.id < s_rec_first || f.id > s_rec_last || !f.present1)
+		{
+			s_prev_present1 = f.present1;
+			s_prev_gpu_end = f.gpu_end;
+			s_prev_retired = f.id;
 			return;
-		s_frame_begin = s_timer.GetElapsed_sec() * 1000.f;
-		s_wait += wait_ms; // frames that do not present (the 3D scope's view) add up to the next sample
+		}
+		const bool consecutive = s_prev_retired + 1 == f.id;
+		sample s = {};
+		s.t = float(qpc_ms(f.present1) - qpc_ms(s_rec_start_qpc));
+		s.interval = consecutive && s_prev_present1 ? float(qpc_ms(f.present1) - qpc_ms(s_prev_present1)) : 0.f;
+		s.wait = f.wait;
+		s.sleep = f.sleep;
+		s.cpu = f.start ? float(qpc_ms(f.present0) - qpc_ms(f.start)) : 0.f;
+		s.present = float(qpc_ms(f.present1) - qpc_ms(f.present0));
+		if (f.gpu_end > 0.0)
+		{
+			s.gpu = float(f.gpu_end - f.gpu_begin);
+			if (consecutive && s_prev_gpu_end > 0.0)
+			{
+				s.gpu_interval = float(f.gpu_end - s_prev_gpu_end);
+				s.gpu_idle = _max(0.f, float(f.gpu_begin - s_prev_gpu_end) - blit_ms());
+			}
+			if (f.begin && s_offsets_n)
+				s.queue = _max(0.f, float(f.gpu_begin + offset_ms() - qpc_ms(f.begin)));
+		}
+		if (f.start && f.done > 1)
+			s.latency = float(qpc_ms(f.done) - qpc_ms(f.start));
+		s_samples.push_back(s);
+		s_prev_present1 = f.present1;
+		s_prev_gpu_end = f.gpu_end;
+		s_prev_retired = f.id;
+	}
+
+	struct stats
+	{
+		u32 n;
+		float mean, median, low1, longest, change, deviation;
+		u32 over2;
+	};
+	static stats compute(xr_vector<float>& v)
+	{
+		stats st = {};
+		st.n = v.size();
+		if (st.n < 10)
+			return st;
+		double sum = 0, change = 0;
+		for (u32 i = 0; i < st.n; i++)
+		{
+			sum += v[i];
+			if (i)
+				change += fabs(v[i] - v[i - 1]);
+		}
+		st.mean = float(sum / st.n);
+		st.change = float(change / (st.n - 1));
+		xr_vector<float> sorted = v;
+		std::sort(sorted.begin(), sorted.end());
+		st.median = sorted[st.n / 2];
+		st.longest = sorted[st.n - 1];
+		const u32 worst = _max(1u, st.n / 100);
+		double low = 0, var = 0;
+		for (u32 i = st.n - worst; i < st.n; i++)
+			low += sorted[i];
+		st.low1 = float(low / worst);
+		for (u32 i = 0; i < st.n; i++)
+		{
+			var += (v[i] - st.mean) * (v[i] - st.mean);
+			if (v[i] > 2.f * st.median)
+				st.over2++;
+		}
+		st.deviation = float(_sqrt(var / double(st.n)));
+		return st;
 	}
 
 	static void finish()
@@ -66,96 +435,59 @@ namespace frame_pacing
 			return;
 		}
 
-		xr_vector<float> sorted;
-		sorted.reserve(n);
-		double sum = 0, sum_wait = 0, sum_cpu = 0, sum_present = 0, sum_gpu = 0, change = 0;
-		u32 gpu_n = 0;
-		for (u32 i = 0; i < n; i++)
+		xr_vector<float> cpu_iv, gpu_iv, lat;
+		double wait = 0, sleep = 0, cpu = 0, present = 0, gpu = 0, idle = 0, queue = 0;
+		u32 gpu_n = 0, idle_n = 0, queue_n = 0;
+		for (const sample& s : s_samples)
 		{
-			const sample& s = s_samples[i];
-			sorted.push_back(s.interval);
-			sum += s.interval;
-			sum_wait += s.wait;
-			sum_cpu += s.cpu;
-			sum_present += s.present;
+			if (s.interval > 0.f)
+				cpu_iv.push_back(s.interval);
+			if (s.gpu_interval > 0.f)
+				gpu_iv.push_back(s.gpu_interval);
+			if (s.latency > 0.f)
+				lat.push_back(s.latency);
+			wait += s.wait;
+			sleep += s.sleep;
+			cpu += s.cpu;
+			present += s.present;
 			if (s.gpu > 0.f)
 			{
-				sum_gpu += s.gpu;
+				gpu += s.gpu;
 				gpu_n++;
 			}
-			if (i)
-				change += fabs(s.interval - s_samples[i - 1].interval);
-		}
-		std::sort(sorted.begin(), sorted.end());
-		const float mean = float(sum / n);
-		const float median = sorted[n / 2];
-		double var = 0;
-		u32 stutters = 0, hitches = 0;
-		for (u32 i = 0; i < n; i++)
-		{
-			const float d = s_samples[i].interval - mean;
-			var += d * d;
-			if (s_samples[i].interval > 2.f * median)
-				stutters++;
-			if (s_samples[i].interval > 50.f)
-				hitches++;
-		}
-		// 1% low: the average of the slowest one percent of the frames
-		const u32 worst = _max(1u, n / 100);
-		double low = 0;
-		for (u32 i = n - worst; i < n; i++)
-			low += sorted[i];
-		const float low1 = float(low / worst);
-		const float seconds = s_samples.back().t / 1000.f;
-
-		Msg("* [Frame pacing] %u frames in %.1f s: %.1f fps (average %.2f ms, median %.2f, 1%% low %.1f fps = %.2f ms, longest %.1f ms), frame to frame change %.2f ms, deviation %.2f ms, %u frames over twice the median, %u over 50 ms",
-			n, seconds, 1000.f / mean, mean, median, 1000.f / low1, low1, sorted[n - 1], float(change / (n - 1)), float(_sqrt(var / double(n))), stutters, hitches);
-
-		// The GPU side: the intervals between consecutive frames' completion on the GPU
-		xr_vector<float> gpu_sorted;
-		gpu_sorted.reserve(n);
-		double gpu_sum = 0, gpu_change = 0;
-		float gpu_prev = 0.f;
-		for (u32 i = 0; i < n; i++)
-		{
-			const float iv = s_samples[i].gpu_interval;
-			if (iv <= 0.f)
-				continue;
-			gpu_sorted.push_back(iv);
-			gpu_sum += iv;
-			if (gpu_prev > 0.f)
-				gpu_change += fabs(iv - gpu_prev);
-			gpu_prev = iv;
-		}
-		if (gpu_sorted.size() >= 10)
-		{
-			std::sort(gpu_sorted.begin(), gpu_sorted.end());
-			const u32 gn = gpu_sorted.size();
-			const float gmean = float(gpu_sum / gn);
-			const float gmedian = gpu_sorted[gn / 2];
-			const u32 gworst = _max(1u, gn / 100);
-			double glow = 0, gvar = 0;
-			u32 gstutters = 0;
-			for (u32 i = gn - gworst; i < gn; i++)
-				glow += gpu_sorted[i];
-			for (u32 i = 0; i < gn; i++)
+			if (s.gpu_interval > 0.f)
 			{
-				const float d = gpu_sorted[i] - gmean;
-				gvar += d * d;
-				if (gpu_sorted[i] > 2.f * gmedian)
-					gstutters++;
+				idle += s.gpu_idle;
+				idle_n++;
 			}
-			Msg("*   GPU side (%u intervals): average %.2f ms, median %.2f, 1%% low %.2f ms, longest %.1f ms, frame to frame change %.2f ms, deviation %.2f ms, %u over twice the median",
-				gn, gmean, gmedian, float(glow / gworst), gpu_sorted[gn - 1], float(gpu_change / (gn - 1)), float(_sqrt(gvar / double(gn))), gstutters);
+			if (s.queue > 0.f)
+			{
+				queue += s.queue;
+				queue_n++;
+			}
 		}
-		if (gpu_n)
-			Msg("*   per frame: latency wait %.2f ms, CPU %.2f ms, Present %.2f ms, GPU %.2f ms (%u frames timed)",
-				float(sum_wait / n), float(sum_cpu / n), float(sum_present / n), float(sum_gpu / gpu_n), gpu_n);
-		else
-			Msg("*   per frame: latency wait %.2f ms, CPU %.2f ms, Present %.2f ms, GPU not timed",
-				float(sum_wait / n), float(sum_cpu / n), float(sum_present / n));
-		Msg("*   %s, max frame latency %d, vsync %s, r__framelimit %d",
-			HW.m_hFrameLatency ? "waitable swap chain (r4_swap_wait)" : "frame latency limited in Present", ps_r4_frame_latency,
+		const stats c = compute(cpu_iv);
+		const float seconds = s_samples.back().t / 1000.f;
+		if (c.n)
+			Msg("* [Frame pacing] %u frames in %.1f s: %.1f fps (average %.2f ms, median %.2f, 1%% low %.1f fps = %.2f ms, longest %.1f ms), frame to frame change %.2f ms, deviation %.2f ms, %u frames over twice the median",
+				n, seconds, 1000.f / c.mean, c.mean, c.median, 1000.f / c.low1, c.low1, c.longest, c.change, c.deviation, c.over2);
+		const stats g = compute(gpu_iv);
+		if (g.n)
+			Msg("*   GPU side (%u intervals): average %.2f ms, median %.2f, 1%% low %.2f ms, longest %.1f ms, frame to frame change %.2f ms, deviation %.2f ms, %u over twice the median",
+				g.n, g.mean, g.median, g.low1, g.longest, g.change, g.deviation, g.over2);
+		const stats l = compute(lat);
+		if (l.n)
+		{
+			std::sort(lat.begin(), lat.end());
+			Msg("*   latency, frame start (input) to GPU done (%u frames): average %.1f ms, median %.1f, 95%% %.1f, longest %.1f",
+				l.n, l.mean, l.median, lat[u32(0.95f * float(l.n - 1))], l.longest);
+		}
+		Msg("*   per frame: latency wait %.2f ms, sleep %.2f ms, CPU %.2f ms, Present %.2f ms, GPU %.2f ms, GPU idle %.2f ms, queued %.2f ms",
+			float(wait / n), float(sleep / n), float(cpu / n), float(present / n), gpu_n ? float(gpu / gpu_n) : 0.f,
+			idle_n ? float(idle / idle_n) : 0.f, queue_n ? float(queue / queue_n) : 0.f);
+		Msg("*   %s, max frame latency %d, just-in-time start %s (margin %.1f ms), vsync %s, r__framelimit %d",
+			HW.m_hFrameLatency ? "waitable swap chain" : "frame latency limited in Present", ps_r4_frame_latency,
+			ps_r4_frame_jit ? (s_fence ? "on" : "unavailable") : "off", ps_r4_frame_jit_margin,
 			psDeviceFlags.test(rsVSync) ? "on" : "off", ps_framelimiter);
 
 		string64 stamp;
@@ -168,47 +500,166 @@ namespace frame_pacing
 			Msg("! [Frame pacing] cannot write %s", path);
 			return;
 		}
-		w->w_printf("frame,t_ms,interval_ms,wait_ms,cpu_ms,present_ms,gpu_ms,gpu_interval_ms\r\n");
+		w->w_printf("frame,t_ms,interval_ms,wait_ms,sleep_ms,cpu_ms,present_ms,gpu_ms,gpu_interval_ms,gpu_idle_ms,queued_ms,latency_ms\r\n");
 		for (u32 i = 0; i < n; i++)
 		{
 			const sample& s = s_samples[i];
-			w->w_printf("%u,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\r\n", i, s.t, s.interval, s.wait, s.cpu, s.present, s.gpu, s.gpu_interval);
+			w->w_printf("%u,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\r\n", i, s.t, s.interval, s.wait, s.sleep, s.cpu,
+				s.present, s.gpu, s.gpu_interval, s.gpu_idle, s.queue, s.latency);
 		}
 		FS.w_close(w);
 		Msg("*   written to %s", path);
 		xrLogger::FlushLog();
 	}
 
-	void present_done(float present_ms, float gpu_ms, double gpu_end_ms, u32 gpu_results)
+	// ------------------------------------------------------------------------------------------------------------
+
+	void start(float seconds)
 	{
-		if (!s_recording)
+		s_samples.clear();
+		s_samples.reserve(u32(seconds * 250.f));
+		s_rec_first = s_id + 1;
+		s_rec_last = u64(-1);
+		s_rec_start_qpc = CPU::QPC();
+		s_rec_seconds = seconds;
+		s_recording = true;
+		s_rec_open = true;
+		Msg("* [Frame pacing] recording %.0f s...", seconds);
+	}
+
+	void frame_begin(float wait_ms, bool game_frame)
+	{
+		frame_info& f = cur();
+		if (f.start)
+			return; // a frame that did not present (the 3D scope's view): one start per presented frame
+		f.wait = wait_ms;
+		if (wanted())
+		{
+			harvest_done();
+			collect_queries();
+		}
+		const bool jit = ps_r4_frame_jit && game_frame && s_fence;
+		if (jit)
+		{
+			update_controller();
+			const float ms = _min(s_jit_ms, sleep_cap());
+			if (ms > 0.2f)
+			{
+				PROF_EVENT("Frame start sleep");
+				sleep_ms(ms);
+				f.sleep = ms;
+			}
+		}
+		f.jit = jit;
+		f.start = CPU::QPC();
+	}
+
+	void render_begin()
+	{
+		frame_info& f = cur();
+		if (f.begin)
 			return;
-		const float now = s_timer.GetElapsed_sec() * 1000.f;
-		// A new query result one after the previous one: the GPU-side interval between those two frames
-		float gpu_interval = 0.f;
-		if (gpu_results == s_gpu_results + 1 && s_gpu_end > 0.0 && gpu_end_ms > s_gpu_end)
-			gpu_interval = float(gpu_end_ms - s_gpu_end);
-		if (gpu_results != s_gpu_results)
+		f.begin = CPU::QPC();
+		s_q_active = false;
+		if (!wanted() || !create_queries())
+			return;
+		query& q = s_q[s_q_write];
+		if (q.pending)
+			collect_queries();
+		if (q.pending)
+			return; // results not back yet, this frame goes untimed
+		HW.pContext->Begin(q.disjoint);
+		HW.pContext->End(q.begin);
+		q.id = s_id;
+		s_q_active = true;
+	}
+
+	void present_begin()
+	{
+		frame_info& f = cur();
+		f.present0 = CPU::QPC();
+		if (s_q_active)
 		{
-			s_gpu_results = gpu_results;
-			s_gpu_end = gpu_end_ms;
+			query& q = s_q[s_q_write];
+			HW.pContext->End(q.end);
+			HW.pContext->End(q.disjoint);
+			q.pending = true;
+			s_q_write = (s_q_write + 1) % kQueries;
+			s_q_active = false;
 		}
-		if (s_frame_begin >= 0.f && s_last_present >= 0.f)
+		if (wanted() && create_fence() && s_work_tail - s_work_head < kWork - 1)
 		{
-			sample s;
-			s.t = now;
-			s.interval = now - s_last_present;
-			s.wait = s_wait;
-			s.cpu = _max(0.f, now - present_ms - s_frame_begin);
-			s.present = present_ms;
-			s.gpu = gpu_ms;
-			s.gpu_interval = gpu_interval;
-			s_samples.push_back(s);
+			s_ctx4->Signal(s_fence, s_id);
+			s_work_ids[s_work_tail % kWork] = s_id;
+			s_work_tail++;
+			s_last_signaled = s_id;
+			ReleaseSemaphore(s_work_sem, 1, nullptr);
 		}
-		s_last_present = now;
-		s_frame_begin = -1.f;
-		s_wait = 0.f;
-		if (now >= s_end_ms)
+	}
+
+	void present_end()
+	{
+		frame_info& f = cur();
+		f.present1 = CPU::QPC();
+
+		if (s_rec_open && qpc_ms(f.present1) - qpc_ms(s_rec_start_qpc) >= s_rec_seconds * 1000.f)
+		{
+			s_rec_last = s_id;
+			s_rec_open = false;
+		}
+
+		// The next frame's slot: the frame it held retires (all of its data arrived long ago)
+		s_id++;
+		frame_info& next = frame(s_id);
+		if (next.id)
+			retire(next);
+		next = frame_info();
+		next.id = s_id;
+
+		if (s_recording && !s_rec_open && s_id > s_rec_last + kRing)
 			finish();
+	}
+
+	void destroy()
+	{
+		if (s_worker.joinable())
+		{
+			// Every value signalled so far completes first, so no completion callback fires after the event is closed
+			if (s_fence && s_last_signaled)
+				s_fence->SetEventOnCompletion(s_last_signaled, nullptr);
+			s_quit = true;
+			ReleaseSemaphore(s_work_sem, 1, nullptr);
+			SetEvent(s_done_event);
+			s_worker.join();
+		}
+		for (query& q : s_q)
+		{
+			_RELEASE(q.disjoint);
+			_RELEASE(q.begin);
+			_RELEASE(q.end);
+			q.pending = false;
+		}
+		s_q_active = false;
+		_RELEASE(s_fence);
+		_RELEASE(s_ctx4);
+		if (s_done_event)
+			CloseHandle(s_done_event);
+		if (s_work_sem)
+			CloseHandle(s_work_sem);
+		if (s_timer)
+			CloseHandle(s_timer);
+		s_done_event = s_work_sem = s_timer = nullptr;
+		s_timer_tried = false;
+		s_fence_failed = false;
+		s_q_failed = false;
+		for (frame_info& f : s_frames)
+			f = frame_info();
+		frame(s_id).id = s_id;
+		s_fb_id = s_id - 1;
+		s_jit_ms = 0.f;
+		s_win_n = 0;
+		s_offsets_n = s_offsets_pos = 0;
+		s_gaps_n = s_gaps_pos = 0;
+		s_recording = s_rec_open = false;
 	}
 }

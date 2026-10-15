@@ -51,8 +51,9 @@ public:
 
 	//	Device state
 	virtual DeviceState GetDeviceState() = 0;
-	// At the start of a frame: blocks until the display queue has room (r4_swap_wait), before input and game logic
-	virtual void WaitFrame() {}
+	// At the start of a frame: blocks until the display queue has room (r4_swap_wait), then the just-in-time sleep
+	// (r4_frame_jit) for a game frame, before input and game logic
+	virtual void WaitFrame(bool game_frame) {}
 	virtual BOOL GetForceGPU_REF() = 0;
 	virtual u32 GetCacheStatPolys() = 0;
 	virtual void Begin() = 0;

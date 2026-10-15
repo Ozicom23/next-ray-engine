@@ -61,7 +61,7 @@ public:
 
 	//	Device state
 	virtual DeviceState GetDeviceState();
-	virtual void WaitFrame();
+	virtual void WaitFrame(bool game_frame);
 	virtual BOOL GetForceGPU_REF();
 	virtual u32 GetCacheStatPolys();
 	virtual void Begin();

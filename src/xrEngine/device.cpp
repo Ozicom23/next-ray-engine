@@ -359,8 +359,9 @@ void CRenderDevice::on_idle()
 	PROF_FRAME("Main Thread");
 
 #ifndef DEDICATED_SERVER
-	// The frame starts (input, game logic, render) when the display queue has room (r4_swap_wait)
-	m_pRender->WaitFrame();
+	// The frame starts (input, game logic, render) when the display queue has room (r4_swap_wait), and for a game
+	// frame just in time for the GPU (r4_frame_jit); the loading screen never sleeps
+	m_pRender->WaitFrame(g_loading_events.empty() && !dwPrecacheFrame);
 #endif
 
 #ifdef DEDICATED_SERVER
