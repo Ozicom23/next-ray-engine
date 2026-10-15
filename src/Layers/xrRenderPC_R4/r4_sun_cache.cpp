@@ -220,7 +220,9 @@ mode frame(u32 cascade, u32 cascade_count, const Fmatrix& xform, u32 used, float
 			Fvector w, l;
 			inv.transform(w, Fvector().set((i & 1) ? 1.f : -1.f, (i & 2) ? 1.f : -1.f, (i & 4) ? 1.f : 0.f));
 			e.xform.transform(l, w);
-			inside = l.x >= -1.f && l.x <= 1.f && l.y >= -1.f && l.y <= 1.f && l.z >= 0.f && l.z <= 1.f;
+			// A margin for rounding: on a refresh frame the near corners sit right on the kept range's edge
+			const float eps = 1e-4f;
+			inside = l.x >= -1.f - eps && l.x <= 1.f + eps && l.y >= -1.f - eps && l.y <= 1.f + eps && l.z >= -eps && l.z <= 1.f + eps;
 		}
 		if (inside)
 		{
