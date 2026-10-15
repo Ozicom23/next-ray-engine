@@ -356,6 +356,7 @@ xr_token perf_overlay_token[] = {
 u32 ps_perf_overlay_pos = 1; // screen corner
 int ps_r4_dbg_shadow_skip = 0; // measuring only: 1 trees, 2 other static, 4 dynamic objects left out of shadow maps
 Fvector3 ps_r4_sun_smap_scale = { 1.f, 1.f, 1.f }; // sun cascades 0, 1, 2: part of the shadow map size each renders at
+int ps_r4_smap_order = 2; // shadow map draw order: 0 shaders only, 1 trees last, 2 + trees front to back, 3 + all casters (r__dsgraph_build.cpp)
 int ps_r4_sun_parallel_cull = 1; // sun cascades: static geometry of all three culled at once on worker threads
 int ps_r4_cbuffer_skip_unchanged = 1; // shader constant buffers: no upload when a draw sets the values they already hold
 xr_token perf_overlay_pos_token[] = {
@@ -1498,6 +1499,7 @@ void xrRender_initconsole()
 	CMD4(CCC_Integer, "r4_sun_parallel_cull", &ps_r4_sun_parallel_cull, 0, 1);
 	CMD4(CCC_Integer, "r4_cbuffer_skip_unchanged", &ps_r4_cbuffer_skip_unchanged, 0, 1);
 	CMD4(CCC_Vector3, "r4_sun_smap_scale", &ps_r4_sun_smap_scale, Fvector3().set(0.25f, 0.25f, 0.25f), Fvector3().set(1.f, 1.f, 1.f));
+	CMD4(CCC_Integer, "r4_smap_order", &ps_r4_smap_order, 0, 3);
 #endif
     CMD4(CCC_Integer, "r4_hdr10_colorspace",	  &ps_r4_hdr10_colorspace, 		     0, 2);
 

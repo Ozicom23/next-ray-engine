@@ -194,7 +194,13 @@ namespace R_dsgraph
             u64 keyHigh = 0;
             u64 keyLow = 0;
 
-            keyHigh |= ((u64)pState >> 4 & 0xFFFF) << 48;
+            // item.sortKey: draw order hint (shadow maps, r4_smap_order): bit 31 draws after everything without it,
+            // bits 0..15 order the draws of a vertex and pixel shader pair before their textures do
+            const u32 hint = item.sortKey;
+            if (hint)
+                keyHigh |= (u64(hint >> 31) << 63) | ((u64)pState >> 4 & 0x7FFF) << 48;
+            else
+                keyHigh |= ((u64)pState >> 4 & 0xFFFF) << 48;
 
 #if defined(USE_DX10) || defined(USE_DX11)
             keyHigh |= ((u64)pGS >> 4 & 0xFFFF) << 32;
@@ -207,7 +213,10 @@ namespace R_dsgraph
 
             keyLow |= ((u64)pVS >> 4 & 0xFFFF) << 48;
             keyLow |= ((u64)pPS >> 4 & 0xFFFF) << 32;
-            keyLow |= ((u64)pCS >> 4 & 0xFFFF) << 16;
+            if (hint)
+                keyLow |= u64(hint & 0xFFFF) << 16; // the constant table follows the shaders: no bits for it
+            else
+                keyLow |= ((u64)pCS >> 4 & 0xFFFF) << 16;
             keyLow |= ((u64)pTextures >> 4 & 0xFFFF);
 
             sortKey = { keyHigh, keyLow };

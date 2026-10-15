@@ -35,6 +35,11 @@ ICF float CalcSSA(float& distSQ, Fvector& C, dxRender_Visual* V)
 // r4_dbg_shadow_skip: leave kinds of objects out of all shadow maps to measure their cost with stat_gpu_passes.
 // 1 trees, 2 other static objects, 4 dynamic objects
 extern int ps_r4_dbg_shadow_skip;
+// r4_smap_order: draw order inside a shadow map. Trees and bushes (alpha tested leaves, the bulk of its pixel work)
+// go after the opaque casters, so their leaves behind a wall or the ground fail the depth test before shading;
+// 2 also orders the trees front to back from the light (depth in 16 steps of the map's range), 3 orders every
+// caster finely (more texture switches on the CPU). 0 keeps the shader order only.
+extern int ps_r4_smap_order;
 namespace hiz { bool test_static(const Fbox& box, bool tree); }
 namespace sun_receivers { bool test_caster(const Fbox& box, u32 cascade); }
 #endif
@@ -367,6 +372,25 @@ void CDSGraphManager::r_dsgraph_insert_static(dxRender_Visual *pVisual, bool pre
 	}
 #endif
 
+	u32 order = 0; // RenderPacket: draw order hint, shadow maps only
+#ifdef USE_DX11
+	if (i_mask[fl_shmap] && ps_r4_smap_order)
+	{
+		const bool tree = pVisual->Type == MT_TREE_ST || pVisual->Type == MT_TREE_PM;
+		if (tree)
+			order |= 0x80000000u;
+		if (ps_r4_smap_order >= 3 || (tree && ps_r4_smap_order == 2))
+		{
+			Fvector p;
+			i_mXFORM.transform(p, pVisual->vis.sphere.P);
+			u32 depth = u32(clampr(p.z, 0.f, 1.f) * 65535.f);
+			if (ps_r4_smap_order == 2)
+				depth &= 0xF000;
+			order |= depth;
+		}
+	}
+#endif
+
 	for (u32 iPass = 0; iPass < sh->passes.size(); ++iPass)
 	{
 		// the most common node
@@ -375,7 +399,7 @@ void CDSGraphManager::r_dsgraph_insert_static(dxRender_Visual *pVisual, bool pre
 
 		SPass& pass	= *sh->passes[iPass];
 
-		AddToRenderQueue(RGraph.mapStaticPasses[shader_priority][iPass], { 0, SSA, nullptr, pVisual, nullptr, nullptr, false }, pass);
+		AddToRenderQueue(RGraph.mapStaticPasses[shader_priority][iPass], { order, SSA, nullptr, pVisual, nullptr, nullptr, false }, pass);
 	}
 }
 
