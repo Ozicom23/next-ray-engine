@@ -236,8 +236,12 @@ mode frame(u32 cascade, u32 cascade_count, const Fmatrix& xform, u32 used, float
 			if (!inside && s_stats && Device.dwTimeGlobal >= s_debug_time)
 			{
 				s_debug_time = Device.dwTimeGlobal + 1000;
-				Msg("* [Sun cascade cache] cascade %u corner %u outside the kept box: %.4f %.4f %.4f (camera depth %.4f, range %.0f m, window %d %d, kept %u used %u)",
-					cascade, i, l.x, l.y, l.z, z_cam, z_len, e.ox, e.oy, big, used);
+				Fvector cam_kept;
+				e.xform.transform(cam_kept, Device.vCameraPosition);
+				Msg("* [Sun cascade cache] cascade %u corner %u outside the kept box: %.4f %.4f %.4f (camera depth %.4f, in the kept box %.4f, range %.0f m, size %.0f, window %d %d, kept %u used %u)",
+					cascade, i, l.x, l.y, l.z, z_cam, cam_kept.z, z_len, size, e.ox, e.oy, big, used);
+				Msg("*   cascade z column %.6f %.6f %.6f %.6f, kept z column %.6f %.6f %.6f %.6f, corner world %.2f %.2f %.2f",
+					xform._13, xform._23, xform._33, xform._43, e.xform._13, e.xform._23, e.xform._33, e.xform._43, w.x, w.y, w.z);
 			}
 		}
 		if (inside)
