@@ -11,17 +11,20 @@ extern int ps_r2_shadow_omnipart_vischeck;
 namespace light_smap_keep
 {
 	int ps_keep = 1;
+	int ps_keep_trees = 20; // r4_light_smap_keep_trees: meters from the camera beyond which a lamp with trees is kept, 0 never
+	float ps_keep_trees_refresh = 1.f; // r4_light_smap_keep_trees_refresh: seconds between redraws of such a map, 0 never
 
 	struct entry
 	{
 		ID3D11Texture2D* tex = nullptr;
 		ID3D11DepthStencilView* dsv = nullptr;
 		ID3D11ShaderResourceView* srv = nullptr;
-		u32 size = 0, bytes = 0, version = 0, used = 0;
+		u32 size = 0, bytes = 0, version = 0, used = 0, drawn = 0; // drawn: the time it was last drawn
 		Fmatrix combine;
 		bool valid = false;
 	};
 	static xr_map<light*, entry> s_entries;
+	static u32 s_tree_refresh_frame = 0; // one lamp with trees drawn again per frame
 	static u32 s_bytes = 0;
 	const u32 kMaxBytes = 128u << 20; // all kept maps together
 	const u32 kUnusedFrames = 600;
@@ -29,14 +32,14 @@ namespace light_smap_keep
 	// stat_light_keep
 	static bool s_stats = false;
 	static u32 s_stats_end = 0, s_frames = 0, s_last_stat_frame = 0;
-	static u32 s_kept = 0, s_drawn = 0, s_off_moving = 0, s_off_dynamic = 0, s_off_trees = 0, s_off_forward = 0,
+	static u32 s_kept = 0, s_kept_trees = 0, s_drawn = 0, s_off_moving = 0, s_off_dynamic = 0, s_off_trees = 0, s_off_forward = 0,
 		s_off_grass = 0, s_off_other = 0, s_off_memory = 0;
 
 	void start_stats(float seconds)
 	{
 		s_stats = true;
 		s_stats_end = Device.dwTimeGlobal + iFloor(seconds * 1000.f);
-		s_kept = s_drawn = s_off_moving = s_off_dynamic = s_off_trees = s_off_forward = s_off_grass = s_off_other = s_off_memory = s_frames = 0;
+		s_kept = s_kept_trees = s_drawn = s_off_moving = s_off_dynamic = s_off_trees = s_off_forward = s_off_grass = s_off_other = s_off_memory = s_frames = 0;
 		Msg("* [Light smap keep] measuring for %.0f s...", seconds);
 	}
 
@@ -48,9 +51,9 @@ namespace light_smap_keep
 		{
 			s_stats = false;
 			const float f = float(_max(1u, s_frames));
-			Msg("* [Light smap keep] per frame over %u frames, %u maps kept (%.1f MB): shadow maps kept %.2f, drawn into their own map %.2f,"
-				" drawn as usual: moving %.2f, dynamic objects %.2f, trees %.2f, semi-transparent %.2f, grass %.2f, memory %.2f, other %.2f",
-				s_frames, u32(s_entries.size()), float(s_bytes) / (1024.f * 1024.f), s_kept / f, s_drawn / f, s_off_moving / f,
+			Msg("* [Light smap keep] per frame over %u frames, %u maps kept (%.1f MB): shadow maps kept %.2f (with trees %.2f), drawn into their own map %.2f,"
+				" drawn as usual: moving %.2f, dynamic objects %.2f, trees near %.2f, semi-transparent %.2f, grass %.2f, memory %.2f, other %.2f",
+				s_frames, u32(s_entries.size()), float(s_bytes) / (1024.f * 1024.f), s_kept / f, s_kept_trees / f, s_drawn / f, s_off_moving / f,
 				s_off_dynamic / f, s_off_trees / f, s_off_forward / f, s_off_grass / f, s_off_memory / f, s_off_other / f);
 			xrLogger::FlushLog();
 			return;
@@ -158,10 +161,18 @@ namespace light_smap_keep
 			count(s_off_grass);
 			return nullptr;
 		}
+		// Trees sway: a lamp with trees among its casters is kept only beyond r4_light_smap_keep_trees meters from the
+		// camera, and its map is drawn again every r4_light_smap_keep_trees_refresh seconds (one such lamp per frame)
+		bool trees = false;
 		if (L->GMLight.i_static_trees)
 		{
-			count(s_off_trees);
-			return nullptr;
+			const float dist = float(ps_keep_trees);
+			if (dist <= 0.f || L->position.distance_to_sqr(Device.vCameraPosition) < dist * dist)
+			{
+				count(s_off_trees);
+				return nullptr;
+			}
+			trees = true;
 		}
 		if (!dynamic_empty(L->GMLight))
 		{
@@ -172,13 +183,19 @@ namespace light_smap_keep
 		e.used = Device.dwFrame;
 		const u32 size = L->X.S.size;
 		fresh = e.valid && e.size == size && e.version == L->m_static_version && !memcmp(&e.combine, &L->X.S.combine, sizeof(Fmatrix));
+		if (fresh && trees && ps_keep_trees_refresh > 0.f && Device.dwTimeGlobal - e.drawn >= u32(ps_keep_trees_refresh * 1000.f) &&
+			s_tree_refresh_frame != Device.dwFrame)
+		{
+			s_tree_refresh_frame = Device.dwFrame;
+			fresh = false;
+		}
 		if (!ensure_texture(e, size))
 		{
 			s_entries.erase(L);
 			count(s_off_memory);
 			return nullptr;
 		}
-		count(fresh ? s_kept : s_drawn);
+		count(fresh ? (trees ? s_kept_trees : s_kept) : s_drawn);
 		return &e;
 	}
 
@@ -186,6 +203,7 @@ namespace light_smap_keep
 	{
 		e.version = L->m_static_version;
 		e.combine = L->X.S.combine;
+		e.drawn = Device.dwTimeGlobal;
 		e.valid = true;
 	}
 

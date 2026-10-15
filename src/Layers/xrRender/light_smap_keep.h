@@ -6,12 +6,18 @@
 // no dynamic object or grass shadow in its volume this frame gets its shadow map drawn once into a depth texture of
 // its own. While nothing changes, the lamp's lighting samples that texture in place of the atlas: no copy, nothing
 // drawn. It is drawn again when the lamp's size, transform or static capture change. Same shadows.
+// A lamp with trees among its casters is kept too when it is far enough from the camera, its map drawn again at an
+// interval (one such lamp per frame): the trees' sway in its shadow holds still in between.
 //   r4_light_smap_keep 0/1
+//   r4_light_smap_keep_trees <meters>: lamps with trees kept beyond this distance (20), 0 never
+//   r4_light_smap_keep_trees_refresh <seconds>: their maps drawn again after this long (1), 0 never
 //   stat_light_keep <seconds>: per-frame counts of kept, drawn and not-kept lamps (with the reason), in the log
 class light;
 namespace light_smap_keep
 {
 	extern int ps_keep;
+	extern int ps_keep_trees;
+	extern float ps_keep_trees_refresh;
 	void start_stats(float seconds);
 	// The light is being destroyed
 	void forget(light* L);
