@@ -203,15 +203,21 @@ mode frame(u32 cascade, u32 cascade_count, const Fmatrix& xform, u32 used, float
 	mode result = m_window;
 	u32* reason = nullptr;
 	// The receivers lie in a slab around the camera along the light: from twice the box above it to the far plane.
-	// The cascade's depth range starts 1.2 km toward the sun, where the slightest turn of the sun swings the
-	// range's corners, so only the slab is tested against the kept box
-	const float z_cam = clampr((far - size - 0.1f) / (far - 0.1f), 0.f, 1.f);
-	const float z_lo = clampr(z_cam - 2.f * size / (far - 0.1f), 0.f, 1.f);
+	// The cascade's depth range starts far toward the sun and its origin moves with the sun light's position, so
+	// only the slab is tested against the kept box: the camera's depth in the cascade, and the range's length in
+	// meters from the transform's depth scale
+	Fvector cam_ndc;
+	xform.transform(cam_ndc, Device.vCameraPosition);
+	const float z_len = 1.f / _max(Fvector().set(xform._13, xform._23, xform._33).magnitude(), 1e-6f);
+	const float z_cam = clampr(cam_ndc.z, 0.f, 1.f);
+	const float z_lo = clampr(z_cam - 2.f * size / z_len, 0.f, 1.f);
 	if (e.valid)
 	{
-		// The sun turned: the shadow of a caster up to four box sides away along the light moves by the allowed texels
-		const float cos_threshold = cosf(ps_r4_sun_cascade_cache_drift / (4.f * float(used)));
-		if (e.dir.dotproduct(sun_dir) < cos_threshold)
+		// The sun turned: the shadow of a caster up to four box sides away along the light moves by the allowed
+		// texels (the sine of a small angle, a cosine of it rounds to 1)
+		Fvector turned;
+		turned.crossproduct(e.dir, sun_dir);
+		if (turned.magnitude() > sinf(ps_r4_sun_cascade_cache_drift / (4.f * float(used))))
 			reason = &e.refresh_sun;
 	}
 	if (e.valid && !reason)
@@ -230,8 +236,8 @@ mode frame(u32 cascade, u32 cascade_count, const Fmatrix& xform, u32 used, float
 			if (!inside && s_stats && Device.dwTimeGlobal >= s_debug_time)
 			{
 				s_debug_time = Device.dwTimeGlobal + 1000;
-				Msg("* [Sun cascade cache] cascade %u corner %u outside the kept box: %.4f %.4f %.4f (sun dot %.7f, window %d %d, kept %u used %u)",
-					cascade, i, l.x, l.y, l.z, e.dir.dotproduct(sun_dir), e.ox, e.oy, big, used);
+				Msg("* [Sun cascade cache] cascade %u corner %u outside the kept box: %.4f %.4f %.4f (camera depth %.4f, range %.0f m, window %d %d, kept %u used %u)",
+					cascade, i, l.x, l.y, l.z, z_cam, z_len, e.ox, e.oy, big, used);
 			}
 		}
 		if (inside)
