@@ -809,7 +809,7 @@ void CDSGraphManager::add_leaf_Static(dxRender_Visual* pVisual)
 #ifdef USE_DX11
 int ps_r4_main_parallel_cull = 1;
 // HOM's recheck delay on the worker threads (::Random is not thread-safe)
-static thread_local CRandom s_static_rnd(s32(GetCurrentThreadId()));
+static thread_local CRandom s_static_rnd{ s32(GetCurrentThreadId()) };
 
 // r_dsgraph_insert_static's rejects that don't depend on the graph (object size, depth of a recent frame): the same
 // tests in the same order, so a visual it passes is one r_dsgraph_insert_static would not reject for these reasons
