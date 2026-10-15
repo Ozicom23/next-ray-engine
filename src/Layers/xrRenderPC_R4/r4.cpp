@@ -21,6 +21,8 @@
 #include "r4_upscaler.h"
 #include "r4_perf_overlay.h"
 #include "r4_frame_pacing.h"
+#include <thread>
+#include <atomic>
 
 CRender RImplementation;
 
@@ -560,8 +562,11 @@ namespace sun_cache { void destroy(); }
 
 namespace tex_streaming { void update(); void clear(); } // dx10SH_Texture.cpp
 
+namespace shader_warmup { void stop(); }
+
 void CRender::destroy()
 {
+	shader_warmup::stop(); // before the device goes
 	tex_streaming::clear();
 	hiz::destroy();
 	light_smap_keep::destroy();
@@ -686,9 +691,103 @@ void CRender::reset_end()
 	m_bFirstFrameAfterReset = true;
 }
 
+// Shader warm-up (r4_shader_warmup): at the first frame of the game (the main menu), a background thread creates every
+// shader of the engine's shader cache that matches the current settings. Under DXVK a shader's translation and its
+// pipeline libraries are compiled when it is created and kept for the device's lifetime, so the level's own creation
+// later is a lookup instead of a compile in the frame that first draws with it; native drivers fill their own caches.
+// The cache files carry one variant per settings combination, named by the settings (the same for every shader of
+// a session): the name of the last compiled shader picks them. Level loads are not touched.
+int ps_r4_shader_warmup = 1;
+namespace shader_warmup
+{
+	static std::thread s_thread;
+	static std::atomic<bool> s_stop{ false };
+	static bool s_started = false;
+	static string_path s_variant = "";
+
+	void note_variant(LPCSTR name) { xr_strcpy(s_variant, name); }
+
+	static void run(xr_string root, xr_string variant)
+	{
+		SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+		CTimer timer;
+		timer.Start();
+		u32 created = 0, missing = 0, failed = 0;
+		WIN32_FIND_DATAA fd;
+		HANDLE find = FindFirstFileA((root + "*").c_str(), &fd);
+		if (find == INVALID_HANDLE_VALUE)
+			return;
+		xr_vector<u8> buf;
+		do
+		{
+			if (s_stop)
+				break;
+			if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || fd.cFileName[0] == '.')
+				continue;
+			const char* dot = strrchr(fd.cFileName, '.');
+			if (!dot || xr_strlen(dot) != 3)
+				continue;
+			const xr_string path = root + fd.cFileName + "\\" + variant;
+			HANDLE file = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+			if (file == INVALID_HANDLE_VALUE)
+			{
+				missing++;
+				continue;
+			}
+			const DWORD size = GetFileSize(file, nullptr);
+			DWORD read = 0;
+			buf.resize(size > 4 ? size : 4);
+			const BOOL ok = size > 8 && size < 16 * 1024 * 1024 && ReadFile(file, buf.data(), size, &read, nullptr);
+			CloseHandle(file);
+			if (!ok || read != size || *(const u32*)buf.data() != crc32(buf.data() + 4, size - 4))
+			{
+				failed++;
+				continue;
+			}
+			const void* code = buf.data() + 4;
+			const SIZE_T len = size - 4;
+			HRESULT hr = E_FAIL;
+			switch (dot[1])
+			{
+			case 'p': { ID3D11PixelShader* sh = nullptr; hr = HW.pDevice->CreatePixelShader(code, len, nullptr, &sh); _RELEASE(sh); } break;
+			case 'v': { ID3D11VertexShader* sh = nullptr; hr = HW.pDevice->CreateVertexShader(code, len, nullptr, &sh); _RELEASE(sh); } break;
+			case 'g': { ID3D11GeometryShader* sh = nullptr; hr = HW.pDevice->CreateGeometryShader(code, len, nullptr, &sh); _RELEASE(sh); } break;
+			case 'h': { ID3D11HullShader* sh = nullptr; hr = HW.pDevice->CreateHullShader(code, len, nullptr, &sh); _RELEASE(sh); } break;
+			case 'd': { ID3D11DomainShader* sh = nullptr; hr = HW.pDevice->CreateDomainShader(code, len, nullptr, &sh); _RELEASE(sh); } break;
+			case 'c': { ID3D11ComputeShader* sh = nullptr; hr = HW.pDevice->CreateComputeShader(code, len, nullptr, &sh); _RELEASE(sh); } break;
+			default: continue;
+			}
+			SUCCEEDED(hr) ? created++ : failed++;
+		} while (FindNextFileA(find, &fd));
+		FindClose(find);
+		Msg("* Shader warm-up: %u shaders created in %.2f s (%u without a cached variant for these settings, %u failed), variant %s",
+			created, timer.GetElapsed_sec(), missing, failed, variant.c_str());
+	}
+
+	// From the first frame: once per process, when a shader was compiled this session
+	void start_once()
+	{
+		if (s_started || !ps_r4_shader_warmup || !s_variant[0])
+			return;
+		s_started = true;
+		string_path root;
+		FS.update_path(root, "$app_data_root$", "shaders_cache\\r4\\");
+		s_stop = false;
+		s_thread = std::thread(run, xr_string(root), xr_string(s_variant));
+	}
+
+	void stop()
+	{
+		s_stop = true;
+		if (s_thread.joinable())
+			s_thread.join();
+	}
+}
+
 void CRender::OnFrame()
 {
 	PROF_EVENT("CRender::OnFrame()");
+	shader_warmup::start_once();
 	tex_streaming::update();
 	
 	Models->DeleteQueue();
@@ -2005,6 +2104,7 @@ HRESULT CRender::shader_compile(
 	}
 
 	sh_name[len] = 0;
+	shader_warmup::note_variant(sh_name);
 
 	// finish
 	defines[def_it].Name = 0;
