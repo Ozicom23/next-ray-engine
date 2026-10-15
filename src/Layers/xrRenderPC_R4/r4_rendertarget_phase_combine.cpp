@@ -341,7 +341,9 @@ void CRenderTarget::phase_combine()
 	}
 
 	// [SSFX] - Water SSR rendering
-	if (RImplementation.o.ssfx_water && !Device.m_SecondViewport.IsSVPFrame())
+	// Nothing samples the water SSR buffers when no water surface is in view: skip the clears, the copy and the two
+	// full-screen passes (blur, waves) in that case
+	if (RImplementation.o.ssfx_water && !Device.m_SecondViewport.IsSVPFrame() && !RImplementation.GMBase.RGraph.mapWater.empty())
 	{
 		FLOAT ColorRGBA[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
 		HW.pContext->ClearRenderTargetView(rt_ssfx_temp->pRT, ColorRGBA);

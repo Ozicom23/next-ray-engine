@@ -1,6 +1,7 @@
 # Compiles the FSR 3.1 upscaler passes for D3D11 (cs_5_0) with fxc into C headers.
 # Usage: powershell -File compile_shaders.ps1 [-OutDir <dir>]
-# Output: <OutDir>/<pass>_s<0|1>.h with byte arrays g_<pass>_s<0|1> (s = sharpening permutation).
+# Output: <OutDir>/<pass>_s<0|1>_h<0|1>.h with byte arrays g_<pass>_s<0|1>_h<0|1>
+# (s = sharpening permutation, h = 16-bit math permutation: min16float, FFX_HALF).
 
 param(
     [string]$OutDir = "$PSScriptRoot\generated"
@@ -21,13 +22,13 @@ $wrapDir = "generated_wrappers"
 New-Item -ItemType Directory -Force -Path $wrapDir | Out-Null
 
 # Fixed configuration used by the engine: LDR color, render-resolution motion vectors without jitter,
-# regular (non-inverted) depth. Only sharpening is a runtime permutation.
+# regular (non-inverted) depth. Sharpening and 16-bit math are runtime permutations.
 $defines = @(
-    "FFX_GPU=1", "FFX_HLSL=1", "FFX_HLSL_SM=50", "FFX_HALF=0",
+    "FFX_GPU=1", "FFX_HLSL=1", "FFX_HLSL_SM=50",
     "FFX_SPD_NO_WAVE_OPERATIONS=1",
     "FFX_FSR3UPSCALER_OPTION_UPSAMPLE_SAMPLERS_USE_DATA_HALF=0",
     "FFX_FSR3UPSCALER_OPTION_ACCUMULATE_SAMPLERS_USE_DATA_HALF=0",
-    "FFX_FSR3UPSCALER_OPTION_REPROJECT_SAMPLERS_USE_DATA_HALF=0",
+    "FFX_FSR3UPSCALER_OPTION_REPROJECT_SAMPLERS_USE_DATA_HALF=1",
     "FFX_FSR3UPSCALER_OPTION_POSTPROCESSLOCKSTATUS_SAMPLERS_USE_DATA_HALF=0",
     "FFX_FSR3UPSCALER_OPTION_UPSAMPLE_USE_LANCZOS_TYPE=2",
     "FFX_FSR3UPSCALER_OPTION_REPROJECT_USE_LANCZOS_TYPE=0",
@@ -49,18 +50,21 @@ foreach ($shader in Get-ChildItem "shaders\*.hlsl") {
     )
 
     foreach ($sharpen in 0, 1) {
-        $var = "g_${name}_s${sharpen}"
-        $out = Join-Path $OutDir "${name}_s${sharpen}.h"
+    foreach ($half in 0, 1) {
+        $var = "g_${name}_s${sharpen}_h${half}"
+        $out = Join-Path $OutDir "${name}_s${sharpen}_h${half}.h"
         $fxcArgs = @("/nologo", "/T", "cs_5_0", "/E", "CS", "/O3", "/Vn", $var, "/Fh", $out,
                      "/I", "include\FidelityFX\gpu", "/I", "include\FidelityFX\gpu\fsr3upscaler")
-        foreach ($d in $defines + "FFX_FSR3UPSCALER_OPTION_APPLY_SHARPENING=$sharpen") { $fxcArgs += @("/D", $d) }
+        $permDefines = @("FFX_FSR3UPSCALER_OPTION_APPLY_SHARPENING=$sharpen", "FFX_HALF=$half")
+        foreach ($d in $defines + $permDefines) { $fxcArgs += @("/D", $d) }
         $fxcArgs += $wrapper
 
         & $fxc.FullName @fxcArgs
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "FAILED: $name (sharpen=$sharpen)"
+            Write-Host "FAILED: $name (sharpen=$sharpen half=$half)"
             $failed++
         }
+    }
     }
 }
 
@@ -75,14 +79,16 @@ $lines = @(
     "#pragma once",
     "",
     "struct FsrDx11Binding { const char* name; char type; unsigned slot; unsigned count; };",
-    "struct FsrDx11Shader { const char* pass; unsigned sharpen; const unsigned char* code; size_t size; const FsrDx11Binding* bindings; unsigned binding_count; };",
+    "struct FsrDx11Shader { const char* pass; unsigned sharpen; unsigned half; const unsigned char* code; size_t size; const FsrDx11Binding* bindings; unsigned binding_count; };",
     ""
 )
 $table = @()
-foreach ($header in Get-ChildItem (Join-Path $OutDir "ffx_fsr3upscaler_*_s?.h") | Sort-Object Name) {
-    $base = $header.BaseName                                   # ffx_fsr3upscaler_<pass>_pass_s<n>
-    $pass = $base -replace '^ffx_fsr3upscaler_', '' -replace '_pass_s\d$', ''
-    $sharpen = [int]($base.Substring($base.Length - 1))
+foreach ($header in Get-ChildItem (Join-Path $OutDir "ffx_fsr3upscaler_*_s?_h?.h") | Sort-Object Name) {
+    $base = $header.BaseName                                   # ffx_fsr3upscaler_<pass>_pass_s<n>_h<n>
+    if ($base -notmatch '^ffx_fsr3upscaler_(.+)_pass_s(\d)_h(\d)$') { throw "Unexpected shader header name $base" }
+    $pass = $Matches[1]
+    $sharpen = [int]$Matches[2]
+    $half = [int]$Matches[3]
     $lines += "#include `"$($header.Name)`""
 
     $bindings = @()
@@ -102,7 +108,7 @@ foreach ($header in Get-ChildItem (Join-Path $OutDir "ffx_fsr3upscaler_*_s?.h") 
 
     $bindVar = "g_${base}_bindings"
     $lines += "static const FsrDx11Binding ${bindVar}[] = { " + ($bindings -join ", ") + " };"
-    $table += "    { `"$pass`", $sharpen, g_$base, sizeof(g_$base), $bindVar, $($bindings.Count) },"
+    $table += "    { `"$pass`", $sharpen, $half, g_$base, sizeof(g_$base), $bindVar, $($bindings.Count) },"
 }
 $lines += ""
 $lines += "static const FsrDx11Shader g_fsr3_dx11_shaders[] = {"

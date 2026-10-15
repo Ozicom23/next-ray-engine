@@ -25,6 +25,9 @@ void CFSR3::GetRenderSize(u32 out_w, u32 out_h, u32 quality, u32& render_w, u32&
 // Matches FSR3UPSCALER_SHADER_PERMUTATION_* in ffx_fsr3upscaler_private.h
 static const uint32_t FSR3_PERMUTATION_LOW_RES_MOTION_VECTORS = 1 << 2;
 static const uint32_t FSR3_PERMUTATION_ENABLE_SHARPENING = 1 << 5;
+static const uint32_t FSR3_PERMUTATION_ALLOW_FP16 = 1 << 7;
+
+extern int ps_r4_fsr_fp16;
 
 //////////////////////////////////////////////////////////////////////////
 // FidelityFX backend interface on D3D11
@@ -263,11 +266,12 @@ namespace
 	FfxErrorCode ffx_GetDeviceCapabilities(FfxInterface*, FfxDeviceCapabilities* caps)
 	{
 		ZeroMemory(caps, sizeof(*caps));
-		// Selects the shader permutations compiled by compile_shaders.ps1: no fp16, no wave64, no Lanczos LUT
+		// Selects the shader permutations compiled by compile_shaders.ps1: no wave64, no Lanczos LUT. 16-bit math
+		// (min16float, r4_fsr_fp16) is a hint the driver may ignore; the shaders are valid on any D3D11 device
 		caps->maximumSupportedShaderModel = FFX_SHADER_MODEL_5_1;
 		caps->waveLaneCountMin = 64;
 		caps->waveLaneCountMax = 64;
-		caps->fp16Supported = false;
+		caps->fp16Supported = ps_r4_fsr_fp16 != 0;
 		return FFX_OK;
 	}
 
@@ -478,7 +482,8 @@ namespace
 		Backend* b = get_backend(iface);
 
 		// Only the configuration compiled by compile_shaders.ps1 is available
-		const uint32_t supported = FSR3_PERMUTATION_LOW_RES_MOTION_VECTORS | FSR3_PERMUTATION_ENABLE_SHARPENING;
+		const uint32_t supported = FSR3_PERMUTATION_LOW_RES_MOTION_VECTORS | FSR3_PERMUTATION_ENABLE_SHARPENING |
+			FSR3_PERMUTATION_ALLOW_FP16;
 		if ((permutation & ~supported) || !(permutation & FSR3_PERMUTATION_LOW_RES_MOTION_VECTORS))
 		{
 			Msg("! FSR: shader permutation 0x%x is not compiled for D3D11", permutation);
@@ -487,10 +492,11 @@ namespace
 
 		const char* name = pass_shader_name(pass);
 		const u32 sharpen = (permutation & FSR3_PERMUTATION_ENABLE_SHARPENING) ? 1 : 0;
+		const u32 half = (permutation & FSR3_PERMUTATION_ALLOW_FP16) ? 1 : 0;
 		const FsrDx11Shader* shader = nullptr;
 		for (const FsrDx11Shader& s : g_fsr3_dx11_shaders)
 		{
-			if (name && s.sharpen == sharpen && 0 == xr_strcmp(s.pass, name))
+			if (name && s.sharpen == sharpen && s.half == half && 0 == xr_strcmp(s.pass, name))
 			{
 				shader = &s;
 				break;
@@ -788,6 +794,14 @@ bool CFSR3::CreateFeature(u32 render_w, u32 render_h, u32 out_w, u32 out_h, u32 
 	fi.scratchBuffer = b;
 	fi.scratchBufferSize = sizeof(Backend);
 	fi.device = HW.pDevice;
+
+	{
+		// What the driver says about 16-bit minimum precision (DXVK: depends on shaderFloat16 of the Vulkan device)
+		D3D11_FEATURE_DATA_SHADER_MIN_PRECISION_SUPPORT mp = {};
+		HW.pDevice->CheckFeatureSupport(D3D11_FEATURE_SHADER_MIN_PRECISION_SUPPORT, &mp, sizeof(mp));
+		Msg("* FSR: 16-bit math %s, driver min-precision support: compute %u, pixel %u", ps_r4_fsr_fp16 ? "on" : "off",
+			mp.AllOtherShaderStagesMinPrecision, mp.PixelShaderMinPrecision);
+	}
 
 	FfxFsr3UpscalerContext* ctx = xr_new<FfxFsr3UpscalerContext>();
 	const FfxErrorCode res = ffxFsr3UpscalerContextCreate(ctx, &cd);
