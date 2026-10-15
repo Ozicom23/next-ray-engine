@@ -48,7 +48,11 @@ void CRenderTarget::phase_nightvision()
 	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
 	
 #if defined(USE_DX10) || defined(USE_DX11)
+#ifdef USE_DX11
+	post_result(dest_rt); // ping-pong in the post chain (r4_post_pingpong)
+#else
 	HW.pContext->CopyResource(rt_Generic_0->pTexture->surface_get(), dest_rt->pTexture->surface_get());
+#endif
 #endif
 };
 
@@ -98,7 +102,11 @@ void CRenderTarget::phase_fakescope()
 	RCache.set_Geometry(g_combine);
 	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
 
+#ifdef USE_DX11
+	post_result(dest_rt); // ping-pong in the post chain (r4_post_pingpong)
+#else
 	HW.pContext->CopyResource(rt_Generic_0->pTexture->surface_get(), dest_rt->pTexture->surface_get());
+#endif
 #else
 	//Main pass (we avoid write-read from the same buffer)
 	u_setrt(rt_Generic_PingPong, nullptr, nullptr, nullptr);
@@ -193,7 +201,11 @@ void CRenderTarget::phase_heatvision()
 	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
 
 #if defined(USE_DX10) || defined(USE_DX11)
+#ifdef USE_DX11
+	post_result(dest_rt); // ping-pong in the post chain (r4_post_pingpong)
+#else
 	HW.pContext->CopyResource(rt_Generic_0->pTexture->surface_get(), dest_rt->pTexture->surface_get());
+#endif
 #endif
 };
 //--DSR-- HeatVision_start

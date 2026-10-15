@@ -516,6 +516,9 @@ void CRenderTarget::phase_combine()
 			{ PIX_EVENT(phase_sunshafts); phase_sunshafts(); }
 	}
 
+	// From here to post_chain_end, passes that draw into rt_Color and copied it into rt_Generic_0 exchange them instead
+	post_chain_begin();
+
 	if (RImplementation.o.ssfx_fog && ps_ssfx_fog_scattering > 0)
 	{
 		{ PIX_EVENT(phase_ssfx_fog_scattering); phase_ssfx_fog_scattering(); }
@@ -594,6 +597,8 @@ void CRenderTarget::phase_combine()
 	{
 		{ PIX_EVENT(phase_ssfx_taa); phase_ssfx_taa(); }
 	}
+
+	post_chain_end();
 
 	if (ssfx_PrevPos_Requiered)
 		HW.pContext->CopyResource(rt_ssfx_prevPos->pTexture->surface_get(), rt_Position->pTexture->surface_get());

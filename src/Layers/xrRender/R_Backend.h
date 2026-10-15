@@ -200,6 +200,18 @@ private:
 
 	void Invalidate();
 public:
+#ifdef USE_DX11
+	// Forgets that a texture is bound on any stage, so its next use binds its view again (the view changed in place)
+	void forget_texture(const CTexture* t)
+	{
+		for (CTexture*& s : textures_ps) if (s == t) s = nullptr;
+		for (CTexture*& s : textures_vs) if (s == t) s = nullptr;
+		for (CTexture*& s : textures_gs) if (s == t) s = nullptr;
+		for (CTexture*& s : textures_hs) if (s == t) s = nullptr;
+		for (CTexture*& s : textures_ds) if (s == t) s = nullptr;
+		for (CTexture*& s : textures_cs) if (s == t) s = nullptr;
+	}
+#endif
 	struct _stats
 	{
 		u32 polys;

@@ -668,6 +668,7 @@ public:
 extern int ps_r4_swap_wait;
 extern int ps_r4_frame_latency;
 extern int ps_r4_frame_jit;
+extern int ps_r4_post_pingpong;
 extern float ps_r4_frame_jit_margin;
 class CCC_FramePacingStats : public IConsole_Command
 {
@@ -1531,6 +1532,7 @@ void xrRender_initconsole()
 	CMD4(CCC_Integer, "r4_frame_latency", &ps_r4_frame_latency, 1, 3); // vid_restart
 	CMD4(CCC_Integer, "r4_frame_jit", &ps_r4_frame_jit, 0, 1);
 	CMD4(CCC_Float, "r4_frame_jit_margin", &ps_r4_frame_jit_margin, 0.f, 10.f);
+	CMD4(CCC_Integer, "r4_post_pingpong", &ps_r4_post_pingpong, 0, 1); // post passes exchange targets instead of copying
 	CMD1(CCC_FramePacingStats, "stat_frame_pacing");
 	CMD1(CCC_TexStreamStats, "stat_tex_stream");
 	CMD4(CCC_Integer, "r4_sky_on_demand", &ps_r4_sky_on_demand, 0, 1); // read when the weathers are created

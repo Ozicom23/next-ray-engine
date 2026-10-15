@@ -81,6 +81,10 @@ void CRenderTarget::phase_dof()
 
 	//Resolve RT
 #if defined(USE_DX10) || defined(USE_DX11)
+#ifdef USE_DX11
+	post_result(dest_rt); // ping-pong in the post chain (r4_post_pingpong)
+#else
 	HW.pContext->CopyResource(rt_Generic_0->pTexture->surface_get(), dest_rt->pTexture->surface_get());
+#endif
 #endif
 };

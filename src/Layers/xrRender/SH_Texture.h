@@ -98,6 +98,17 @@ public:
 	// The caller restores the texture's own view afterwards
 	void								set_SRView(ID3DShaderResourceView* v) { m_pSRView = v; }
 	void								apply_view(u32 stage) { Apply(stage); } // bind the current view on that stage
+	// Exchanges the resources and views of two render target textures of the same size and format (the post-process
+	// ping-pong, CRenderTarget::post_result); the backend's binding cache of both is cleared by the caller
+	void								surface_swap(CTexture& other)
+	{
+		wait_for_loading();
+		other.wait_for_loading();
+		std::swap(pSurface, other.pSurface);
+		std::swap(m_pSRView, other.m_pSRView);
+		std::swap(desc_cache, other.desc_cache);
+		std::swap(desc, other.desc);
+	}
 #endif	//	USE_DX10
 
 private:

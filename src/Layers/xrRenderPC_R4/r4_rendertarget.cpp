@@ -1364,6 +1364,50 @@ CRenderTarget::CRenderTarget()
 
 void upscale_mask_release();
 
+int ps_r4_post_pingpong = 1;
+
+void CRenderTarget::post_chain_begin()
+{
+	m_post_chain = ps_r4_post_pingpong && !RImplementation.o.dx10_msaa && rt_Color->dwWidth == rt_Generic_0->dwWidth &&
+		rt_Color->dwHeight == rt_Generic_0->dwHeight && rt_Color->fmt == rt_Generic_0->fmt;
+	m_post_swaps = 0;
+}
+
+void CRenderTarget::post_result(ref_rt& dest)
+{
+	if (!m_post_chain || &dest != &rt_Color)
+	{
+		HW.pContext->CopyResource(rt_Generic_0->pSurface, dest->pSurface);
+		return;
+	}
+	CRT* a = &*rt_Generic_0;
+	CRT* b = &*rt_Color;
+	std::swap(a->pSurface, b->pSurface);
+	std::swap(a->pRT, b->pRT);
+	std::swap(a->pZRT, b->pZRT);
+	std::swap(a->pUAView, b->pUAView);
+	a->pTexture->surface_swap(*b->pTexture);
+	RCache.forget_texture(&*a->pTexture);
+	RCache.forget_texture(&*b->pTexture);
+	m_post_swaps++;
+}
+
+// Both targets end the chain holding the result, on their own resources (the same state as after the copies)
+void CRenderTarget::post_chain_end()
+{
+	if (m_post_chain && m_post_swaps)
+	{
+		HW.pContext->CopyResource(rt_Color->pSurface, rt_Generic_0->pSurface);
+		if (m_post_swaps & 1)
+		{
+			m_post_chain = true;
+			post_result(rt_Color); // back to their own resources, both now hold the result
+		}
+	}
+	m_post_chain = false;
+	m_post_swaps = 0;
+}
+
 ref_rt& CRenderTarget::overlay_target()
 {
 	if (m_overlay_target)

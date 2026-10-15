@@ -35,6 +35,10 @@ private:
 	ID3DDepthStencilView* m_upscale_saved_zb;
 	bool m_overlays_after_upscale; // this frame the screen overlays run after the upscaler, at output resolution
 	ref_rt* m_overlay_target;      // set while they do
+	// Post-process ping-pong (r4_post_pingpong): passes that draw the scene image into rt_Color and copied it back into
+	// rt_Generic_0 exchange the two targets' resources instead; post_chain_end copies once so both hold the result
+	bool m_post_chain = false;
+	u32 m_post_swaps = 0;
 public:
 	enum eStencilOptimizeMode
 	{
@@ -450,6 +454,11 @@ public:
 	void phase_nightvision();
 	// Screen overlays (gas mask, night vision, shader scopes): their target, and the passes before or after an upscaler
 	ref_rt& overlay_target();
+	// A pass drew the next scene image into dest: rt_Generic_0 takes it (exchanged with rt_Color in the post chain,
+	// copied otherwise)
+	void post_result(ref_rt& dest);
+	void post_chain_begin();
+	void post_chain_end();
 	void phase_screen_overlays();
 	void phase_screen_overlays_upscaled();
 	void phase_fakescope(); //crookr
