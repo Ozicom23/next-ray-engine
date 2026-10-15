@@ -331,7 +331,6 @@ private:
 
 	ref_geom g_accum_point;
 	ref_geom g_accum_spot;
-	ref_geom g_smap_mask; // smap_mask_view: the view footprint polygon, dynamic vertices
 	ref_geom g_accum_omnipart;
 	ref_geom g_accum_volumetric;
 
@@ -466,11 +465,7 @@ public:
 	void phase_hdao();
 	void phase_downsamp();
 	void phase_wallmarks();
-	void phase_smap_direct(light* L, u32 sub_phase, float clear_depth = 1.f);
-	// Sun cascade (r4_sun_smap_mask): the map cleared to the near depth, the view frustum's footprint on it drawn at the
-	// far depth, so casters outside the footprint fail the depth test before shading. Called after the map's viewport
-	// is set; the caster transforms are set after it.
-	void smap_mask_view(const Fmatrix& light_xform, u32 map_size, u32 margin_texels);
+	void phase_smap_direct(light* L, u32 sub_phase);
 	void phase_smap_direct_tsh(light* L, u32 sub_phase);
 	void phase_smap_spot_clear();
 	void phase_smap_spot(light* L);

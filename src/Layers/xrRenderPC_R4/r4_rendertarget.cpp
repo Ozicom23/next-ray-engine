@@ -884,8 +884,6 @@ CRenderTarget::CRenderTarget()
 		g_accum_spot.create(D3DFVF_XYZ, g_accum_spot_vb, g_accum_spot_ib);
 	}
 
-	g_smap_mask.create(D3DFVF_XYZ, RCache.Vertex.Buffer(), RCache.Index.Buffer());
-
 	{
 		s_accum_volume.create("accum_volumetric", "lights\\lights_spot01");
 		accum_volumetric_geom_create();
