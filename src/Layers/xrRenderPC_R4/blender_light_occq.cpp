@@ -42,5 +42,12 @@ void CBlender_light_occq::Compile(CBlender_Compile& C)
 		//C.r_Stencil				(TRUE,D3DCMP_ALWAYS,0x00,0xFF, D3DSTENCILOP_ZERO, D3DSTENCILOP_ZERO, D3DSTENCILOP_ZERO);	// keep/keep/keep
 		C.r_End();
 		break;
+	case 3: // sun shadow map view mask (CRenderTarget::smap_mask_view): depth written unconditionally, nothing else
+		C.r_Pass("dumb", "dumb", false, TRUE, TRUE, FALSE);
+		C.RS.SetRS(D3DRS_ZFUNC, D3DCMP_ALWAYS);
+		C.r_ColorWriteEnable(false, false, false, false);
+		C.r_CullMode(D3DCULL_NONE);
+		C.r_End();
+		break;
 	}
 }

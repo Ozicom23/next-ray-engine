@@ -8,6 +8,7 @@
 #ifdef USE_DX11
 #include "../xrRenderPC_R4/r4_sun_receivers.h"
 extern Fvector3 ps_r4_sun_smap_scale;
+extern int ps_r4_sun_smap_mask;
 extern int ps_r4_sun_parallel_cull;
 #endif
 
@@ -393,8 +394,17 @@ void CRender::render_sun_cascade(u32 cascade_ind)
             bool bForward_Shadows = cascade.GMCascade.RGraph.mapStaticPasses[1][0].size() || cascade.GMCascade.RGraph.mapDynamicPasses[1][0].size() || cascade.GMCascade.RGraph.mapStaticSorted.Sorted.size() || cascade.GMCascade.RGraph.mapDynamicSorted.Sorted.size();
             if (bDeffered_Shadows || bForward_Shadows)
             {
+#ifdef USE_DX11
+                // The view's footprint on the map masks the casters outside it (CRenderTarget::smap_mask_view)
+                const u32 mask_margin = u32(_max(ps_r4_sun_smap_mask, 0));
+                Target->phase_smap_direct(fuckingsun, SE_SUN_FAR, mask_margin ? 0.f : 1.f);
+                set_smap_viewport();
+                if (mask_margin)
+                    Target->smap_mask_view(fuckingsun->X.D.combine, smap_used, mask_margin);
+#else
                 Target->phase_smap_direct(fuckingsun, SE_SUN_FAR);
                 set_smap_viewport();
+#endif
                 RCache.set_xform_world(Fidentity);
                 RCache.set_xform_view(Fidentity);
                 RCache.set_xform_project(fuckingsun->X.D.combine);
