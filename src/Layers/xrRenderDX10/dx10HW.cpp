@@ -761,14 +761,10 @@ void CHW::SetupFrameLatency()
             m_hFrameLatency = swapchain2->GetFrameLatencyWaitableObject();
             _RELEASE(swapchain2);
         }
-        if (m_hFrameLatency)
-        {
-            // The object is a semaphore with one slot per frame of latency, taken by a wait before each Present and
-            // given back when that frame leaves the display queue. The first frame presents without passing the
-            // frame start, so its slot is taken here; otherwise the CPU runs one frame further ahead than asked
-            WaitForSingleObject(m_hFrameLatency, 0);
-        }
-        else
+        // The object is a semaphore with one slot per frame of latency, taken by a wait before each frame's Present
+        // (the first one included) and given back when that frame leaves the display queue
+        m_FrameWaitOwed = m_hFrameLatency != nullptr;
+        if (!m_hFrameLatency)
             Msg("! DXGI: the frame latency waitable object is not available, the frame latency applies in Present");
     }
     if (!m_hFrameLatency)
@@ -786,8 +782,9 @@ void CHW::SetupFrameLatency()
 
 float CHW::WaitFrameLatency()
 {
-    if (!m_hFrameLatency)
+    if (!m_hFrameLatency || !m_FrameWaitOwed)
         return 0.f;
+    m_FrameWaitOwed = false;
     CTimer timer;
     timer.Start();
     WaitForSingleObject(m_hFrameLatency, 1000); // a timeout never stalls the game

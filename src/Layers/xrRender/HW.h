@@ -89,11 +89,12 @@ public:
 	// (r4_swap_wait, windowed and borderless modes) and its waitable object, nullptr without
 	bool							m_FrameLatencyWaitable = false;
 	HANDLE							m_hFrameLatency = nullptr;
+	bool							m_FrameWaitOwed = false; // a wait is due before the next Present (one per frame)
 	UINT	SwapChainFlags() const;
 	void	CreateSwapChain();  // from m_ChainDesc / m_ChainDescFullscreen, with the color space and the frame latency
 	void	DestroySwapChain();
 	void	SetupFrameLatency(); // r4_frame_latency on the swap chain (waitable) or the DXGI device
-	float	WaitFrameLatency(); // blocks until the display queue has room; the ms spent (0 without the waitable object)
+	float	WaitFrameLatency(); // when a wait is due: blocks until the display queue has room; the ms spent
 #elif defined(USE_DX10)
 public:
 	IDXGIAdapter*			m_pAdapter;	//	pD3D equivalent

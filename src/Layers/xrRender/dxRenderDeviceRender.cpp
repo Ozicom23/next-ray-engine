@@ -356,9 +356,6 @@ u32 dxRenderDeviceRender::GetCacheStatPolys()
 void dxRenderDeviceRender::WaitFrame()
 {
 #ifdef USE_DX11
-	if (!m_presented)
-		return;
-	m_presented = false;
 	PROF_EVENT("Frame latency wait");
 	frame_pacing::frame_begin(HW.WaitFrameLatency());
 #endif
@@ -436,13 +433,8 @@ void dxRenderDeviceRender::End()
 
 	if (!Device.m_SecondViewport.IsSVPFrame() && !Device.m_SecondViewport.isCamReady) {
 #ifdef USE_DX11
-		// One wait per Present keeps the waitable object's count: a frame drawn outside the frame loop (the loading
-		// screen draws from the loading steps) waits here instead
-		if (m_presented)
-		{
-			m_presented = false;
-			HW.WaitFrameLatency();
-		}
+		// A frame drawn outside the frame loop (the loading screen draws from the loading steps) takes its wait here
+		HW.WaitFrameLatency();
 		g_PerfOverlay.PresentBegin();
 		CTimer present_timer;
 		present_timer.Start();
@@ -450,7 +442,7 @@ void dxRenderDeviceRender::End()
 		HW.m_pSwapChain->Present(present_interval, present_flags);
 #ifdef USE_DX11
 		g_PerfOverlay.PresentEnd();
-		m_presented = true;
+		HW.m_FrameWaitOwed = true;
 		frame_pacing::present_done(present_timer.GetElapsed_sec() * 1000.f, g_PerfOverlay.LastGpuMs(), g_PerfOverlay.LastGpuEndMs(), g_PerfOverlay.GpuResults());
 #endif
 	}

@@ -53,7 +53,7 @@ namespace frame_pacing
 		if (!s_recording)
 			return;
 		s_frame_begin = s_timer.GetElapsed_sec() * 1000.f;
-		s_wait = wait_ms;
+		s_wait += wait_ms; // frames that do not present (the 3D scope's view) add up to the next sample
 	}
 
 	static void finish()

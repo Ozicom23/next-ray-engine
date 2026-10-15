@@ -75,7 +75,6 @@ public:
 
 public:
 	CResourceManager* Resources;
-	bool m_presented = false; // the last End() presented: the next frame waits for the display queue (one wait per Present)
 	ref_shader m_WireShader;
 	ref_shader m_SelectionShader;
 

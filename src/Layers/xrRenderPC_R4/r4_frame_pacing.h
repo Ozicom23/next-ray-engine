@@ -18,7 +18,7 @@ namespace frame_pacing
 {
 	void start(float seconds);
 	bool recording();
-	// At the start of a frame that follows a Present, after the latency wait (the ms spent in it)
+	// At the start of a frame, after the latency wait (the ms spent in it)
 	void frame_begin(float wait_ms);
 	// After Present: its duration and the last GPU frame time the overlay's queries returned (0 when none), with the
 	// GPU timestamp at that frame's end and the count of results (the GPU-side interval between consecutive results)
