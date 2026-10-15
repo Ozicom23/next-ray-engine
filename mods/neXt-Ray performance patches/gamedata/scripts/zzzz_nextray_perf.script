@@ -10,6 +10,11 @@
 -- 2. Useful Idiots (illish.lib.surge): the emission cover cache, built on the first update of every load (about 1.6 s
 --    of raycasts behind the loading screen), is built by the mod's own code spread over the first frames, ~2 ms each.
 --    Anything that needs the cache sooner gets it finished on the spot; with an emission running it builds at once.
+-- 3. 3DSS (z_3dss_shader_switcher): while a save loads, the inventory is put back slot by slot and every slot change
+--    normalizes the new weapon's scope marker shaders (about 25 ms each, 20 to 60 times per load, mostly the same few
+--    weapons, one per frame). While the load runs the requests are only noted; at the end of the load, before the
+--    first frame is shown (on_loading_screen_key_prompt), each weapon is normalized once by the mod's own function.
+--    After that every call goes straight to the mod.
 
 local log_prefix = "* [neXt-Ray perf] "
 
@@ -76,9 +81,10 @@ end
 
 local surge_co = nil          -- the mod's buildCovers running as a coroutine
 local surge_timer = nil       -- time spent in it this frame
-local surge_budget_us = 1500
+local surge_budget_us = 2000
 local surge_load_window = true -- until the first actor_on_update: the call from the first update
 local surge_frames = 0
+local surge_snaps, surge_yields, surge_us = 0, 0, 0
 
 local function surge_finish()
 	local co = surge_co
@@ -111,11 +117,15 @@ local function surge_patch()
 	-- nearbyCovers snaps each sample point to the AI grid, then tests it for cover: the step to yield between
 	POS.snap = function(...)
 		if surge_co and surge_timer and coroutine.running() == surge_co then
+			surge_snaps = surge_snaps + 1
 			surge_timer:stop()
 			if surge_timer:time() >= surge_budget_us then
+				surge_yields = surge_yields + 1
 				coroutine.yield()
+				-- resumed in a later frame: surge_update started that frame's timer already
+			else
+				surge_timer:start()
 			end
-			surge_timer:start()
 		end
 		return snap(...)
 	end
@@ -149,30 +159,78 @@ local function surge_update()
 	end
 	surge_timer = profile_timer()
 	surge_timer:start()
+	local frame_timer = profile_timer()
+	frame_timer:start()
 	local okc, err = coroutine.resume(surge_co)
+	frame_timer:stop()
+	surge_us = surge_us + frame_timer:time()
 	surge_frames = surge_frames + 1
 	if not okc then
 		msg("cover cache build failed: %s", tostring(err))
 		surge_co = nil
 	elseif coroutine.status(surge_co) == "dead" then
-		msg("emission cover cache built over %d frames", surge_frames)
+		msg("emission cover cache built over %d frames, %.0f ms in all, %d grid snaps, %d yields", surge_frames, surge_us / 1000, surge_snaps, surge_yields)
 		surge_co = nil
 	end
 	surge_timer = nil
 end
 
 ---------------------------------------------------------------------------------------------------------------------
+-- 3. 3DSS: marker shader normalization once per weapon after a load
 
-local da_on, surge_on = false, false
+local tdss_loading = true -- from the script load (the start of a load) to the end of the load
+local tdss_pending = {} -- weapon id -> true
+local tdss_calls, tdss_done = 0, 0
+local tdss_deadline = nil -- fallback when the end of the load isn't signalled: 10 s after the first update
+
+local function tdss_patch()
+	local m = z_3dss_shader_switcher
+	if not (m and type(m.normalize_marker_shaders) == "function") then return false end
+	local normalize = m.normalize_marker_shaders
+	m.normalize_marker_shaders = function(weapon)
+		if tdss_loading and weapon and weapon.id then
+			tdss_pending[weapon:id()] = true
+			tdss_calls = tdss_calls + 1
+			return
+		end
+		return normalize(weapon)
+	end
+	m.nextray_normalize = normalize
+	return true
+end
+
+local function tdss_flush()
+	if not tdss_loading then return end
+	tdss_loading = false
+	local pending = tdss_pending
+	tdss_pending = {}
+	local normalize = z_3dss_shader_switcher.nextray_normalize
+	for id in pairs(pending) do
+		local obj = level.object_by_id(id)
+		if obj then
+			normalize(obj)
+			tdss_done = tdss_done + 1
+		end
+	end
+end
+
+---------------------------------------------------------------------------------------------------------------------
+
+local da_on, surge_on, tdss_on = false, false, false
 local reported = false
+local reported_after = 0
 
 local function actor_on_update()
+	if tdss_loading and tdss_deadline and time_global() > tdss_deadline then tdss_flush() end
 	if da_on then da_update() end
 	if surge_on then surge_update() end
-	if not reported then
+	if not reported and time_global() > reported_after then
 		reported = true
-		msg("Dynamic Anomalies dispatcher %s (%d anomalies), emission cover cache %s", da_on and "on" or "off", da_count,
-			surge_on and "spread over frames" or "off")
+		if tdss_calls > 0 then
+			msg("3DSS: %d marker normalization requests done as %d", tdss_calls, tdss_done)
+		end
+		msg("Dynamic Anomalies dispatcher %s (%d anomalies), emission cover cache %s, 3DSS normalization after loads %s",
+			da_on and "on" or "off", da_count, surge_on and "spread over frames" or "off", tdss_on and "on" or "off")
 	end
 end
 
@@ -186,5 +244,40 @@ function on_game_start()
 	end
 	da_on = da_patch()
 	surge_on = surge_patch()
+	tdss_on = tdss_patch()
 	RegisterScriptCallback("actor_on_update", actor_on_update)
+	RegisterScriptCallback("actor_on_first_update", function()
+		reported_after = time_global() + 5000
+		tdss_deadline = time_global() + 10000
+	end)
+	if tdss_on then
+		RegisterScriptCallback("on_loading_screen_key_prompt", tdss_flush)
+	end
+end
+
+---------------------------------------------------------------------------------------------------------------------
+-- Measuring aid (the console lowercases its commands): run_string zzzz_nextray_perf.bench()
+function bench()
+	local function B(n, f, k)
+		k = k or 100
+		if type(f) ~= "function" then
+			log(string.format("~bench %-28s n/a", n))
+			return
+		end
+		local t = profile_timer()
+		t:start()
+		for i = 1, k do f() end
+		t:stop()
+		log(string.format("~bench %-28s %9.1f us", n, t:time() / k))
+	end
+	local lg = demonized_ledge_grabbing
+	B("ledge.checkLedgeGrabbing", lg and lg.checkLedgeGrabbing)
+	B("ledge.checkClimbPrecondition", lg and lg.checkClimbPrecondition)
+	B("ledge.getActorWeights", lg and lg.getActorWeights)
+	B("ledge.getActorMaxWalkWeight", lg and lg.getActorMaxWalkWeight)
+	B("IsMoveState(mcClimb)", function() return IsMoveState("mcClimb") end)
+	B("actor:get_total_weight", function() return db.actor:get_total_weight() end)
+	B("actor:iterate_belt", function() db.actor:iterate_belt(function() end) end)
+	local okS, S = pcall(require, "illish.lib.surge")
+	B("surge.buildCovers(true)", okS and S and function() S.buildCovers(true) end, 1)
 end
