@@ -807,7 +807,7 @@ void CDSGraphManager::add_leaf_Static(dxRender_Visual* pVisual)
 }
 
 #ifdef USE_DX11
-int ps_r4_main_parallel_cull = 1;
+int ps_r4_main_parallel_cull = 0;
 // HOM's recheck delay on the worker threads (::Random is not thread-safe)
 static thread_local CRandom s_static_rnd{ s32(GetCurrentThreadId()) };
 
