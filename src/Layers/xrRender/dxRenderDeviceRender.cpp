@@ -4,6 +4,7 @@
 #include "ResourceManager.h"
 #ifdef USE_DX11
 #include "../xrRenderPC_R4/r4_perf_overlay.h"
+#include "../xrRenderPC_R4/r4_frame_pacing.h"
 #endif
 
 dxRenderDeviceRender::dxRenderDeviceRender()
@@ -352,6 +353,17 @@ u32 dxRenderDeviceRender::GetCacheStatPolys()
 	return RCache.stat.polys;
 }
 
+void dxRenderDeviceRender::WaitFrame()
+{
+#ifdef USE_DX11
+	if (!m_presented)
+		return;
+	m_presented = false;
+	PROF_EVENT("Frame latency wait");
+	frame_pacing::frame_begin(HW.WaitFrameLatency());
+#endif
+}
+
 void dxRenderDeviceRender::Begin()
 {
 #if !defined(USE_DX10) && !defined(USE_DX11)
@@ -425,10 +437,14 @@ void dxRenderDeviceRender::End()
 	if (!Device.m_SecondViewport.IsSVPFrame() && !Device.m_SecondViewport.isCamReady) {
 #ifdef USE_DX11
 		g_PerfOverlay.PresentBegin();
+		CTimer present_timer;
+		present_timer.Start();
 #endif
 		HW.m_pSwapChain->Present(present_interval, present_flags);
 #ifdef USE_DX11
 		g_PerfOverlay.PresentEnd();
+		m_presented = true;
+		frame_pacing::present_done(present_timer.GetElapsed_sec() * 1000.f, g_PerfOverlay.LastGpuMs());
 #endif
 	}
 #else //!USE_DX10 || USE_DX11

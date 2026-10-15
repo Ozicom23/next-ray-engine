@@ -664,6 +664,24 @@ public:
 	}
 };
 
+#include "../xrRenderPC_R4/r4_frame_pacing.h"
+extern int ps_r4_swap_wait;
+extern int ps_r4_frame_latency;
+class CCC_FramePacingStats : public IConsole_Command
+{
+public:
+	CCC_FramePacingStats(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; }
+	virtual void Execute(LPCSTR args)
+	{
+		const float seconds = float(atof(args));
+		frame_pacing::start(seconds > 0.f ? _min(seconds, 120.f) : 10.f);
+	}
+	virtual void Info(TInfo& I)
+	{
+		xr_strcpy(I, "each frame's interval, latency wait, CPU, Present and GPU time to logs/frame_pacing_<time>.csv, a summary to the log [seconds, default 10]");
+	}
+};
+
 class CCC_SunCasterStats : public IConsole_Command
 {
 public:
@@ -1507,6 +1525,9 @@ void xrRender_initconsole()
 	CMD4(CCC_Integer, "r4_sun_cascade_cache", &ps_r4_sun_cascade_cache, 0, 2);
 	CMD4(CCC_Float, "r4_sun_cascade_cache_drift", &ps_r4_sun_cascade_cache_drift, 0.1f, 4.f);
 	CMD1(CCC_SunCacheStats, "stat_sun_cache");
+	CMD4(CCC_Integer, "r4_swap_wait", &ps_r4_swap_wait, 0, 1);         // vid_restart
+	CMD4(CCC_Integer, "r4_frame_latency", &ps_r4_frame_latency, 1, 3); // vid_restart
+	CMD1(CCC_FramePacingStats, "stat_frame_pacing");
 	CMD1(CCC_TexStreamStats, "stat_tex_stream");
 	CMD4(CCC_Integer, "r4_sky_on_demand", &ps_r4_sky_on_demand, 0, 1); // read when the weathers are created
 	CMD4(CCC_Integer, "r4_tex_stream", &ps_r4_tex_stream, 0, 1); // read when textures load (next level load)

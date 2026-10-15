@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "r4_perf_overlay.h"
 #include "r4_upscaler.h"
+#include "r4_frame_pacing.h"
 #include "../../xrEngine/Stats.h"
 #include "../../xrEngine/IGame_Persistent.h"
 
@@ -67,6 +68,7 @@ void CPerfOverlay::CollectGpuTimes()
 			const float ms = float(double(t1 - t0) * 1000.0 / double(dj.Frequency));
 			m_sum.gpu += ms;
 			++m_sum.gpu_n;
+			m_last_gpu_ms = ms;
 		}
 	}
 }
@@ -77,8 +79,11 @@ void CPerfOverlay::GpuFrameBegin()
 	gpu_profiler::frame_begin(ps_perf_overlay >= 2);
 
 	m_query_active = false;
-	if (!ps_perf_overlay || !CreateQueries())
+	if ((!ps_perf_overlay && !frame_pacing::recording()) || !CreateQueries())
+	{
+		m_last_gpu_ms = 0.f;
 		return;
+	}
 
 	CollectGpuTimes();
 
@@ -95,7 +100,7 @@ void CPerfOverlay::GpuFrameEnd()
 {
 	gpu_profiler::frame_end();
 
-	if (!ps_perf_overlay)
+	if (!ps_perf_overlay && !frame_pacing::recording())
 		return;
 
 	m_draw_calls = RCache.stat.calls;

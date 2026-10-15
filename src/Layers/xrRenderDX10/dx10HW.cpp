@@ -298,6 +298,10 @@ void CHW::DestroyD3D()
 }
 
 extern u32 g_screenmode;
+#if defined(USE_DX11)
+extern int ps_r4_swap_wait;     // r4_frame_pacing.cpp
+extern int ps_r4_frame_latency;
+#endif
 
 void CHW::CreateDevice(HWND hwnd, bool move_window)
 {
@@ -528,12 +532,12 @@ void CHW::CreateDevice(HWND hwnd, bool move_window)
 
     //	Additional set up
     sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    sd.Flags       = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
-
 #if defined(USE_DX11)
-    if (m_SupportsVRR) {
-        sd.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
-    }
+    // The frame latency waitable object exists on windowed swap chains only (DXGI refuses it for exclusive fullscreen)
+    m_FrameLatencyWaitable = ps_r4_swap_wait && bWindowed;
+    sd.Flags = SwapChainFlags();
+#else
+    sd.Flags       = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
 #endif
 
     UINT createDeviceFlags = 0;
@@ -581,32 +585,7 @@ void CHW::CreateDevice(HWND hwnd, bool move_window)
     _RELEASE(context);
 
     // create swapchain
-    R_CHK(m_pFactory->CreateSwapChainForHwnd(pDevice, m_hWnd, &sd, &sd_fullscreen, NULL, &m_pSwapChain));
-
-    // setup colorspace
-    // HDR10 (U10 output) -> DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020
-    // SDR   (U8 output)  -> DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709
-    // TODO: SDR 10-bit?
-    IDXGISwapChain3* swapchain3;
-    R_CHK(m_pSwapChain->QueryInterface(&swapchain3));
-
-    if (ps_r4_hdr10_on) {
-        UINT color_space_supported = 0;
-        R_CHK(swapchain3->CheckColorSpaceSupport(
-            DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020,
-            &color_space_supported));
-
-        if (color_space_supported & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) {
-            R_CHK(swapchain3->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020));
-        } else {
-            Log("HDR10 color space unsupported, failed to enable HDR10 output");
-            R_CHK(swapchain3->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709));
-        }
-    } else {
-        R_CHK(swapchain3->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709));
-    }
-
-    _RELEASE(swapchain3);
+    CreateSwapChain();
 
     R_CHK(pContext->QueryInterface(__uuidof(ID3DUserDefinedAnnotation), (void**)&pAnnotation));
 
@@ -708,6 +687,107 @@ void CHW::CreateDevice(HWND hwnd, bool move_window)
     // #endif
 }
 
+#if defined(USE_DX11)
+UINT CHW::SwapChainFlags() const
+{
+    UINT flags = 0;
+    if (m_FrameLatencyWaitable)
+        flags |= DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT; // windowed only, no display mode switches
+    else
+        flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+    if (m_SupportsVRR)
+        flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+    return flags;
+}
+
+void CHW::CreateSwapChain()
+{
+    R_CHK(m_pFactory->CreateSwapChainForHwnd(pDevice, m_hWnd, &m_ChainDesc, &m_ChainDescFullscreen, NULL, &m_pSwapChain));
+
+
+    // setup colorspace
+    // HDR10 (U10 output) -> DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020
+    // SDR   (U8 output)  -> DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709
+    // TODO: SDR 10-bit?
+    IDXGISwapChain3* swapchain3;
+    R_CHK(m_pSwapChain->QueryInterface(&swapchain3));
+
+    if (ps_r4_hdr10_on) {
+        UINT color_space_supported = 0;
+        R_CHK(swapchain3->CheckColorSpaceSupport(
+            DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020,
+            &color_space_supported));
+
+        if (color_space_supported & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) {
+            R_CHK(swapchain3->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020));
+        } else {
+            Log("HDR10 color space unsupported, failed to enable HDR10 output");
+            R_CHK(swapchain3->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709));
+        }
+    } else {
+        R_CHK(swapchain3->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709));
+    }
+
+    _RELEASE(swapchain3);
+
+    SetupFrameLatency();
+}
+
+void CHW::DestroySwapChain()
+{
+    if (m_hFrameLatency)
+    {
+        CloseHandle(m_hFrameLatency);
+        m_hFrameLatency = nullptr;
+    }
+    _SHOW_REF("refCount:m_pSwapChain", m_pSwapChain);
+    _RELEASE(m_pSwapChain);
+}
+
+void CHW::SetupFrameLatency()
+{
+    if (m_hFrameLatency)
+    {
+        CloseHandle(m_hFrameLatency);
+        m_hFrameLatency = nullptr;
+    }
+    const UINT latency = UINT(clampr(ps_r4_frame_latency, 1, 3));
+    if (m_FrameLatencyWaitable)
+    {
+        IDXGISwapChain2* swapchain2 = nullptr;
+        if (SUCCEEDED(m_pSwapChain->QueryInterface(__uuidof(IDXGISwapChain2), (void**)&swapchain2)) && swapchain2)
+        {
+            swapchain2->SetMaximumFrameLatency(latency);
+            m_hFrameLatency = swapchain2->GetFrameLatencyWaitableObject();
+            _RELEASE(swapchain2);
+        }
+        if (!m_hFrameLatency)
+            Msg("! DXGI: the frame latency waitable object is not available, the frame latency applies in Present");
+    }
+    if (!m_hFrameLatency)
+    {
+        IDXGIDevice1* device1 = nullptr;
+        if (SUCCEEDED(pDevice->QueryInterface(__uuidof(IDXGIDevice1), (void**)&device1)) && device1)
+        {
+            device1->SetMaximumFrameLatency(latency);
+            _RELEASE(device1);
+        }
+    }
+    Msg("* DXGI: max frame latency %u, %s", latency,
+        m_hFrameLatency ? "waited at the frame start (r4_swap_wait)" : "limited in Present");
+}
+
+float CHW::WaitFrameLatency()
+{
+    if (!m_hFrameLatency)
+        return 0.f;
+    CTimer timer;
+    timer.Start();
+    WaitForSingleObject(m_hFrameLatency, 1000); // a timeout never stalls the game
+    return timer.GetElapsed_sec() * 1000.f;
+}
+#endif
+
 void CHW::DestroyDevice()
 {
     //	Destroy state managers
@@ -751,11 +831,12 @@ void CHW::DestroyDevice()
 #endif
 		}
     }
+#ifdef USE_DX11
+    DestroySwapChain();
+    _RELEASE(pContext);
+#else
     _SHOW_REF("refCount:m_pSwapChain", m_pSwapChain);
     _RELEASE(m_pSwapChain);
-
-#ifdef USE_DX11
-    _RELEASE(pContext);
 #endif
 
 #ifndef USE_DX11
@@ -790,6 +871,19 @@ void CHW::Reset(HWND hwnd)
     BOOL bWindowed = (g_screenmode != 2);
 
 #if defined(USE_DX11)
+    // The frame latency waitable object exists on windowed swap chains only: when the mode or r4_swap_wait changed
+    // that, the swap chain is created anew below instead of resized
+    const bool want_waitable = ps_r4_swap_wait && bWindowed;
+    if (want_waitable != m_FrameLatencyWaitable)
+    {
+        if (!cd_fs.Windowed)
+            m_pSwapChain->SetFullscreenState(FALSE, NULL);
+        _RELEASE(pBaseZB);
+        _RELEASE(pBaseRT);
+        DestroySwapChain();
+        m_FrameLatencyWaitable = want_waitable;
+        cd.Flags = SwapChainFlags();
+    }
     cd_fs.Windowed = bWindowed;
 #elif defined(USE_DX10)
     cd.Windowed = bWindowed;
@@ -801,7 +895,8 @@ void CHW::Reset(HWND hwnd)
         SetForegroundWindow(hwnd);
     }
 
-    m_pSwapChain->SetFullscreenState(!bWindowed, bWindowed ? NULL : m_pOutput);
+    if (m_pSwapChain)
+        m_pSwapChain->SetFullscreenState(!bWindowed, bWindowed ? NULL : m_pOutput);
 
 #if defined(USE_DX11)
     selectResolution(cd.Width, cd.Height, bWindowed);
@@ -837,7 +932,8 @@ void CHW::Reset(HWND hwnd)
     mode.Height      = cd.Height;
     mode.Format      = cd.Format;
     mode.RefreshRate = cd_fs.RefreshRate;
-    CHK_DX(m_pSwapChain->ResizeTarget(&mode));
+    if (m_pSwapChain)
+        CHK_DX(m_pSwapChain->ResizeTarget(&mode));
 #elif defined(USE_DX10)
     CHK_DX(m_pSwapChain->ResizeTarget(&desc));
 #endif
@@ -853,17 +949,15 @@ void CHW::Reset(HWND hwnd)
     _RELEASE(pBaseRT);
 
 #if defined(USE_DX11)
-    UINT flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
-    if (m_SupportsVRR) {
-        flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
-    }
-
-    CHK_DX(m_pSwapChain->ResizeBuffers(
-        cd.BufferCount,
-        cd.Width,
-        cd.Height,
-        cd.Format,
-        flags));
+    if (!m_pSwapChain)
+        CreateSwapChain();
+    else
+        CHK_DX(m_pSwapChain->ResizeBuffers(
+            cd.BufferCount,
+            cd.Width,
+            cd.Height,
+            cd.Format,
+            SwapChainFlags()));
 #elif defined(USE_DX10)
 	CHK_DX(m_pSwapChain->ResizeBuffers(
 		cd.BufferCount,
@@ -1102,17 +1196,12 @@ void CHW::OnAppActivate()
 
         const auto& cd = m_ChainDesc;
 
-        UINT flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
-        if (m_SupportsVRR) {
-            flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
-        }
-
         m_pSwapChain->ResizeBuffers(
             cd.BufferCount,
             cd.Width,
             cd.Height,
             cd.Format,
-            flags);
+            SwapChainFlags());
 
         UpdateViews();
 #endif
@@ -1148,17 +1237,12 @@ void CHW::OnAppDeactivate()
 
         const auto& cd = m_ChainDesc;
 
-        UINT flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
-        if (m_SupportsVRR) {
-            flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
-        }
-
         m_pSwapChain->ResizeBuffers(
             cd.BufferCount,
             cd.Width,
             cd.Height,
             cd.Format,
-            flags);
+            SwapChainFlags());
 
         UpdateViews();
 #endif

@@ -358,6 +358,11 @@ void CRenderDevice::on_idle()
 
 	PROF_FRAME("Main Thread");
 
+#ifndef DEDICATED_SERVER
+	// The frame starts (input, game logic, render) when the display queue has room (r4_swap_wait)
+	m_pRender->WaitFrame();
+#endif
+
 #ifdef DEDICATED_SERVER
     u32 FrameStartTime = TimerGlobal.GetElapsed_ms();
 #endif

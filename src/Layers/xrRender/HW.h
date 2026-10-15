@@ -85,6 +85,15 @@ public:
 	bool							m_bUsePerfhud;
 	D3D_FEATURE_LEVEL				FeatureLevel;
 	bool 							m_SupportsVRR; // whether we can use DXGI_PRESENT_ALLOW_TEARING etc.
+	// Frame pacing (r4_frame_pacing.h): the swap chain created with DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT
+	// (r4_swap_wait, windowed and borderless modes) and its waitable object, nullptr without
+	bool							m_FrameLatencyWaitable = false;
+	HANDLE							m_hFrameLatency = nullptr;
+	UINT	SwapChainFlags() const;
+	void	CreateSwapChain();  // from m_ChainDesc / m_ChainDescFullscreen, with the color space and the frame latency
+	void	DestroySwapChain();
+	void	SetupFrameLatency(); // r4_frame_latency on the swap chain (waitable) or the DXGI device
+	float	WaitFrameLatency(); // blocks until the display queue has room; the ms spent (0 without the waitable object)
 #elif defined(USE_DX10)
 public:
 	IDXGIAdapter*			m_pAdapter;	//	pD3D equivalent
