@@ -545,173 +545,74 @@ IC void CBackend::set_Constants(R_constant_table* C)
 
 	//	Setup constant tables
 	{
-		static ref_cbuffer aPixelConstants[MaxCBuffers];
-		static ref_cbuffer aVertexConstants[MaxCBuffers];
-		static ref_cbuffer aGeometryConstants[MaxCBuffers];
+		// The buffers this table binds, per stage and slot, as plain pointers. Only the slots that change are assigned
+		// (each assignment is a reference count update) and bound: the same D3D calls as comparing every slot of two
+		// copies of the arrays, which took ~2 us per shader change. The bound buffers are also listed for flush_cache
 #ifdef USE_DX11
-		static ref_cbuffer aHullConstants[MaxCBuffers];
-		static ref_cbuffer aDomainConstants[MaxCBuffers];
-		static ref_cbuffer aComputeConstants[MaxCBuffers];
+		const int stages = 6;
+		ref_cbuffer* current[stages] = { m_aPixelConstants, m_aVertexConstants, m_aGeometryConstants, m_aHullConstants,
+			m_aDomainConstants, m_aComputeConstants };
+#else
+		const int stages = 3;
+		ref_cbuffer* current[stages] = { m_aPixelConstants, m_aVertexConstants, m_aGeometryConstants };
 #endif
-
-		for (int i = 0; i < MaxCBuffers; ++i)
-		{
-			aPixelConstants[i] = m_aPixelConstants[i];
-			aVertexConstants[i] = m_aVertexConstants[i];
-			aGeometryConstants[i] = m_aGeometryConstants[i];
-
-#ifdef USE_DX11
-			aHullConstants[i] = m_aHullConstants[i];
-			aDomainConstants[i] = m_aDomainConstants[i];
-			aComputeConstants[i] = m_aComputeConstants[i];
-#endif
-
-			m_aPixelConstants[i] = 0;
-			m_aVertexConstants[i] = 0;
-			m_aGeometryConstants[i] = 0;
-
-#ifdef USE_DX11
-			m_aHullConstants[i] = 0;
-			m_aDomainConstants[i] = 0;
-			m_aComputeConstants[i] = 0;
-#endif
-		}
+		dx10ConstantBuffer* next[stages][MaxCBuffers] = {};
 		R_constant_table::cb_table::iterator it = C->m_CBTable.begin();
 		R_constant_table::cb_table::iterator end = C->m_CBTable.end();
 		for (; it != end; ++it)
 		{
-			//ID3DxxBuffer*	pBuffer = (it->second)->GetBuffer();
-			u32 uiBufferIndex = it->first;
-
-			if ((uiBufferIndex & CB_BufferTypeMask) == CB_BufferPixelShader)
+			const u32 uiBufferIndex = it->first;
+			const u32 slot = uiBufferIndex & CB_BufferIndexMask;
+			VERIFY(slot < MaxCBuffers);
+			switch (uiBufferIndex & CB_BufferTypeMask)
 			{
-				VERIFY((uiBufferIndex&CB_BufferIndexMask)<MaxCBuffers);
-				m_aPixelConstants[uiBufferIndex & CB_BufferIndexMask] = it->second;
-			}
-			else if ((uiBufferIndex & CB_BufferTypeMask) == CB_BufferVertexShader)
-			{
-				VERIFY((uiBufferIndex&CB_BufferIndexMask)<MaxCBuffers);
-				m_aVertexConstants[uiBufferIndex & CB_BufferIndexMask] = it->second;
-			}
-			else if ((uiBufferIndex & CB_BufferTypeMask) == CB_BufferGeometryShader)
-			{
-				VERIFY((uiBufferIndex&CB_BufferIndexMask)<MaxCBuffers);
-				m_aGeometryConstants[uiBufferIndex & CB_BufferIndexMask] = it->second;
-			}
+			case CB_BufferPixelShader: next[0][slot] = it->second._get(); break;
+			case CB_BufferVertexShader: next[1][slot] = it->second._get(); break;
+			case CB_BufferGeometryShader: next[2][slot] = it->second._get(); break;
 #ifdef USE_DX11
-			else if ( (uiBufferIndex&CB_BufferTypeMask) == CB_BufferHullShader)
-			{
-				VERIFY((uiBufferIndex&CB_BufferIndexMask)<MaxCBuffers);
-				m_aHullConstants[uiBufferIndex&CB_BufferIndexMask] = it->second;
-			}
-			else if ( (uiBufferIndex&CB_BufferTypeMask) == CB_BufferDomainShader)
-			{
-				VERIFY((uiBufferIndex&CB_BufferIndexMask)<MaxCBuffers);
-				m_aDomainConstants[uiBufferIndex&CB_BufferIndexMask] = it->second;
-			}
-			else if ( (uiBufferIndex&CB_BufferTypeMask) == CB_BufferComputeShader)
-			{
-				VERIFY((uiBufferIndex&CB_BufferIndexMask)<MaxCBuffers);
-				m_aComputeConstants[uiBufferIndex&CB_BufferIndexMask] = it->second;
-			}
+			case CB_BufferHullShader: next[3][slot] = it->second._get(); break;
+			case CB_BufferDomainShader: next[4][slot] = it->second._get(); break;
+			case CB_BufferComputeShader: next[5][slot] = it->second._get(); break;
 #endif
-			else
-				VERIFY("Invalid enumeration");
+			default: VERIFY("Invalid enumeration");
+			}
 		}
 
 		ID3DBuffer* tempBuffer[MaxCBuffers];
-
-		u32 uiMin;
-		u32 uiMax;
-
-		if (CBuffersNeedUpdate(m_aPixelConstants, aPixelConstants, uiMin, uiMax))
+		m_bound_cbuffers_count = 0;
+		for (int stage = 0; stage < stages; ++stage)
 		{
-			++uiMax;
-
-			for (u32 i = uiMin; i < uiMax; ++i)
+			ref_cbuffer* cur = current[stage];
+			int lo = -1, hi = -1;
+			for (int i = 0; i < MaxCBuffers; ++i)
 			{
-				if (m_aPixelConstants[i])
-					tempBuffer[i] = m_aPixelConstants[i]->GetBuffer();
-				else
-					tempBuffer[i] = 0;
+				dx10ConstantBuffer* buffer = next[stage][i];
+				if (buffer)
+					m_bound_cbuffers[m_bound_cbuffers_count++] = buffer;
+				if (cur[i]._get() == buffer)
+					continue;
+				if (lo < 0)
+					lo = i;
+				hi = i;
+				cur[i] = buffer;
 			}
-
-			HW.pContext->PSSetConstantBuffers(uiMin, uiMax - uiMin, &tempBuffer[uiMin]);
-		}
-
-
-		if (CBuffersNeedUpdate(m_aVertexConstants, aVertexConstants, uiMin, uiMax))
-		{
-			++uiMax;
-
-			for (u32 i = uiMin; i < uiMax; ++i)
+			if (lo < 0)
+				continue;
+			for (int i = lo; i <= hi; ++i)
+				tempBuffer[i] = next[stage][i] ? next[stage][i]->GetBuffer() : 0;
+			const UINT count = UINT(hi - lo + 1);
+			switch (stage)
 			{
-				if (m_aVertexConstants[i])
-					tempBuffer[i] = m_aVertexConstants[i]->GetBuffer();
-				else
-					tempBuffer[i] = 0;
-			}
-			HW.pContext->VSSetConstantBuffers(uiMin, uiMax - uiMin, &tempBuffer[uiMin]);
-		}
-
-
-		if (CBuffersNeedUpdate(m_aGeometryConstants, aGeometryConstants, uiMin, uiMax))
-		{
-			++uiMax;
-
-			for (u32 i = uiMin; i < uiMax; ++i)
-			{
-				if (m_aGeometryConstants[i])
-					tempBuffer[i] = m_aGeometryConstants[i]->GetBuffer();
-				else
-					tempBuffer[i] = 0;
-			}
-			HW.pContext->GSSetConstantBuffers(uiMin, uiMax - uiMin, &tempBuffer[uiMin]);
-		}
-
+			case 0: HW.pContext->PSSetConstantBuffers(lo, count, &tempBuffer[lo]); break;
+			case 1: HW.pContext->VSSetConstantBuffers(lo, count, &tempBuffer[lo]); break;
+			case 2: HW.pContext->GSSetConstantBuffers(lo, count, &tempBuffer[lo]); break;
 #ifdef USE_DX11
-		if (CBuffersNeedUpdate(m_aHullConstants, aHullConstants, uiMin, uiMax))
-		{
-			++uiMax;
-
-			for (u32 i=uiMin; i<uiMax; ++i)
-			{
-				if (m_aHullConstants[i])
-					tempBuffer[i] = m_aHullConstants[i]->GetBuffer();
-				else
-					tempBuffer[i] = 0;
-			}
-			HW.pContext->HSSetConstantBuffers(uiMin, uiMax-uiMin, &tempBuffer[uiMin]);
-		}
-
-		if (CBuffersNeedUpdate(m_aDomainConstants, aDomainConstants, uiMin, uiMax))
-		{
-			++uiMax;
-
-			for (u32 i=uiMin; i<uiMax; ++i)
-			{
-				if (m_aDomainConstants[i])
-					tempBuffer[i] = m_aDomainConstants[i]->GetBuffer();
-				else
-					tempBuffer[i] = 0;
-			}
-			HW.pContext->DSSetConstantBuffers(uiMin, uiMax-uiMin, &tempBuffer[uiMin]);
-		}
-
-		if (CBuffersNeedUpdate(m_aComputeConstants, aComputeConstants, uiMin, uiMax))
-		{
-			++uiMax;
-
-			for (u32 i=uiMin; i<uiMax; ++i)
-			{
-				if (m_aComputeConstants[i])
-					tempBuffer[i] = m_aComputeConstants[i]->GetBuffer();
-				else
-					tempBuffer[i] = 0;
-			}
-			HW.pContext->CSSetConstantBuffers(uiMin, uiMax-uiMin, &tempBuffer[uiMin]);
-		}
+			case 3: HW.pContext->HSSetConstantBuffers(lo, count, &tempBuffer[lo]); break;
+			case 4: HW.pContext->DSSetConstantBuffers(lo, count, &tempBuffer[lo]); break;
+			case 5: HW.pContext->CSSetConstantBuffers(lo, count, &tempBuffer[lo]); break;
 #endif
+			}
+		}
 		/*
 		for (int i=0; i<MaxCBuffers; ++i)
 		{

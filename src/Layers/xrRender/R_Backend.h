@@ -108,6 +108,9 @@ public:
 	ref_cbuffer m_aDomainConstants[MaxCBuffers];
 	ref_cbuffer m_aComputeConstants[MaxCBuffers];
 #	endif
+	// The buffers bound by the current constant table (set_Constants), flushed before each draw
+	dx10ConstantBuffer* m_bound_cbuffers[6 * MaxCBuffers];
+	u32 m_bound_cbuffers_count = 0;
 	D3D_PRIMITIVE_TOPOLOGY m_PrimitiveTopology;
 	ID3DInputLayout* m_pInputLayout;
 	DWORD dummy0; //	Padding to avoid warning	

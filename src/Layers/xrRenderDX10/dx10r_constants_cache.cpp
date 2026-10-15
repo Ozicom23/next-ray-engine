@@ -71,28 +71,9 @@ dx10ConstantBuffer& R_constants::GetCBuffer(R_constant* C, BufferType BType)
 void R_constants::flush_cache()
 {
 	PROF_EVENT("R_constants::flush_cache");
-	for (int i = 0; i < CBackend::MaxCBuffers; ++i)
-	{
-		if (RCache.m_aVertexConstants[i])
-			RCache.m_aVertexConstants[i]->Flush();
-
-		if (RCache.m_aPixelConstants[i])
-			RCache.m_aPixelConstants[i]->Flush();
-
-		if (RCache.m_aGeometryConstants[i])
-			RCache.m_aGeometryConstants[i]->Flush();
-
-#ifdef USE_DX11
-		if (RCache.m_aHullConstants[i])
-			RCache.m_aHullConstants[i]->Flush();
-
-		if (RCache.m_aDomainConstants[i])
-			RCache.m_aDomainConstants[i]->Flush();
-
-		if (RCache.m_aComputeConstants[i])
-			RCache.m_aComputeConstants[i]->Flush();
-#endif
-	}
+	// Only the buffers bound now (listed by set_Constants), instead of every slot of every stage
+	for (u32 i = 0; i < RCache.m_bound_cbuffers_count; ++i)
+		RCache.m_bound_cbuffers[i]->Flush();
 }
 
 /*

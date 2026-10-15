@@ -126,6 +126,7 @@ void CBackend::Invalidate()
 		m_aComputeConstants[i] = 0;
 #endif
 	}
+	m_bound_cbuffers_count = 0;
 	StateManager.Reset();
 	//	Redundant call. Just no note that we need to unmap const
 	//	if we create dedicated class.
