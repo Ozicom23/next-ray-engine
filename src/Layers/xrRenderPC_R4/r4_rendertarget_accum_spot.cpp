@@ -90,10 +90,16 @@ void CRenderTarget::accum_spot(light* L)
 	Fmatrix m_Shadow, m_Lmap;
 	{
 		float smapsize = float(RImplementation.o.smapsize);
+		float posX = float(L->X.S.posX), posY = float(L->X.S.posY);
+		if (L->m_smap_keep_srv) // the lamp's own kept shadow map in place of the atlas (light_smap_keep)
+		{
+			smapsize = float(L->X.S.size);
+			posX = posY = 0.f;
+		}
 		float fTexelOffs = (.5f / smapsize);
 		float view_dim = float(L->X.S.size - 2) / smapsize;
-		float view_sx = float(L->X.S.posX + 1) / smapsize;
-		float view_sy = float(L->X.S.posY + 1) / smapsize;
+		float view_sx = (posX + 1.f) / smapsize;
+		float view_sy = (posY + 1.f) / smapsize;
 		float fRange = float(1.f) * ps_r2_ls_depth_scale;
 		float fBias = ps_r2_ls_depth_bias;
 		Fmatrix m_TexelAdjust = {
@@ -322,10 +328,16 @@ void CRenderTarget::accum_volumetric_lv(light* L)
 	Fmatrix m_Shadow, m_Lmap;
 	{
 		float smapsize = float(RImplementation.o.smapsize);
+		float posX = float(L->X.S.posX), posY = float(L->X.S.posY);
+		if (L->m_smap_keep_srv) // the lamp's own kept shadow map in place of the atlas (light_smap_keep)
+		{
+			smapsize = float(L->X.S.size);
+			posX = posY = 0.f;
+		}
 		float fTexelOffs = (.5f / smapsize);
 		float view_dim = float(L->X.S.size - 2) / smapsize;
-		float view_sx = float(L->X.S.posX + 1) / smapsize;
-		float view_sy = float(L->X.S.posY + 1) / smapsize;
+		float view_sx = (posX + 1.f) / smapsize;
+		float view_sy = (posY + 1.f) / smapsize;
 		float fRange = float(1.f) * ps_r2_ls_depth_scale;
 		float fBias = ps_r2_ls_depth_bias;
 
@@ -455,10 +467,16 @@ void CRenderTarget::accum_volumetric(light* L)
 	CFrustum ClipFrustum;
 	{
 		float smapsize = float(RImplementation.o.smapsize);
+		float posX = float(L->X.S.posX), posY = float(L->X.S.posY);
+		if (L->m_smap_keep_srv) // the lamp's own kept shadow map in place of the atlas (light_smap_keep)
+		{
+			smapsize = float(L->X.S.size);
+			posX = posY = 0.f;
+		}
 		float fTexelOffs = (.5f / smapsize);
 		float view_dim = float(L->X.S.size - 2) / smapsize;
-		float view_sx = float(L->X.S.posX + 1) / smapsize;
-		float view_sy = float(L->X.S.posY + 1) / smapsize;
+		float view_sx = (posX + 1.f) / smapsize;
+		float view_sy = (posY + 1.f) / smapsize;
 		float fRange = float(1.f) * ps_r2_ls_depth_scale;
 		float fBias = ps_r2_ls_depth_bias;
 		Fmatrix m_TexelAdjust = {

@@ -3,6 +3,7 @@
 
 #include "QueryHelper.h"
 #include "../../xrEngine/IGame_Level.h"
+#include "light_smap_keep.h"
 
 extern int ps_r2_shadow_omnipart_vischeck;
 
@@ -61,6 +62,9 @@ light::light()
 light::~light()
 {
 	m_parent = nullptr;
+#ifdef USE_DX11
+	light_smap_keep::forget(this);
+#endif
 #if (RENDER==R_R2) || (RENDER==R_R3) || (RENDER==R_R4)
 	RImplementation.v_all_lights.erase(this);
 	for (int f = 0; f < 6; f++) xr_delete(omnipart[f]);

@@ -470,6 +470,11 @@ public:
 	void phase_smap_spot_clear();
 	void phase_smap_spot(light* L);
 	void phase_smap_spot_tsh(light* L);
+	// Lamp shadow maps kept between frames (light_smap_keep): draw into the lamp's own depth texture
+	void phase_smap_keep(ID3DDepthStencilView* zb, u32 size);
+	// ... and sample it in place of the atlas while the lamp is accumulated (bind before, unbind after)
+	void smap_keep_bind(light* L);
+	void smap_keep_unbind(light* L);
 	void phase_accumulator();
 	void phase_vol_accumulator();
 	void shadow_direct(light* L, u32 dls_phase);

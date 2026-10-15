@@ -42,6 +42,10 @@ public:
 	u32 frame_render;
 	light* m_parent;
 	u8 m_moving_frames;
+	u32 m_static_version = 0; // bumped whenever its static shadow casters are captured again (light_smap_keep)
+#ifdef USE_DX11
+	ID3DShaderResourceView* m_smap_keep_srv = nullptr; // this frame: its own kept shadow map in place of the atlas
+#endif
 
 	int omnipart_num;
 	int sss_id;

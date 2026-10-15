@@ -18,6 +18,7 @@ public:
 	u32										i_options;		// input:	culling options
 	u32										i_doptions;
 	int										i_sun_cascade = -1;	// input:	sun cascade this graph captures casters for, -1 none
+	u32										i_static_trees = 0;	// output:	trees and bushes among the static objects inserted (light_smap_keep)
 	Fvector									i_vBase;		// input:	"view" point
 	CFrustum								i_frustum;		// input:	"view" frustum
 	Fmatrix									i_mXFORM;		// input:	4x4 xform

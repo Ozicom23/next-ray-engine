@@ -34,6 +34,48 @@ void CRenderTarget::phase_smap_spot(light* L)
 	//HW.pContext->ClearDepthStencilView( rt_smap_depth->pZRT, D3D_CLEAR_DEPTH, 1.0f, 0L);
 }
 
+void CRenderTarget::phase_smap_keep(ID3DDepthStencilView* zb, u32 size)
+{
+	HW.pContext->ClearDepthStencilView(zb, D3D_CLEAR_DEPTH, 1.0f, 0L);
+	u_setrt(rt_smap_surf, NULL, NULL, zb);
+	D3D_VIEWPORT VP = {0.f, 0.f, (float)size, (float)size, 0, 1};
+	HW.pContext->RSSetViewports(1, &VP);
+	RCache.set_CullMode(CULL_CCW);
+	RCache.set_Stencil(FALSE);
+	RCache.set_ColorWriteEnable(FALSE);
+}
+
+// The backend skips a texture list it has already set, so the view is re-applied on every stage the atlas texture is
+// bound to; the next set_Element applies it on any other
+static void smap_keep_apply(CTexture* T)
+{
+	for (u32 stage = 0; stage < CBackend::mtMaxPixelShaderTextures; ++stage)
+		if (RCache.get_ActiveTexture(stage) == T)
+			T->Apply(stage);
+}
+
+static ID3DShaderResourceView* s_smap_keep_saved = nullptr;
+
+void CRenderTarget::smap_keep_bind(light* L)
+{
+	if (!L->m_smap_keep_srv)
+		return;
+	CTexture* T = rt_smap_depth->pTexture._get();
+	s_smap_keep_saved = T->get_SRView();
+	T->set_SRView(L->m_smap_keep_srv);
+	smap_keep_apply(T);
+}
+
+void CRenderTarget::smap_keep_unbind(light* L)
+{
+	if (!L->m_smap_keep_srv)
+		return;
+	CTexture* T = rt_smap_depth->pTexture._get();
+	T->set_SRView(s_smap_keep_saved);
+	s_smap_keep_saved = nullptr;
+	smap_keep_apply(T);
+}
+
 void CRenderTarget::phase_smap_spot_tsh(light* L)
 {
 	VERIFY(!"Implement clear of the buffer for tsh!");

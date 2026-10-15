@@ -2,8 +2,225 @@
 #include "../../xrEngine/xr_object.h"
 #include "FBasicVisual.h"
 #include "SkeletonCustom.h"
+#include "light_smap_keep.h"
 
 extern int ps_r2_shadow_omnipart_vischeck;
+
+#ifdef USE_DX11
+// Lamp shadow maps kept between frames, see light_smap_keep.h
+namespace light_smap_keep
+{
+	int ps_keep = 1;
+
+	struct entry
+	{
+		ID3D11Texture2D* tex = nullptr;
+		ID3D11DepthStencilView* dsv = nullptr;
+		ID3D11ShaderResourceView* srv = nullptr;
+		u32 size = 0, bytes = 0, version = 0, used = 0;
+		Fmatrix combine;
+		bool valid = false;
+	};
+	static xr_map<light*, entry> s_entries;
+	static u32 s_bytes = 0;
+	const u32 kMaxBytes = 128u << 20; // all kept maps together
+	const u32 kUnusedFrames = 600;
+
+	// stat_light_keep
+	static bool s_stats = false;
+	static u32 s_stats_end = 0, s_frames = 0, s_last_stat_frame = 0;
+	static u32 s_kept = 0, s_drawn = 0, s_off_moving = 0, s_off_dynamic = 0, s_off_trees = 0, s_off_forward = 0,
+		s_off_grass = 0, s_off_other = 0, s_off_memory = 0;
+
+	void start_stats(float seconds)
+	{
+		s_stats = true;
+		s_stats_end = Device.dwTimeGlobal + iFloor(seconds * 1000.f);
+		s_kept = s_drawn = s_off_moving = s_off_dynamic = s_off_trees = s_off_forward = s_off_grass = s_off_other = s_off_memory = s_frames = 0;
+		Msg("* [Light smap keep] measuring for %.0f s...", seconds);
+	}
+
+	static void count(u32& c)
+	{
+		if (!s_stats)
+			return;
+		if (Device.dwTimeGlobal >= s_stats_end)
+		{
+			s_stats = false;
+			const float f = float(_max(1u, s_frames));
+			Msg("* [Light smap keep] per frame over %u frames, %u maps kept (%.1f MB): shadow maps kept %.2f, drawn into their own map %.2f,"
+				" drawn as usual: moving %.2f, dynamic objects %.2f, trees %.2f, semi-transparent %.2f, grass %.2f, memory %.2f, other %.2f",
+				s_frames, u32(s_entries.size()), float(s_bytes) / (1024.f * 1024.f), s_kept / f, s_drawn / f, s_off_moving / f,
+				s_off_dynamic / f, s_off_trees / f, s_off_forward / f, s_off_grass / f, s_off_memory / f, s_off_other / f);
+			xrLogger::FlushLog();
+			return;
+		}
+		if (s_last_stat_frame != Device.dwFrame)
+		{
+			s_last_stat_frame = Device.dwFrame;
+			s_frames++;
+		}
+		c++;
+	}
+
+	static void release(entry& e)
+	{
+		_RELEASE(e.srv);
+		_RELEASE(e.dsv);
+		_RELEASE(e.tex);
+		s_bytes -= e.bytes;
+		e.bytes = 0;
+		e.size = 0;
+		e.valid = false;
+	}
+
+	// The lamp's own texture, in the atlas' format
+	static bool ensure_texture(entry& e, u32 size)
+	{
+		if (e.tex && e.size == size)
+			return true;
+		release(e);
+
+		D3D11_TEXTURE2D_DESC atlas = {};
+		((ID3D11Texture2D*)RImplementation.Target->rt_smap_depth->pSurface)->GetDesc(&atlas);
+		DXGI_FORMAT dsv_format, srv_format;
+		u32 bpp;
+		switch (atlas.Format)
+		{
+		case DXGI_FORMAT_R32_TYPELESS: dsv_format = DXGI_FORMAT_D32_FLOAT; srv_format = DXGI_FORMAT_R32_FLOAT; bpp = 4; break;
+		case DXGI_FORMAT_R24G8_TYPELESS: dsv_format = DXGI_FORMAT_D24_UNORM_S8_UINT; srv_format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS; bpp = 4; break;
+		case DXGI_FORMAT_R16_TYPELESS: dsv_format = DXGI_FORMAT_D16_UNORM; srv_format = DXGI_FORMAT_R16_UNORM; bpp = 2; break;
+		default: return false;
+		}
+		const u32 bytes = size * size * bpp;
+		if (s_bytes + bytes > kMaxBytes)
+			return false;
+
+		D3D11_TEXTURE2D_DESC d = {};
+		d.Width = d.Height = size;
+		d.MipLevels = d.ArraySize = 1;
+		d.Format = atlas.Format;
+		d.SampleDesc.Count = 1;
+		d.Usage = D3D11_USAGE_DEFAULT;
+		d.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+		D3D11_DEPTH_STENCIL_VIEW_DESC dv = {};
+		dv.Format = dsv_format;
+		dv.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+		D3D11_SHADER_RESOURCE_VIEW_DESC sv = {};
+		sv.Format = srv_format;
+		sv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		sv.Texture2D.MipLevels = 1;
+		if (FAILED(HW.pDevice->CreateTexture2D(&d, nullptr, &e.tex)) || FAILED(HW.pDevice->CreateDepthStencilView(e.tex, &dv, &e.dsv)) ||
+			FAILED(HW.pDevice->CreateShaderResourceView(e.tex, &sv, &e.srv)))
+		{
+			release(e);
+			return false;
+		}
+		e.size = size;
+		e.bytes = bytes;
+		s_bytes += bytes;
+		return true;
+	}
+
+	// No dynamic object captured for this lamp's shadow map
+	static bool dynamic_empty(const CDSGraphManager& G)
+	{
+		for (u32 p = 0; p < 2; ++p)
+			for (u32 i = 0; i < SHADER_PASSES_MAX; ++i)
+				if (!G.RGraph.mapDynamicPasses[p][i].empty())
+					return false;
+		return G.RGraph.mapDynamicSorted.Sorted.empty();
+	}
+
+	// The lamp's entry when its shadow map can be kept this frame, else nullptr. fresh: the entry already holds it
+	static entry* get(light* L, bool decorative, bool forward, bool grass, bool& fresh)
+	{
+		fresh = false;
+		if (!ps_keep)
+			return nullptr;
+		if (decorative || L->flags.bHudMode)
+		{
+			count(s_off_other);
+			return nullptr;
+		}
+		if (L->m_moving_frames < 32u)
+		{
+			count(s_off_moving);
+			return nullptr;
+		}
+		if (forward)
+		{
+			count(s_off_forward);
+			return nullptr;
+		}
+		if (grass)
+		{
+			count(s_off_grass);
+			return nullptr;
+		}
+		if (L->GMLight.i_static_trees)
+		{
+			count(s_off_trees);
+			return nullptr;
+		}
+		if (!dynamic_empty(L->GMLight))
+		{
+			count(s_off_dynamic);
+			return nullptr;
+		}
+		entry& e = s_entries[L];
+		e.used = Device.dwFrame;
+		const u32 size = L->X.S.size;
+		fresh = e.valid && e.size == size && e.version == L->m_static_version && !memcmp(&e.combine, &L->X.S.combine, sizeof(Fmatrix));
+		if (!ensure_texture(e, size))
+		{
+			s_entries.erase(L);
+			count(s_off_memory);
+			return nullptr;
+		}
+		count(fresh ? s_kept : s_drawn);
+		return &e;
+	}
+
+	static void filled(entry& e, light* L)
+	{
+		e.version = L->m_static_version;
+		e.combine = L->X.S.combine;
+		e.valid = true;
+	}
+
+	// Entries of lamps not drawn for a while
+	static void sweep()
+	{
+		for (auto it = s_entries.begin(); it != s_entries.end();)
+		{
+			if (Device.dwFrame - it->second.used > kUnusedFrames)
+			{
+				release(it->second);
+				it = s_entries.erase(it);
+			}
+			else
+				++it;
+		}
+	}
+
+	void forget(light* L)
+	{
+		auto it = s_entries.find(L);
+		if (it == s_entries.end())
+			return;
+		release(it->second);
+		s_entries.erase(it);
+	}
+
+	void destroy()
+	{
+		for (auto& it : s_entries)
+			release(it.second);
+		s_entries.clear();
+	}
+}
+#endif
 
 bool check_grass_shadow(light* L, CFrustum VB)
 {
@@ -64,6 +281,9 @@ int ps_r4_lights_parallel_query = 1; // lamps that don't move: their dynamic obj
 
 void CRender::render_lights(light_Package& LP)
 {
+#ifdef USE_DX11
+	light_smap_keep::sweep();
+#endif
 	xr_map<light*, std::pair<Fvector, Fvector>> saved_pos;
 	stats.ls_shadowed_in += (u32)LP.v_shadowed.size();
 	stats.ls_unshadowed_point_in += (u32)LP.v_point.size();
@@ -226,9 +446,11 @@ void CRender::render_lights(light_Package& LP)
 							{
 								L->GMLight.m_dynamic_prefetched = false; // moved since: queried after the traverse
 								L->GMLight.RGraph.clear_static<false>();
+								L->GMLight.i_static_trees = 0;
 								L->GMLight.traverse((CSector*)L->SpatialComponent->spatial.sector, L->X.S.frustum, L->position, L->X.S.combine);
 								L->GMLight.r_dsgraph_capture_static();
 								L->m_moving_frames++;
+								L->m_static_version++;
 							}
 							L->GMLight.r_dsgraph_capture_dynamic(L->ignore_object);
 						}
@@ -239,6 +461,27 @@ void CRender::render_lights(light_Package& LP)
 					if (bDeffered_Shadows || bForward_Shadows)
 					{
 						L_spot_s.push_back(L);
+#ifdef USE_DX11
+						// Kept shadow map (light_smap_keep): the lamp's own texture, drawn only when something changed
+						L->m_smap_keep_srv = nullptr;
+						const bool grass = Details && Details->dtFS && check_grass_shadow(L, ViewBase) && L->flags.bShadow && !decorative_light;
+						bool keep_fresh = false;
+						if (light_smap_keep::entry* keep = light_smap_keep::get(L, decorative_light, bForward_Shadows, grass, keep_fresh))
+						{
+							if (!keep_fresh)
+							{
+								Target->phase_smap_keep(keep->dsv, L->X.S.size);
+								RCache.set_xform_world(Fidentity);
+								RCache.set_xform_view(L->X.S.view);
+								RCache.set_xform_project(L->X.S.project);
+								L->GMLight.r_dsgraph_render_static(0, false);
+								light_smap_keep::filled(*keep, L);
+							}
+							L->m_smap_keep_srv = keep->srv;
+							L->X.S.transluent = FALSE;
+							continue;
+						}
+#endif
 						Target->phase_smap_spot(L);
 						RCache.set_xform_world(Fidentity);
 						RCache.set_xform_view(L->X.S.view);
@@ -277,6 +520,9 @@ void CRender::render_lights(light_Package& LP)
 				stats.ls_shadowed_rendered += (u32)L_spot_s.size();
 				for (light* L : L_spot_s)
 				{
+#ifdef USE_DX11
+					Target->smap_keep_bind(L);
+#endif
 					Target->accum_spot(L);
 					render_indirect(L);
 					if (L->flags.bVolumetric && RImplementation.o.advancedpp && ps_r2_ls_flags.is(R2FLAG_VOLUMETRIC_LIGHTS))
@@ -300,6 +546,9 @@ void CRender::render_lights(light_Package& LP)
 							Target->set_viewport_size(HW.pContext, w, h);
 #endif
 					}
+#ifdef USE_DX11
+					Target->smap_keep_unbind(L);
+#endif
 				}
 
 				L_spot_s.clear();

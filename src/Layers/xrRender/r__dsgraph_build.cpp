@@ -246,6 +246,9 @@ void CDSGraphManager::r_dsgraph_insert_static(dxRender_Visual *pVisual, bool pre
 	// Sun cascade: its shadow falls on nothing the view sees (r4_sun_receivers.h)
 	if (i_sun_cascade >= 0 && sun_receivers::test_caster(pVisual->vis.box, u32(i_sun_cascade)))
 		return;
+
+	if (pVisual->Type == MT_TREE_ST || pVisual->Type == MT_TREE_PM)
+		i_static_trees++;
 #endif
 
 	if (m_static_seen.find(pVisual) != m_static_seen.end())

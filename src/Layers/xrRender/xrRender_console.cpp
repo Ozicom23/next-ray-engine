@@ -657,6 +657,19 @@ public:
 		sun_receivers::start_stats(seconds > 0.f ? _min(seconds, 60.f) : 5.f);
 	}
 };
+#ifdef USE_DX11
+#include "light_smap_keep.h"
+class CCC_LightKeepStats : public IConsole_Command
+{
+public:
+	CCC_LightKeepStats(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; }
+	virtual void Execute(LPCSTR args)
+	{
+		const float seconds = float(atof(args));
+		light_smap_keep::start_stats(seconds > 0.f ? _min(seconds, 60.f) : 5.f);
+	}
+};
+#endif
 class CCC_HizStats : public IConsole_Command
 {
 public:
@@ -1478,6 +1491,8 @@ void xrRender_initconsole()
 	CMD4(CCC_Integer, "r4_tex_stream", &ps_r4_tex_stream, 0, 1); // read when textures load (next level load)
 	CMD4(CCC_Integer, "r4_tex_stream_keep", &ps_r4_tex_stream_keep, 5, 600); // seconds a streamed texture stays whole unused
 	CMD4(CCC_Integer, "r4_lights_parallel_query", &ps_r4_lights_parallel_query, 0, 1);
+	CMD4(CCC_Integer, "r4_light_smap_keep", &light_smap_keep::ps_keep, 0, 1);
+	CMD1(CCC_LightKeepStats, "stat_light_keep");
 	CMD4(CCC_Integer, "r4_main_parallel_cull", &ps_r4_main_parallel_cull, 0, 1);
 	CMD4(CCC_Integer, "r4_sun_caster_cull", &ps_r4_sun_caster_cull, 0, 1);
 	CMD4(CCC_Integer, "r4_sun_parallel_cull", &ps_r4_sun_parallel_cull, 0, 1);

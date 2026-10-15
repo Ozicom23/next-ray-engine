@@ -94,6 +94,9 @@ public:
 
 #if defined(USE_DX10) || defined(USE_DX11)
 	ID3DShaderResourceView*				get_SRView() {return m_pSRView;}
+	// The view the texture binds, without ownership: a kept lamp shadow map in place of the atlas (light_smap_keep).
+	// The caller restores the texture's own view afterwards
+	void								set_SRView(ID3DShaderResourceView* v) { m_pSRView = v; }
 #endif	//	USE_DX10
 
 private:
