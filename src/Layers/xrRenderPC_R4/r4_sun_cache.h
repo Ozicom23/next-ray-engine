@@ -5,9 +5,9 @@
 // Every frame the window of that map that matches the cascade's transform of the frame is copied into the shadow map
 // atlas, at the cascade's place and scale there, and the dynamic casters (NPCs, the player, physics objects) and
 // grass are drawn over it; the accumulation then samples the atlas exactly as it would after a full render. The kept
-// map is drawn again when the sun turned by more than a fraction of a texel at the box's far corner
-// (r4_sun_cascade_cache_drift), when the cascade's box left the kept one (the view moved or turned), or when the
-// map's size changed. Tree sway in a kept map stands still between refreshes; near shadows (cascade 0) stay live.
+// map is drawn again when the sun turned enough to move a far caster's shadow by a fraction of a texel
+// (r4_sun_cascade_cache_drift), when the cascade's receiver slab left the kept box (the view moved or turned), or
+// when the map's size changed. Tree sway in a kept map stands still between refreshes; near shadows (cascade 0) stay live.
 //   r4_sun_cascade_cache 0/1/2: off, the far cascade, the two far cascades
 //   r4_sun_cascade_cache_drift: texels of sun movement allowed before a refresh (0.5)
 //   stat_sun_cache <seconds>: frames served from the kept maps and refreshes with their reasons, in the log

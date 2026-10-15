@@ -202,25 +202,29 @@ mode frame(u32 cascade, u32 cascade_count, const Fmatrix& xform, u32 used, float
 
 	mode result = m_window;
 	u32* reason = nullptr;
+	// The receivers lie in a slab around the camera along the light: from twice the box above it to the far plane.
+	// The cascade's depth range starts 1.2 km toward the sun, where the slightest turn of the sun swings the
+	// range's corners, so only the slab is tested against the kept box
+	const float z_cam = clampr((far - size - 0.1f) / (far - 0.1f), 0.f, 1.f);
+	const float z_lo = clampr(z_cam - 2.f * size / (far - 0.1f), 0.f, 1.f);
 	if (e.valid)
 	{
-		// The sun turned: the allowed texels at the box's far corner (half the diagonal away from the center)
-		const float cos_threshold = cosf(ps_r4_sun_cascade_cache_drift * 1.4142f / float(used));
+		// The sun turned: the shadow of a caster up to four box sides away along the light moves by the allowed texels
+		const float cos_threshold = cosf(ps_r4_sun_cascade_cache_drift / (4.f * float(used)));
 		if (e.dir.dotproduct(sun_dir) < cos_threshold)
 			reason = &e.refresh_sun;
 	}
 	if (e.valid && !reason)
 	{
-		// The cascade's box inside the kept one (the view moved or turned, the depth range), and its window there
+		// The cascade's slab inside the kept box (the view moved or turned, the depth range), and its window there
 		Fmatrix inv; // the cascade's transform is orthographic: affine
 		inv.invert(xform);
 		bool inside = true;
 		for (u32 i = 0; i < 8 && inside; i++)
 		{
 			Fvector w, l;
-			inv.transform(w, Fvector().set((i & 1) ? 1.f : -1.f, (i & 2) ? 1.f : -1.f, (i & 4) ? 1.f : 0.f));
+			inv.transform(w, Fvector().set((i & 1) ? 1.f : -1.f, (i & 2) ? 1.f : -1.f, (i & 4) ? 1.f : z_lo));
 			e.xform.transform(l, w);
-			// A margin for rounding: on a refresh frame the near corners sit right on the kept range's edge
 			const float eps = 1e-4f;
 			inside = l.x >= -1.f - eps && l.x <= 1.f + eps && l.y >= -1.f - eps && l.y <= 1.f + eps && l.z >= -eps && l.z <= 1.f + eps;
 			if (!inside && s_stats && Device.dwTimeGlobal >= s_debug_time)
@@ -233,7 +237,7 @@ mode frame(u32 cascade, u32 cascade_count, const Fmatrix& xform, u32 used, float
 		if (inside)
 		{
 			Fvector w, l;
-			inv.transform(w, Fvector().set(-1.f, 1.f, 0.f)); // the atlas' top left corner
+			inv.transform(w, Fvector().set(-1.f, 1.f, z_cam)); // the atlas' top left corner, at the camera's depth
 			e.xform.transform(l, w);
 			const int ox = iFloor((l.x + 1.f) * 0.5f * float(big) + 0.5f);
 			const int oy = iFloor((1.f - l.y) * 0.5f * float(big) + 0.5f);
