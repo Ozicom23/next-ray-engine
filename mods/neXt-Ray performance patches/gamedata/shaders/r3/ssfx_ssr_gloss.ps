@@ -4,7 +4,11 @@
 #ifndef NEXTRAY_PATCHES
 #define NEXTRAY_PATCHES 0xFFF
 #endif
-#if (NEXTRAY_PATCHES & 0x800)
+#if (NEXTRAY_PATCHES & 0x400)
+// neXt-Ray (bit 0x400): with the engine's sky binding for the SSR pass, ssfx_ssr.ps takes the sky itself where it shows
+uniform float4 nextray_ssr_sky;
+#endif
+#if (NEXTRAY_PATCHES & 0x800) || (NEXTRAY_PATCHES & 0x400)
 // neXt-Ray: ssfx_ssr.ps multiplies its result by saturate(gloss.a * 10) and marches only where gloss.a > 0.02; off
 // terrain, an unmarched pixel's reflection is the sky times 0. So the sky (rgb) is not used where the stored alpha
 // (8 bit) is 0, or is 1..5 (5/255 <= 0.02) off terrain. The SSR pass reads this target at its texel centers only at
@@ -63,7 +67,7 @@ float4 main(p_screen I) : SV_Target
 	float fresnel_amount = pow(fresnel, 3);
 	gloss *= fresnel_amount;
 
-#if !(NEXTRAY_PATCHES & 0x800)
+#if !(NEXTRAY_PATCHES & 0x800) && !(NEXTRAY_PATCHES & 0x400)
 #ifdef G_SSR_CHEAP_SKYBOX
 	float3 sky = SSFX_calc_env(v2reflect) * ssfx_ssr_2.y * !ssfx_is_underground.x;
 #else
@@ -96,21 +100,27 @@ float4 main(p_screen I) : SV_Target
 	// Sky discard
 	if (P.z < SKY_EPS)
 	{
-#if !(NEXTRAY_PATCHES & 0x800)
+#if !(NEXTRAY_PATCHES & 0x800) && !(NEXTRAY_PATCHES & 0x400)
 		sky *= 0;
 #endif
 		gloss *= 0;
 	}
 
-#if !(NEXTRAY_PATCHES & 0x800)
+#if !(NEXTRAY_PATCHES & 0x800) && !(NEXTRAY_PATCHES & 0x400)
 	// Mix
 	return float4(sky, gloss * fog * fog);
 #else
 	const float alpha = gloss * fog * fog;
 	const bool m_terrain = abs(mtl - 0.95f) <= 0.02f; // as ssfx_ssr.ps (screenspace_reflections.h) tests it
 	[branch]
+#if (NEXTRAY_PATCHES & 0x400)
+	if (ssr_setup.x == 1.0f && nextray_ssr_sky.x == 1.0f)
+		return float4(0, 0, 0, alpha);
+#endif
+#if (NEXTRAY_PATCHES & 0x800)
 	if (ssr_setup.x == 1.0f && (alpha * 255.0f < 0.49f || (alpha * 255.0f < 5.49f && !m_terrain)))
 		return float4(0, 0, 0, alpha);
+#endif
 
 #ifdef G_SSR_CHEAP_SKYBOX
 	float3 sky = SSFX_calc_env(v2reflect) * ssfx_ssr_2.y * !ssfx_is_underground.x;

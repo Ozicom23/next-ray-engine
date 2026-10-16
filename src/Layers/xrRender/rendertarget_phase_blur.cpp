@@ -223,6 +223,7 @@ void CRenderTarget::phase_ssfx_ssr()
 	// Draw COLOR
 	RCache.set_Element(s_ssfx_ssr->E[5]);
 	RCache.set_c("ssr_setup", ps_ssfx_ssr); // the patch mod's gloss pass (r4_shader_patches 0x800) checks the SSR resolution
+	RCache.set_c("nextray_ssr_sky", 1.f, 0.f, 0.f, 0.f); // the SSR pass binds the sky (r4_shader_patches 0x400)
 	RCache.set_Geometry(g_combine);
 	{ PIX_EVENT(ssr_gloss); RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2); }
 	///////////////////////////////////////////////////////////////////////////
@@ -256,6 +257,7 @@ void CRenderTarget::phase_ssfx_ssr()
 	RCache.set_c("cam_pos", ::Random.randF(-1.0, 1.0), ::Random.randF(-1.0, 1.0), 0.0f, 0.0f);
 
 	RCache.set_c("ssr_setup", ps_ssfx_ssr);
+	RCache.set_c("nextray_ssr_sky", 1.f, 0.f, 0.f, 0.f); // the sky is bound for this pass (r4_shader_patches 0x400)
 	RCache.set_Geometry(g_combine);
 	{ PIX_EVENT(ssr_march); RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2); }
 
