@@ -833,6 +833,9 @@ namespace script_chunk_cache
 	};
 	static xr_unordered_map<xr_string, entry> s_chunks;
 	static u32 s_hits = 0, s_misses = 0;
+	static size_t s_bytes = 0; // bytecode kept
+
+	static size_t total_bytes() { return s_bytes; }
 
 	static void hash(const char* p, size_t n, u64& h1, u64& h2)
 	{
@@ -856,16 +859,17 @@ namespace script_chunk_cache
 		return 0;
 	}
 
-	static int load(lua_State* L, const char* buf, size_t size, const char* name)
+	static int load(lua_State* L, const char* buf, size_t size, const char* name, const char* name_space)
 	{
 		if (!g_script_chunk_cache)
 			return luaL_loadbuffer(L, buf, size, name);
 		u64 h1, h2;
 		hash(buf, size, h1, h2);
-		// One entry per file and length: _g.script runs as _G and again as the namespace _g (with its header)
+		// One entry per file and namespace (_g.script runs as _G and again as the namespace _g, with its header): a
+		// file changed during the run replaces its entry
 		xr_string key = name;
 		key += '|';
-		key += std::to_string(size).c_str();
+		key += name_space ? name_space : "";
 		auto it = s_chunks.find(key);
 		if (it != s_chunks.end() && it->second.size == size && it->second.h1 == h1 && it->second.h2 == h2)
 		{
@@ -882,12 +886,18 @@ namespace script_chunk_cache
 		if (r == 0)
 		{
 			entry& e = s_chunks[key];
+			s_bytes -= e.bytecode.capacity();
 			e.size = size;
 			e.h1 = h1;
 			e.h2 = h2;
 			e.bytecode.clear();
 			if (lua_dump(L, writer, &e.bytecode) != 0 || e.bytecode.empty())
 				s_chunks.erase(key);
+			else
+			{
+				e.bytecode.shrink_to_fit();
+				s_bytes += e.bytecode.capacity();
+			}
 		}
 		return r;
 	}
@@ -941,7 +951,7 @@ bool CScriptStorage::load_buffer(lua_State* L, LPCSTR caBuffer, size_t tSize, LP
 		xr_strcpy(script, total_size, insert);
 		CopyMemory(script + str_len, caBuffer, u32(tSize));
 
-		l_iErrorCode = cache_chunk ? script_chunk_cache::load(L, script, tSize + str_len, caScriptName)
+		l_iErrorCode = cache_chunk ? script_chunk_cache::load(L, script, tSize + str_len, caScriptName, caNameSpaceName)
 			: luaL_loadbuffer(L, script, tSize + str_len, caScriptName);
 
 		if (dynamic_allocation)
@@ -951,7 +961,7 @@ bool CScriptStorage::load_buffer(lua_State* L, LPCSTR caBuffer, size_t tSize, LP
 	{
 		//		try
 		{
-			l_iErrorCode = cache_chunk ? script_chunk_cache::load(L, caBuffer, tSize, caScriptName)
+			l_iErrorCode = cache_chunk ? script_chunk_cache::load(L, caBuffer, tSize, caScriptName, caNameSpaceName)
 				: luaL_loadbuffer(L, caBuffer, tSize, caScriptName);
 		}
 		//		catch(...) {
@@ -1041,8 +1051,9 @@ namespace script_load_stats
 		g_fs_prefetch_wait = 0;
 		g_fs_rescan_enum = g_fs_rescan_check = g_fs_rescan_register = 0;
 		g_fs_rescan_files = g_fs_rescan_checked = 0;
-		Msg("* [Script load] compiled chunks: %u loaded from their bytecode, %u compiled", script_chunk_cache::s_hits,
-			script_chunk_cache::s_misses);
+		Msg("* [Script load] compiled chunks: %u loaded from their bytecode, %u compiled; %u files kept, %.1f MB of bytecode",
+			script_chunk_cache::s_hits, script_chunk_cache::s_misses, u32(script_chunk_cache::s_chunks.size()),
+			double(script_chunk_cache::total_bytes()) / (1024.0 * 1024.0));
 		script_chunk_cache::s_hits = script_chunk_cache::s_misses = 0;
 		std::sort(per_file.begin(), per_file.end(), [](const file_time& a, const file_time& b) { return a.total > b.total; });
 		for (size_t i = 0; i < per_file.size() && i < 25; i++)
