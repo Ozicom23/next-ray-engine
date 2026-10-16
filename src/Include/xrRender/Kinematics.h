@@ -92,6 +92,11 @@ public:
 	// Advances the animation tracks under the model's lock (their end callbacks run game code), as CalculateBones
 	// does first; the bones thread runs these one after another, then the bones of all models in parallel
 	virtual void CalculateTracks() = 0;
+	// CalculateBones with the update callback held back: the callback (foot IK) ray-picks other models, which takes
+	// their locks, so with bones on several threads two models could wait for each other. The bones thread runs the
+	// held callbacks one after another (CalculateBones_RunCallback) once all bones are done
+	virtual void CalculateBones_HoldCallback(BOOL bForceExact) = 0;
+	virtual void CalculateBones_RunCallback() = 0;
 	virtual void Callback(UpdateCallback C, void* Param) = 0;
 
 	//	Callback: data manipulation

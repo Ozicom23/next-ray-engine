@@ -26,9 +26,32 @@ void CKinematics::CalculateTracks()
 	OnCalculateBones();
 }
 
+// Set by CalculateBones_HoldCallback for the CalculateBones call it makes on this thread (taken at its start, so
+// other models' bones calculated from inside it run their callbacks as usual)
+static thread_local bool s_hold_update_callback = false;
+
+void CKinematics::CalculateBones_HoldCallback(BOOL bForceExact)
+{
+	s_hold_update_callback = true;
+	CalculateBones(bForceExact);
+	s_hold_update_callback = false;
+}
+
+void CKinematics::CalculateBones_RunCallback()
+{
+	xrCriticalSectionGuard g(UCalc_Mutex);
+	if (!UCalc_CallbackHeld)
+		return;
+	UCalc_CallbackHeld = false;
+	if (Update_Callback)
+		Update_Callback(this);
+}
+
 void CKinematics::CalculateBones(BOOL bForceExact)
 {
 	PROF_EVENT("CKinematics::CalculateBones");
+	const bool hold_callback = s_hold_update_callback;
+	s_hold_update_callback = false;
 	// early out.
 	// check if the info is still relevant
 	// skip all the computations - assume nothing changes in a small period of time :)
@@ -177,7 +200,13 @@ void CKinematics::CalculateBones(BOOL bForceExact)
 	else
 		UCalc_ThisFrame = false;
 	//
-	if (Update_Callback) Update_Callback(this);
+	if (Update_Callback)
+	{
+		if (hold_callback)
+			UCalc_CallbackHeld = true;
+		else
+			Update_Callback(this);
+	}
 }
 
 #ifdef DEBUG
