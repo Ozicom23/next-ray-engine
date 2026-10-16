@@ -38,7 +38,9 @@ float3 NXR_ssr_sky(float3 P, float3 N)
 // SSFX_ScreenSpaceReflections (screenspace_reflections.h) with gloss.rgb (the sky) taken only where the result uses it:
 // off terrain a hit gives lerp(0, scene, fade), on terrain a full fade gives the scene; without a hit the sky is scaled
 // by the ray's fade (0 off terrain without sky along the ray)
-void NXR_ScreenSpaceReflections(float2 tc, float4 P, float3 N, float4 gloss, inout float4 color, float HudMask, inout float2 noise, inout float hitdepth, uint iSample : SV_SAMPLEINDEX)
+// lazy: the gloss pass left the sky out (else gloss.rgb is used as in the original). Called without flow control
+// around it: the march takes implicit gradients (blue noise)
+void NXR_ScreenSpaceReflections(float2 tc, float4 P, float3 N, float4 gloss, inout float4 color, float HudMask, inout float2 noise, inout float hitdepth, bool lazy, uint iSample : SV_SAMPLEINDEX)
 {
 	bool m_terrain = abs(P.w - 0.95f) <= 0.02f;
 
@@ -50,14 +52,14 @@ void NXR_ScreenSpaceReflections(float2 tc, float4 P, float3 N, float4 gloss, ino
 	if (gloss.w > 0.02f)
 		hit_uv = SSFX_ssr_fast_ray(P.xyz, reVec, tc, HudMask, noise, iSample);
 
-	float3 reflection = 0;
+	float3 reflection = lazy ? 0 : gloss.rgb;
 
 	if (all(hit_uv.xy))
 	{
 		float3 scene = SSFX_get_image(hit_uv.xy, iSample);
 		float HitFade = saturate(hit_uv.y * G_SSR_VERTICAL_SCREENFADE);
 		[branch]
-		if (m_terrain && HitFade < 1.0f)
+		if (lazy && m_terrain && HitFade < 1.0f)
 			reflection = NXR_ssr_sky(P.xyz, N);
 		reflection.rgb = lerp(reflection * m_terrain, scene, HitFade);
 	}
@@ -65,7 +67,7 @@ void NXR_ScreenSpaceReflections(float2 tc, float4 P, float3 N, float4 gloss, ino
 	{
 		float ray_fade = saturate(saturate(hit_uv.w * G_SSR_VERTICAL_SCREENFADE) + m_terrain);
 		[branch]
-		if (ray_fade > 0.0f)
+		if (lazy && ray_fade > 0.0f)
 			reflection = NXR_ssr_sky(P.xyz, N);
 		reflection *= ray_fade;
 	}
@@ -122,11 +124,8 @@ float4 main(p_screen I) : SV_Target
 #if !(NEXTRAY_PATCHES & 0x400)
 	SSFX_ScreenSpaceReflections(tc, float4(P, mtl), N, GlossData, ssr_result, HUD_mask, noise, HitDepth, 0);
 #else
-	[branch]
-	if (nextray_ssr_sky.x == 1.0f && ssr_setup.x == 1.0f && GlossData.a > 0.0f)
-		NXR_ScreenSpaceReflections(tc, float4(P, mtl), N, GlossData, ssr_result, HUD_mask, noise, HitDepth, 0);
-	else
-		SSFX_ScreenSpaceReflections(tc, float4(P, mtl), N, GlossData, ssr_result, HUD_mask, noise, HitDepth, 0);
+	const bool lazy = nextray_ssr_sky.x == 1.0f && ssr_setup.x == 1.0f && GlossData.a > 0.0f;
+	NXR_ScreenSpaceReflections(tc, float4(P, mtl), N, GlossData, ssr_result, HUD_mask, noise, HitDepth, lazy, 0);
 #endif
 	
 // Accumulation ---------------------------------------------------
