@@ -386,6 +386,7 @@ CRenderTarget::CRenderTarget()
 	m_upscale_saved_zb = nullptr;
 	m_overlays_after_upscale = false;
 	m_lens_after_upscale = false;
+	m_lens_before_upscale = false;
 	m_overlay_target = nullptr;
 
 	if (m_upscaler)

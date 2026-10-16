@@ -586,10 +586,10 @@ void CRenderTarget::upscale_begin_scene()
 		// r4_upscaler_jitter: 1 on, 0 off, 2 off while aiming down sights (the weapon's aim-in factor, hud_params.x,
 		// past the 0.05 the second viewport switches at). 3DSS lenses magnify the frame (GAMMA's zooming scopes don't
 		// use the second viewport), so the jitter jumped through them by the magnification
-		// With the lenses drawn after the upscaler (r4_upscaler_scope_late) they magnify the resolved image: no jitter
-		// reaches them, it stays on
+		// Only while the lenses draw before the upscaler (the frame before did): drawn after it (r4_upscaler_scope_late,
+		// the patch mod's lens shaders) they magnify the resolved image, no jitter reaches them and it stays on
 		const bool aiming = g_pGamePersistent && g_pGamePersistent->m_pGShaderConstants->hud_params.x > 0.05f &&
-			!(ps_r4_upscaler_scope_late && rt_upscale_lens_src._get());
+			m_lens_before_upscale;
 		if (ps_r4_upscaler_jitter == 0 || (ps_r4_upscaler_jitter == 2 && aiming))
 			jx = jy = 0.f;
 		m_upscale_jitter.set(jx, jy);

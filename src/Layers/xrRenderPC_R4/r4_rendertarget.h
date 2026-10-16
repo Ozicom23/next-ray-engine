@@ -35,6 +35,7 @@ private:
 	ID3DDepthStencilView* m_upscale_saved_zb;
 	bool m_overlays_after_upscale; // this frame the screen overlays run after the upscaler, at output resolution
 	bool m_lens_after_upscale; // this frame the 3DSS lenses draw after the upscaler, at output resolution (r4_upscaler_scope_late)
+	bool m_lens_before_upscale; // the frame before drew 3DSS lenses before the upscaler (r4_upscaler_jitter 2 then turns it off)
 	ref_rt* m_overlay_target;      // set while they do
 	// Post-process ping-pong (r4_post_pingpong): passes that draw the scene image into rt_Color and copied it back into
 	// rt_Generic_0 exchange the two targets' resources instead; post_chain_end copies once so both hold the result
