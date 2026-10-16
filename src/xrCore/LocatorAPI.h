@@ -188,6 +188,9 @@ public:
 	void rescan_path(LPCSTR full_path, BOOL bRecurse);
 	// editor functions
 	void rescan_pathes();
+	// Lists a path's folder on a worker thread now; its next rescan within 10 s takes that listing instead of reading
+	// the folder again (fs_prefetch_scripts: the scripts folder at a level change)
+	void prefetch_listing(LPCSTR path_alias);
 	void lock_rescan();
 	void unlock_rescan();
 };

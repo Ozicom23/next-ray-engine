@@ -929,6 +929,8 @@ extern u64 g_file_list_ex_rescan, g_file_list_ex_list;
 #endif
 XRCORE_API extern u64 g_fs_rescan_enum, g_fs_rescan_check, g_fs_rescan_register; // LocatorAPI.cpp
 XRCORE_API extern u32 g_fs_rescan_files, g_fs_rescan_checked;
+XRCORE_API extern u64 g_fs_prefetch_wait; // LocatorAPI.cpp
+XRCORE_API extern u32 g_fs_prefetch_used;
 
 extern "C" uint64_t lj_str_stat_calls, lj_str_stat_steps, lj_str_stat_samelen; // lj_str.c
 
@@ -957,6 +959,10 @@ namespace script_load_stats
 #endif
 		Msg("* [Script load] forced rescans: %u entries, enumerating %.0f ms, existence checks %.0f ms (%u), registering %.0f ms",
 			g_fs_rescan_files, ms(g_fs_rescan_enum), ms(g_fs_rescan_check), g_fs_rescan_checked, ms(g_fs_rescan_register));
+		Msg("* [Script load] folder listings prefetched at a level change: %u used, waited for them %.0f ms",
+			g_fs_prefetch_used, ms(g_fs_prefetch_wait));
+		g_fs_prefetch_used = 0;
+		g_fs_prefetch_wait = 0;
 		g_fs_rescan_enum = g_fs_rescan_check = g_fs_rescan_register = 0;
 		g_fs_rescan_files = g_fs_rescan_checked = 0;
 		Msg("* [Lua strings] %llu created or looked up, %llu hash chain entries visited (%.2f per call), %llu same length"

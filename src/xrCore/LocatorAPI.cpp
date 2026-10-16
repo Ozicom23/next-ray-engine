@@ -7,6 +7,10 @@
 
 #pragma warning(disable:4995)
 #include <direct.h>
+#include <condition_variable>
+#include <memory>
+#include <mutex>
+#include <thread>
 #include <fcntl.h>
 #include <sys\stat.h>
 #define _SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING
@@ -606,6 +610,93 @@ static bool needs_existence_check(const char* name)
 	return false;
 }
 
+// prefetch_listing: a folder listed on a worker thread ahead of its rescan. Reading the scripts folder through Proton
+// and MO2's virtual file system takes ~0.6 s on the Steam Deck, and axr_main rescans it in every level load; at a level
+// change it is listed while the old level is saved and unloaded. A listing is taken by the next rescan of that folder
+// within 10 s of its start (the same age file_list_open_ex already accepts for the scripts folder's listing)
+XRCORE_API u64 g_fs_prefetch_wait = 0;
+XRCORE_API u32 g_fs_prefetch_used = 0;
+namespace fs_prefetch
+{
+	struct listing
+	{
+		string_path path; // the folder, as Recurse gets it (ends with a slash)
+		u64 started = 0;
+		xr_vector<_finddata_t> entries;
+		bool found = false;
+		std::mutex m;
+		std::condition_variable cv;
+		bool done = false;
+	};
+	static std::mutex s_lock;
+	static std::shared_ptr<listing> s_current;
+
+	static void run(std::shared_ptr<listing> L)
+	{
+		string_path scan;
+		xr_strcpy(scan, sizeof(scan), L->path);
+		xr_strcat(scan, "*.*");
+		_finddata_t fd;
+		const intptr_t handle = _findfirst(scan, &fd);
+		bool found = false;
+		if (handle != -1)
+		{
+			found = true;
+			L->entries.reserve(1024);
+			intptr_t next = handle;
+			while (next != -1)
+			{
+				L->entries.push_back(fd);
+				next = _findnext(handle, &fd);
+			}
+			_findclose(handle);
+		}
+		std::lock_guard<std::mutex> g(L->m);
+		L->found = found;
+		L->done = true;
+		L->cv.notify_all();
+	}
+
+	// The prefetched listing of this folder, if one was started for it within 10 s (waits for it to finish)
+	static bool take(const char* path, xr_vector<_finddata_t>& out)
+	{
+		std::shared_ptr<listing> L;
+		{
+			std::lock_guard<std::mutex> g(s_lock);
+			if (!s_current || xr_strcmp(s_current->path, path) != 0)
+				return false;
+			L = s_current;
+			s_current.reset(); // used once
+		}
+		if (CPU::QPC() - L->started >= 10 * CPU::qpc_freq)
+			return false;
+		const u64 t0 = CPU::QPC();
+		std::unique_lock<std::mutex> g(L->m);
+		L->cv.wait(g, [&] { return L->done; });
+		g_fs_prefetch_wait += CPU::QPC() - t0;
+		if (!L->found)
+			return false;
+		out.swap(L->entries);
+		g_fs_prefetch_used++;
+		return true;
+	}
+}
+
+void CLocatorAPI::prefetch_listing(LPCSTR path_alias)
+{
+	FS_Path* P = get_path(path_alias);
+	if (!P || !P->m_Path || !P->m_Path[0])
+		return;
+	auto L = std::make_shared<fs_prefetch::listing>();
+	xr_strcpy(L->path, sizeof(L->path), P->m_Path);
+	L->started = CPU::QPC();
+	{
+		std::lock_guard<std::mutex> g(fs_prefetch::s_lock);
+		fs_prefetch::s_current = L;
+	}
+	std::thread(fs_prefetch::run, L).detach();
+}
+
 bool CLocatorAPI::Recurse(const char* path)
 {
 	string_path scanPath;
@@ -614,18 +705,33 @@ bool CLocatorAPI::Recurse(const char* path)
 	struct stat buffer;
 	if (!stat(scanPath, &buffer))
 		return true;
-	xr_strcpy(scanPath, sizeof(scanPath), path);
-	xr_strcat(scanPath, "*.*");
+	const bool timed = m_Flags.test(flNeedCheck);
+	const u64 t_begin = timed ? CPU::QPC() : 0;
+	xr_vector<_finddata_t> prefetched;
+	const bool use_prefetched = fs_prefetch::take(path, prefetched);
 	_finddata_t findData;
-	intptr_t handle = _findfirst(scanPath, &findData);
-	if (handle == -1)
-		return false;
+	intptr_t handle = -1;
+	size_t prefetched_pos = 0;
+	if (use_prefetched)
+	{
+		if (!prefetched.empty())
+		{
+			findData = prefetched[0];
+			handle = 0;
+		}
+	}
+	else
+	{
+		xr_strcpy(scanPath, sizeof(scanPath), path);
+		xr_strcat(scanPath, "*.*");
+		handle = _findfirst(scanPath, &findData);
+		if (handle == -1)
+			return false;
+	}
 	rec_files.reserve(256);
 	size_t oldSize = rec_files.size();
 	intptr_t done = handle;
-	const bool timed = m_Flags.test(flNeedCheck);
 	u64 t_check = 0;
-	const u64 t_begin = timed ? CPU::QPC() : 0;
 	while (done != -1)
 	{
 		string1024 fullPath;
@@ -649,9 +755,18 @@ bool CLocatorAPI::Recurse(const char* path)
 		}
 		if (!ignore)
 			rec_files.push_back(findData);
-		done = _findnext(handle, &findData);
+		if (use_prefetched)
+		{
+			if (++prefetched_pos < prefetched.size())
+				findData = prefetched[prefetched_pos];
+			else
+				done = -1;
+		}
+		else
+			done = _findnext(handle, &findData);
 	}
-	_findclose(handle);
+	if (!use_prefetched)
+		_findclose(handle);
 	size_t newSize = rec_files.size();
 	const u64 t_enumerated = timed ? CPU::QPC() : 0;
 	if (newSize > oldSize)
