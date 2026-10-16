@@ -1330,7 +1330,8 @@ CRenderTarget::CRenderTarget()
 
 #ifdef USE_DX12
 				// No D3DX11: the mips point-filtered on the CPU from the level 0 data, as D3DX10_FILTER_POINT
-				xr_vector<u32> mip_src(tempData[0], tempData[0] + TEX_jitter * TEX_jitter), mip_dst;
+				xr_vector<u32> mip_src, mip_dst;
+				mip_src.assign(tempData[0], tempData[0] + TEX_jitter * TEX_jitter);
 				u32 mip_w = TEX_jitter, mip_h = TEX_jitter;
 				for (UINT level = 1; mip_w > 1 || mip_h > 1; level++)
 				{
