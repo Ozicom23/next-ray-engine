@@ -138,7 +138,6 @@ public:
 	ref_rt rt_Generic_1_r; // MRT generic 1
 	ref_rt rt_Generic;
 	ref_rt rt_Position; // 64bit,	fat	(x,y,z,?)				(eye-space)
-	ref_rt rt_nextray_depth; // rt_Position.z alone, 16 bit float (r4_shader_patches 0x400, phase_nextray_depth)
 	ref_rt rt_Color; // 64/32bit,fat	(r,g,b,specular-gloss)	(or decompressed MET-8-8-8-8)
 
 	//--DSR-- HeatVision_start
@@ -481,7 +480,6 @@ public:
 	void phase_scene_prepare();
 	void phase_scene_begin();
 	void phase_scene_end();
-	void phase_nextray_depth();
 	void phase_occq();
 	void phase_ssao();
 	void phase_hdao();

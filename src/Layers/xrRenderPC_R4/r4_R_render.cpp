@@ -245,9 +245,6 @@ void CRender::Render()
 		render_rain();
 	}
 
-	// The G-buffer is complete: its depth for the patch mod's ray marches (r4_shader_patches 0x400)
-	Target->phase_nextray_depth();
-
 	{
 		// Save previus and current matrices
 		{
