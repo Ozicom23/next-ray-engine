@@ -700,7 +700,7 @@ void CRender::reset_end()
 int ps_r4_shader_warmup = 1;
 // r4_shader_patches: bits of the neXt-Ray patch mod's shader changes in use, the shaders get it as NEXTRAY_PATCHES
 // (each change is kept next to the original code and picked by its bit; vid_restart recompiles). In the variant name
-int ps_r4_shader_patches = 0x1FF; // 0x010 (IL) unused: its SampleLevel change measured slower and was dropped; 0x200 unused (the 3DSS lens jitter correction, replaced by r4_upscaler_scope_late)
+int ps_r4_shader_patches = 0x9FF; // 0x010 (IL) unused: its SampleLevel change measured slower and was dropped; 0x200 unused (the 3DSS lens jitter correction, replaced by r4_upscaler_scope_late); 0x400 unused (a depth-only copy for the ray marches, no gain); 0x800 SSR gloss sky taps
 namespace shader_warmup
 {
 	static std::thread s_thread;
