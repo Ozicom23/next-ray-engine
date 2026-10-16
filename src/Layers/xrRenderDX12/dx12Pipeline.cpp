@@ -451,6 +451,80 @@ struct OutputFix
 };
 } // namespace
 
+// Output register moves of LinkVertexOutputs
+struct RegisterMove
+{
+	u32 from, to;
+};
+
+bool MoveRegister(u32& reg, const std::vector<RegisterMove>& moves)
+{
+	for (const RegisterMove& m : moves)
+		if (reg == m.from)
+		{
+			reg = m.to;
+			return true;
+		}
+	return false;
+}
+
+// One operand at p[i] (and its index operands); output register indices (o#) renumbered. False on a layout this
+// doesn't know or an output indexed by a register
+bool RemapOperand(std::vector<u32>& p, u32& i, u32 end, const std::vector<RegisterMove>& moves)
+{
+	if (i >= end)
+		return false;
+	const u32 tok = p[i++];
+	for (u32 ext = tok; ext & 0x80000000u;)
+	{
+		if (i >= end)
+			return false;
+		ext = p[i++];
+	}
+	const u32 type = (tok >> 12) & 0xff;
+	const u32 components = tok & 3;
+	if (type == 4 || type == 5) // immediate32 / immediate64
+	{
+		i += (components == 2 ? 4 : 1) * (type == 5 ? 2 : 1);
+		return i <= end;
+	}
+	const u32 dims = (tok >> 20) & 3;
+	for (u32 d = 0; d < dims; ++d)
+	{
+		const u32 rep = (tok >> (22 + 3 * d)) & 7;
+		const u32 at = i;
+		switch (rep)
+		{
+		case 0: i += 1; break; // immediate32
+		case 1: i += 2; break; // immediate64
+		case 2: // relative
+			if (!RemapOperand(p, i, end, moves))
+				return false;
+			break;
+		case 3: // immediate32 + relative
+			i += 1;
+			if (!RemapOperand(p, i, end, moves))
+				return false;
+			break;
+		case 4: // immediate64 + relative
+			i += 2;
+			if (!RemapOperand(p, i, end, moves))
+				return false;
+			break;
+		default: return false;
+		}
+		if (i > end)
+			return false;
+		if (type == 2 && d == 0 && !moves.empty())
+		{
+			if (rep != 0)
+				return false;
+			MoveRegister(p[at], moves);
+		}
+	}
+	return true;
+}
+
 // The vertex shader's outputs grown to cover the pixel shader's inputs; false when nothing is missing or the
 // mismatch isn't one this fixes (an input on another register than the output of its name). why: the fixes, for the log
 static bool LinkVertexOutputs(const std::vector<u8>& vs, const std::vector<u8>& ps, std::vector<u8>& patched, xr_string& why)
@@ -466,6 +540,41 @@ static bool LinkVertexOutputs(const std::vector<u8>& vs, const std::vector<u8>& 
 	std::vector<SigElement> outputs, inputs;
 	if (!osgn || !isgn || !shex || !ReadSignature(*osgn, outputs) || !ReadSignature(*isgn, inputs))
 		return false;
+
+	// Registers of outputs the pixel shader doesn't read, where it reads other inputs (models_selflight.vs writes
+	// only SV_Position, on the register accum_emissive.ps reads TEXCOORD0 from), move to free registers
+	auto read_by_ps = [&](const SigElement& o) {
+		for (const SigElement& in : inputs)
+			if (in.index == o.index && !_stricmp(o.name.c_str(), in.name.c_str()))
+				return true;
+		return false;
+	};
+	std::vector<RegisterMove> moves;
+	u32 free_reg = 0;
+	for (const SigElement& o : outputs)
+		free_reg = _max(free_reg, o.reg + 1);
+	for (const SigElement& in : inputs)
+		free_reg = _max(free_reg, in.reg + 1);
+	for (const SigElement& o : outputs)
+	{
+		bool conflict = false, read = false, moved = false;
+		for (const RegisterMove& m : moves)
+			moved |= m.from == o.reg;
+		if (moved)
+			continue;
+		for (const SigElement& in : inputs)
+			conflict |= in.reg == o.reg && !read_by_ps(o);
+		if (!conflict)
+			continue;
+		for (const SigElement& other : outputs)
+			read |= other.reg == o.reg && read_by_ps(other);
+		if (read || free_reg >= 32)
+			return false;
+		moves.push_back({ o.reg, free_reg++ });
+	}
+	for (SigElement& o : outputs)
+		if (MoveRegister(o.reg, moves))
+			why.append(make_string(" %s%u moved to o%u", o.name.c_str(), o.index, o.reg).c_str());
 
 	std::vector<OutputFix> fixes;
 	for (const SigElement& in : inputs)
@@ -519,6 +628,10 @@ static bool LinkVertexOutputs(const std::vector<u8>& vs, const std::vector<u8>& 
 		const u32 len = opcode == 0x35 ? (body + 1 < length ? program[body + 1] : 0) : (program[body] >> 24) & 0x7f;
 		if (!len || body + len > length)
 			return false;
+		if ((opcode == kOpDclOutput || opcode == 0x66 || opcode == 0x67) && len >= 3 && ((program[body + 1] >> 12) & 0xff) == 2)
+			MoveRegister(program[body + 2], moves); // dcl_output, dcl_output_sgv, dcl_output_siv
+		if (opcode == 0x5b && !moves.empty())
+			return false; // dcl_indexRange
 		if (opcode == kOpDclOutput && len == 3 && (program[body + 1] & ~0xf0u) == kOperandOutput)
 		{
 			for (OutputFix& f : fixes)
@@ -530,6 +643,33 @@ static bool LinkVertexOutputs(const std::vector<u8>& vs, const std::vector<u8>& 
 		}
 		body += len;
 	}
+	if (!moves.empty())
+	{
+		for (u32 i = body; i < length;)
+		{
+			const u32 opcode = program[i] & 0x7ff;
+			const u32 len = opcode == 0x35 ? (i + 1 < length ? program[i + 1] : 0) : (program[i] >> 24) & 0x7f;
+			if (!len || i + len > length)
+				return false;
+			if (opcode == 0x35)
+			{
+				i += len;
+				continue;
+			}
+			if (IsDeclaration(opcode) || opcode == 0x78 /* fcall */)
+				return false;
+			u32 j = i + 1;
+			for (bool ext = (program[i] & 0x80000000u) != 0; ext && j < i + len; ++j)
+				ext = (program[j] & 0x80000000u) != 0;
+			while (j < i + len)
+				if (!RemapOperand(program, j, i + len, moves))
+					return false;
+			if (j != i + len)
+				return false;
+			i += len;
+		}
+	}
+
 	std::vector<u32> added;
 	for (const OutputFix& f : fixes)
 		if (f.old_mask != 0xff)

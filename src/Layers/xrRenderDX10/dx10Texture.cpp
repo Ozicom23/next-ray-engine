@@ -618,7 +618,18 @@ ID3DBaseTexture* CRender::texture_load(LPCSTR fRName, u32& ret_msize, bool bStag
 			}
 		}
 		else
+		{
+			// Not a DDS file (a PNG named .dds, as D3DX accepted): one level, no texture_lod
+			u32 w = 0, h = 0;
+			ID3DBaseTexture* T = dds12::load_image(S->pointer(), S->length(), bStaging, w, h);
 			FS.r_close(S);
+			if (T)
+			{
+				Msg("* Texture '%s' is not a DDS file: loaded as an image (%ux%u RGBA8)", fn, w, h);
+				ret_msize = w * h * 4;
+				return T;
+			}
+		}
 		Msg("! Can't load texture '%s' (unsupported DDS layout)", fn);
 		if (!FS.exist(fn, "$game_textures$", "ed\\ed_not_existing_texture", ".dds"))
 			break;

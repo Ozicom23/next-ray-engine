@@ -3,6 +3,8 @@
 #pragma hdrstop
 
 #include "dx12DDS.h"
+#include <wincodec.h>
+#pragma comment(lib, "ole32.lib")
 
 namespace dds12
 {
@@ -514,6 +516,72 @@ ID3DBaseTexture* load(const void* data, size_t length, int skip, bool staging, u
 	}
 	mips_out = new_mips;
 	skipped = skip;
+	return result;
+}
+
+namespace
+{
+// Not taken from windowscodecs.lib / uuid.lib: CLSID_WICImagingFactory1 and GUID_WICPixelFormat32bppRGBA
+const GUID kWicFactory = { 0xcacaf262, 0x9370, 0x4615, { 0xa1, 0x3b, 0x9f, 0x55, 0x39, 0xda, 0x4c, 0x0a } };
+const GUID kWic32bppRGBA = { 0xf5c7ad2d, 0x6a8d, 0x43dd, { 0xa7, 0xa8, 0xa2, 0x99, 0x35, 0x26, 0x1a, 0xe9 } };
+
+template <class T>
+void release(T*& p)
+{
+	if (p)
+		p->Release();
+	p = nullptr;
+}
+} // namespace
+
+ID3DBaseTexture* load_image(const void* data, size_t length, bool staging, u32& width_out, u32& height_out)
+{
+	// Texture loads run on loader threads too: COM for this call
+	const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+	IWICImagingFactory* factory = nullptr;
+	IWICStream* stream = nullptr;
+	IWICBitmapDecoder* decoder = nullptr;
+	IWICBitmapFrameDecode* frame = nullptr;
+	IWICFormatConverter* converter = nullptr;
+	ID3DBaseTexture* result = nullptr;
+	UINT w = 0, h = 0;
+	xr_vector<u8> pixels;
+	if (SUCCEEDED(CoCreateInstance(kWicFactory, nullptr, CLSCTX_INPROC_SERVER, __uuidof(IWICImagingFactory), reinterpret_cast<void**>(&factory))) &&
+	    SUCCEEDED(factory->CreateStream(&stream)) &&
+	    SUCCEEDED(stream->InitializeFromMemory(static_cast<BYTE*>(const_cast<void*>(data)), DWORD(length))) &&
+	    SUCCEEDED(factory->CreateDecoderFromStream(stream, nullptr, WICDecodeMetadataCacheOnDemand, &decoder)) &&
+	    SUCCEEDED(decoder->GetFrame(0, &frame)) && SUCCEEDED(factory->CreateFormatConverter(&converter)) &&
+	    SUCCEEDED(converter->Initialize(frame, kWic32bppRGBA, WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom)) &&
+	    SUCCEEDED(converter->GetSize(&w, &h)) && w && h && w <= 16384 && h <= 16384)
+	{
+		pixels.resize(size_t(w) * h * 4);
+		if (SUCCEEDED(converter->CopyPixels(nullptr, w * 4, UINT(pixels.size()), pixels.data())))
+		{
+			D3D11_SUBRESOURCE_DATA init = { pixels.data(), w * 4, w * h * 4 };
+			D3D11_TEXTURE2D_DESC desc = {};
+			desc.Width = w;
+			desc.Height = h;
+			desc.MipLevels = 1;
+			desc.ArraySize = 1;
+			desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+			desc.SampleDesc.Count = 1;
+			desc.Usage = staging ? D3D11_USAGE_STAGING : D3D11_USAGE_IMMUTABLE;
+			desc.BindFlags = staging ? 0 : D3D11_BIND_SHADER_RESOURCE;
+			desc.CPUAccessFlags = staging ? D3D11_CPU_ACCESS_WRITE : 0;
+			ID3DTexture2D* t = nullptr;
+			if (SUCCEEDED(HW.pDevice->CreateTexture2D(&desc, &init, &t)))
+				result = t;
+		}
+	}
+	release(converter);
+	release(frame);
+	release(decoder);
+	release(stream);
+	release(factory);
+	if (SUCCEEDED(co))
+		CoUninitialize();
+	width_out = w;
+	height_out = h;
 	return result;
 }
 } // namespace dds12
