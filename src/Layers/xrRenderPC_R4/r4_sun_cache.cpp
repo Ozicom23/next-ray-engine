@@ -26,9 +26,9 @@ namespace
 
 	struct entry
 	{
-		ID3D11Texture2D* tex = nullptr;
-		ID3D11DepthStencilView* dsv = nullptr;
-		ID3D11ShaderResourceView* srv = nullptr;
+		ID3DTexture2D* tex = nullptr;
+		ID3DDepthStencilView* dsv = nullptr;
+		ID3DShaderResourceView* srv = nullptr;
 		u32 big = 0; // the kept map's side
 		bool valid = false;
 		Fmatrix xform; // the kept map's transform
@@ -40,11 +40,11 @@ namespace
 	};
 	entry s_e[kCascades];
 
-	ID3D11VertexShader* s_vs = nullptr;
-	ID3D11PixelShader* s_ps = nullptr;
-	ID3D11Buffer* s_cb = nullptr;
-	ID3D11RasterizerState* s_rs = nullptr;
-	ID3D11DepthStencilState* s_ds = nullptr;
+	ID3DVertexShader* s_vs = nullptr;
+	ID3DPixelShader* s_ps = nullptr;
+	ID3DBuffer* s_cb = nullptr;
+	ID3DRasterizerState* s_rs = nullptr;
+	ID3DDepthStencilState* s_ds = nullptr;
 	bool s_failed = false;
 
 	bool s_stats = false;
@@ -67,7 +67,7 @@ namespace
 		release(e);
 
 		D3D11_TEXTURE2D_DESC atlas = {};
-		((ID3D11Texture2D*)RImplementation.Target->rt_smap_depth->pSurface)->GetDesc(&atlas);
+		((ID3DTexture2D*)RImplementation.Target->rt_smap_depth->pSurface)->GetDesc(&atlas);
 		DXGI_FORMAT dsv_format, srv_format;
 		switch (atlas.Format)
 		{
@@ -321,7 +321,7 @@ void begin_refresh(u32 cascade)
 void draw_window(u32 cascade, ID3DDepthStencilView* atlas, u32 used)
 {
 	entry& e = s_e[cascade];
-	ID3D11DeviceContext* ctx = HW.pContext;
+	ID3DDeviceContext* ctx = HW.pContext;
 	D3D11_MAPPED_SUBRESOURCE m;
 	if (FAILED(ctx->Map(s_cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m)))
 		return;

@@ -144,9 +144,9 @@ private:
 #if defined(USE_DX10) || defined(USE_DX11)
 	ID3DGeometryShader* gs;
 #	ifdef USE_DX11
-	ID3D11HullShader* hs;
-	ID3D11DomainShader* ds;
-	ID3D11ComputeShader* cs;
+	ID3DHullShader* hs;
+	ID3DDomainShader* ds;
+	ID3DComputeShader* cs;
 #	endif
 #endif	//	USE_DX10
 
@@ -320,13 +320,13 @@ public:
 	ICF void set_GS(ref_gs& _gs) { set_GS(_gs->gs, _gs->cName.c_str()); }
 
 #	ifdef USE_DX11
-	ICF void set_HS(ID3D11HullShader* _hs, LPCSTR _n = 0);
+	ICF void set_HS(ID3DHullShader* _hs, LPCSTR _n = 0);
 	ICF void set_HS(ref_hs& _hs) { set_HS(_hs->sh, _hs->cName.c_str()); }
 
-	ICF void set_DS(ID3D11DomainShader* _ds, LPCSTR _n = 0);
+	ICF void set_DS(ID3DDomainShader* _ds, LPCSTR _n = 0);
 	ICF void set_DS(ref_ds& _ds) { set_DS(_ds->sh, _ds->cName.c_str()); }
 
-	ICF void set_CS(ID3D11ComputeShader* _cs, LPCSTR _n = 0);
+	ICF void set_CS(ID3DComputeShader* _cs, LPCSTR _n = 0);
 	ICF void set_CS(ref_cs& _cs) { set_CS(_cs->sh, _cs->cName.c_str()); }
 #	endif
 

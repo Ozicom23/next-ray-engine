@@ -548,7 +548,23 @@ void CHW::CreateDevice(HWND hwnd, bool move_window)
     // Create the device
     //	DX10 don't need it?
 	//u32 GPU		= selectGPU();
-#ifdef USE_DX11
+#if defined(USE_DX12)
+    // D3D12 device and queue on the adapter of the window's monitor; the swap chain goes on the queue
+    pDevice = dx12::Device::Create(m_pAdapter, Core.ParamsData.test(ECoreParams::dxgi_dbg));
+    if (!pDevice)
+    {
+        Msg("Failed to initialize graphics hardware: D3D12 device creation failed (feature level 11_0 required)");
+        xrLogger::FlushLog();
+        MessageBox(NULL, "Failed to initialize Direct3D 12.\nPlease update the graphics driver or use the DX11 executable.", "Error!",
+            MB_OK | MB_ICONERROR);
+        TerminateProcess(GetCurrentProcess(), 0);
+    }
+    pDevice->GetImmediateContext(&pContext);
+    FeatureLevel = D3D_FEATURE_LEVEL_11_0;
+    CreateSwapChain();
+    pAnnotation = pContext;
+    R = S_OK;
+#elif defined(USE_DX11)
     D3D_FEATURE_LEVEL pFeatureLevels[] = {
         // D3D_FEATURE_LEVEL_11_1,
         D3D_FEATURE_LEVEL_11_0,
@@ -702,7 +718,11 @@ UINT CHW::SwapChainFlags() const
 
 void CHW::CreateSwapChain()
 {
+#if defined(USE_DX12)
+    R_CHK(m_pFactory->CreateSwapChainForHwnd(pDevice->Queue(), m_hWnd, &m_ChainDesc, &m_ChainDescFullscreen, NULL, &m_pSwapChain));
+#else
     R_CHK(m_pFactory->CreateSwapChainForHwnd(pDevice, m_hWnd, &m_ChainDesc, &m_ChainDescFullscreen, NULL, &m_pSwapChain));
+#endif
 
 
     // setup colorspace
@@ -735,6 +755,10 @@ void CHW::CreateSwapChain()
 
 void CHW::DestroySwapChain()
 {
+#if defined(USE_DX12)
+    if (pDevice)
+        pDevice->ReleaseBackBuffers();
+#endif
     if (m_hFrameLatency)
     {
         CloseHandle(m_hFrameLatency);
@@ -823,6 +847,9 @@ void CHW::DestroyDevice()
 
         if (Core.ParamsData.test(ECoreParams::dxgi_old)) {
 #ifdef USE_DX11
+#ifdef USE_DX12
+            pDevice->ReleaseBackBuffers();
+#endif
             const auto& cd = m_ChainDesc;
             CHK_DX(m_pSwapChain->ResizeBuffers(
                 cd.BufferCount,
@@ -837,7 +864,12 @@ void CHW::DestroyDevice()
     }
 #ifdef USE_DX11
     DestroySwapChain();
+#ifdef USE_DX12
+    pAnnotation = nullptr; // the device's context
+    pContext = nullptr;
+#else
     _RELEASE(pContext);
+#endif
 #else
     _SHOW_REF("refCount:m_pSwapChain", m_pSwapChain);
     _RELEASE(m_pSwapChain);
@@ -849,7 +881,7 @@ void CHW::DestroyDevice()
     _SHOW_REF("DeviceREF:", HW.pDevice);
     _RELEASE(HW.pDevice);
 
-#if defined(USE_DX11)
+#if defined(USE_DX11) && !defined(USE_DX12)
     _RELEASE(pAnnotation);
 #endif
 
@@ -953,6 +985,10 @@ void CHW::Reset(HWND hwnd)
     _RELEASE(pBaseRT);
 
 #if defined(USE_DX11)
+#if defined(USE_DX12)
+    if (m_pSwapChain)
+        pDevice->ReleaseBackBuffers();
+#endif
     if (!m_pSwapChain)
         CreateSwapChain();
     else
@@ -1200,6 +1236,9 @@ void CHW::OnAppActivate()
 
         const auto& cd = m_ChainDesc;
 
+#ifdef USE_DX12
+        pDevice->ReleaseBackBuffers();
+#endif
         m_pSwapChain->ResizeBuffers(
             cd.BufferCount,
             cd.Width,
@@ -1241,6 +1280,9 @@ void CHW::OnAppDeactivate()
 
         const auto& cd = m_ChainDesc;
 
+#ifdef USE_DX12
+        pDevice->ReleaseBackBuffers();
+#endif
         m_pSwapChain->ResizeBuffers(
             cd.BufferCount,
             cd.Width,
@@ -1552,6 +1594,11 @@ void CHW::UpdateViews()
 
     // Create a render target view
 	//R_CHK	(pDevice->GetRenderTarget			(0,&pBaseRT));
+#if defined(USE_DX12)
+    // The device wraps the swap chain's buffers; the base RT view follows the current one
+    R_CHK(pDevice->AttachSwapChain(m_pSwapChain));
+    R_CHK(pDevice->CreateBackBufferRTV(&pBaseRT));
+#else
     ID3DTexture2D* pBuffer;
 	R = m_pSwapChain->GetBuffer(0, __uuidof( ID3DTexture2D), (LPVOID*)&pBuffer);
     R_CHK(R);
@@ -1559,6 +1606,7 @@ void CHW::UpdateViews()
     R = pDevice->CreateRenderTargetView(pBuffer, NULL, &pBaseRT);
     pBuffer->Release();
     R_CHK(R);
+#endif
 
     //	Create Depth/stencil buffer
     //	HACK: DX10: hard depth buffer format

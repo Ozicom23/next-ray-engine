@@ -1,6 +1,7 @@
 # Fast development build: DX11-AVX only, no release.
 # Runs on pushes to dlss-* branches and can be started manually from the Actions tab.
-# Download the "dev_DX11-AVX" artifact from the run page: it contains bin/ (exe + nvngx_dlss.dll)
+# Download the "dev_DX11-AVX" artifact from the run page: it contains bin/ (AnomalyDX11AVX.exe, AnomalyDX12AVX.exe (the R4
+# renderer on D3D12, xrRender_R5 + xrEngineDX12 projects, built in the same configuration) and nvngx_dlss.dll)
 # and db/mods/00_modded_exes_gamedata.db0, laid out like the Anomaly folder. The exe's debug symbols
 # (pdb, ~190 MB, for crash analysis) are a separate artifact, "dev_DX11-AVX_pdb".
 # bin/dlss_dev/nvngx_dlss.dll is NVIDIA's development DLL (on-screen debug overlay), swap it in for debugging.

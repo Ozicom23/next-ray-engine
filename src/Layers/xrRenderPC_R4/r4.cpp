@@ -752,12 +752,12 @@ namespace shader_warmup
 			HRESULT hr = E_FAIL;
 			switch (dot[1])
 			{
-			case 'p': { ID3D11PixelShader* sh = nullptr; hr = HW.pDevice->CreatePixelShader(code, len, nullptr, &sh); _RELEASE(sh); } break;
-			case 'v': { ID3D11VertexShader* sh = nullptr; hr = HW.pDevice->CreateVertexShader(code, len, nullptr, &sh); _RELEASE(sh); } break;
-			case 'g': { ID3D11GeometryShader* sh = nullptr; hr = HW.pDevice->CreateGeometryShader(code, len, nullptr, &sh); _RELEASE(sh); } break;
-			case 'h': { ID3D11HullShader* sh = nullptr; hr = HW.pDevice->CreateHullShader(code, len, nullptr, &sh); _RELEASE(sh); } break;
-			case 'd': { ID3D11DomainShader* sh = nullptr; hr = HW.pDevice->CreateDomainShader(code, len, nullptr, &sh); _RELEASE(sh); } break;
-			case 'c': { ID3D11ComputeShader* sh = nullptr; hr = HW.pDevice->CreateComputeShader(code, len, nullptr, &sh); _RELEASE(sh); } break;
+			case 'p': { ID3DPixelShader* sh = nullptr; hr = HW.pDevice->CreatePixelShader(code, len, nullptr, &sh); _RELEASE(sh); } break;
+			case 'v': { ID3DVertexShader* sh = nullptr; hr = HW.pDevice->CreateVertexShader(code, len, nullptr, &sh); _RELEASE(sh); } break;
+			case 'g': { ID3DGeometryShader* sh = nullptr; hr = HW.pDevice->CreateGeometryShader(code, len, nullptr, &sh); _RELEASE(sh); } break;
+			case 'h': { ID3DHullShader* sh = nullptr; hr = HW.pDevice->CreateHullShader(code, len, nullptr, &sh); _RELEASE(sh); } break;
+			case 'd': { ID3DDomainShader* sh = nullptr; hr = HW.pDevice->CreateDomainShader(code, len, nullptr, &sh); _RELEASE(sh); } break;
+			case 'c': { ID3DComputeShader* sh = nullptr; hr = HW.pDevice->CreateComputeShader(code, len, nullptr, &sh); _RELEASE(sh); } break;
 			default: continue;
 			}
 			SUCCEEDED(hr) ? created++ : failed++;
@@ -770,6 +770,9 @@ namespace shader_warmup
 	// From the first frame: once per process, when a shader was compiled this session
 	void start_once()
 	{
+#ifdef USE_DX12
+		return; // shader objects are only CPU data under D3D12: what is worth warming there are pipeline states
+#endif
 		if (s_started || !ps_r4_shader_warmup || !s_variant[0])
 			return;
 		s_started = true;

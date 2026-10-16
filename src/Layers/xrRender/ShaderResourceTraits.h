@@ -11,7 +11,7 @@ template <>
 struct ShaderTypeTraits<SHS>
 {
 	typedef CResourceManager::map_HS MapType;
-	typedef ID3D11HullShader DXIface;
+	typedef ID3DHullShader DXIface;
 
 	static inline const char* GetShaderExt() { return ".hs"; }
 	static inline const char* GetCompilationTarget() { return "hs_5_0"; }
@@ -30,7 +30,7 @@ template <>
 struct ShaderTypeTraits<SDS>
 {
 	typedef CResourceManager::map_DS MapType;
-	typedef ID3D11DomainShader DXIface;
+	typedef ID3DDomainShader DXIface;
 
 	static inline const char* GetShaderExt() { return ".ds"; }
 	static inline const char* GetCompilationTarget() { return "ds_5_0"; }
@@ -49,7 +49,7 @@ template <>
 struct ShaderTypeTraits<SCS>
 {
 	typedef CResourceManager::map_CS MapType;
-	typedef ID3D11ComputeShader DXIface;
+	typedef ID3DComputeShader DXIface;
 
 	static inline const char* GetShaderExt() { return ".cs"; }
 	static inline const char* GetCompilationTarget() { return "cs_5_0"; }

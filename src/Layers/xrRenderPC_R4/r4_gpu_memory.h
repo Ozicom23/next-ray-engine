@@ -23,7 +23,7 @@ namespace gpu_memory
 	};
 
 	// Starts counting a resource; resources counted already are skipped. The name may be null
-	void track(ID3D11Resource* res, const char* name = nullptr, category cat = automatic);
+	void track(ID3DResource* res, const char* name = nullptr, category cat = automatic);
 
 	// Buffers created on this thread while the scope lives are counted under its category and name
 	class scope

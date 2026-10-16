@@ -13,12 +13,12 @@ namespace hiz
 	// Start of the main view. usable: this view is the one the depth comes from (not the 3D scope's)
 	void frame_begin(bool usable);
 	// Main view, after the scene geometry: reduce its depth for a later frame
-	void capture(ID3D11DepthStencilView* depth, const Fmatrix& view_proj);
+	void capture(ID3DDepthStencilView* depth, const Fmatrix& view_proj);
 	// Main view static object about to be drawn: true to cull it
 	bool test_static(const Fbox& box, bool tree);
 	// Main view dynamic object (NPC, item, particles), by its bounding sphere: true to cull it
 	bool test_dynamic(const Fsphere& sphere);
 	// This frame's depth copy (after the scene geometry), for the sun receiver mask: false without one
-	bool depth_copy(ID3D11ShaderResourceView*& srv, Fmatrix& view_proj, u32& width, u32& height);
+	bool depth_copy(ID3DShaderResourceView*& srv, Fmatrix& view_proj, u32& width, u32& height);
 	void destroy();
 }

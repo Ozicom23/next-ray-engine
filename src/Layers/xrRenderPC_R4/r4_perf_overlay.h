@@ -34,9 +34,9 @@ private:
 
 	struct GpuQuery
 	{
-		ID3D11Query* disjoint;
-		ID3D11Query* begin;
-		ID3D11Query* end;
+		ID3DQuery* disjoint;
+		ID3DQuery* begin;
+		ID3DQuery* end;
 		bool pending;
 	};
 

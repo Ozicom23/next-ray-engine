@@ -48,9 +48,9 @@ namespace frame_pacing
 	static const u32 kQueries = 8;
 	struct query
 	{
-		ID3D11Query* disjoint;
-		ID3D11Query* begin;
-		ID3D11Query* end;
+		ID3DQuery* disjoint;
+		ID3DQuery* begin;
+		ID3DQuery* end;
 		u64 id;
 		bool pending;
 	};
@@ -60,8 +60,13 @@ namespace frame_pacing
 	static bool s_q_failed = false;
 
 	// GPU completion: a fence signalled before each Present, a thread that stamps the CPU time each value completes
+#ifdef USE_DX12
+	// D3D12: signalled on the queue right after the frame's commands are submitted (in Present)
+	static ID3D12Fence* s_fence = nullptr;
+#else
 	static ID3D11Fence* s_fence = nullptr;
 	static ID3D11DeviceContext4* s_ctx4 = nullptr;
+#endif
 	static bool s_fence_failed = false;
 	static HANDLE s_done_event = nullptr;
 	static HANDLE s_work_sem = nullptr;
@@ -158,6 +163,15 @@ namespace frame_pacing
 			return true;
 		if (s_fence_failed)
 			return false;
+#ifdef USE_DX12
+		if (FAILED(HW.pDevice->Native()->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), (void**)&s_fence)) || !s_fence)
+		{
+			Msg("! Frame pacing: D3D12 fence creation failed, no just-in-time frame start");
+			_RELEASE(s_fence);
+			s_fence_failed = true;
+			return false;
+		}
+#else
 		ID3D11Device5* device5 = nullptr;
 		if (SUCCEEDED(HW.pDevice->QueryInterface(__uuidof(ID3D11Device5), (void**)&device5)) && device5)
 		{
@@ -174,6 +188,7 @@ namespace frame_pacing
 			s_fence_failed = true;
 			return false;
 		}
+#endif
 		s_done_event = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 		s_work_sem = CreateSemaphore(nullptr, 0, LONG(kWork), nullptr);
 		for (auto& d : s_done_id)
@@ -602,7 +617,11 @@ namespace frame_pacing
 		}
 		if (wanted() && create_fence() && s_work_tail - s_work_head < kWork - 1)
 		{
+#ifdef USE_DX12
+			HW.pContext->SignalAfterSubmit(s_fence, s_id);
+#else
 			s_ctx4->Signal(s_fence, s_id);
+#endif
 			s_work_ids[s_work_tail % kWork] = s_id;
 			s_work_tail++;
 			s_last_signaled = s_id;
@@ -638,8 +657,20 @@ namespace frame_pacing
 		if (s_worker.joinable())
 		{
 			// Every value signalled so far completes first, so no completion callback fires after the event is closed
+#ifdef USE_DX12
+			// A value queued for a submission that never came is never signalled: wait a bounded time
+			if (s_fence && s_last_signaled && s_fence->GetCompletedValue() < s_last_signaled)
+			{
+				HANDLE e = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+				if (e && SUCCEEDED(s_fence->SetEventOnCompletion(s_last_signaled, e)))
+					WaitForSingleObject(e, 2000);
+				if (e)
+					CloseHandle(e);
+			}
+#else
 			if (s_fence && s_last_signaled)
 				s_fence->SetEventOnCompletion(s_last_signaled, nullptr);
+#endif
 			s_quit = true;
 			ReleaseSemaphore(s_work_sem, 1, nullptr);
 			SetEvent(s_done_event);
@@ -654,7 +685,9 @@ namespace frame_pacing
 		}
 		s_q_active = false;
 		_RELEASE(s_fence);
+#ifndef USE_DX12
 		_RELEASE(s_ctx4);
+#endif
 		if (s_done_event)
 			CloseHandle(s_done_event);
 		if (s_work_sem)

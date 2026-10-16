@@ -8,18 +8,18 @@
 // vectors; first-person items are their z. Built by a small pass right before the upscaler runs.
 namespace upscale_mask
 {
-	ID3D11Texture2D* s_tex = nullptr;
-	ID3D11RenderTargetView* s_rtv = nullptr;
-	ID3D11ShaderResourceView* s_mv_srv = nullptr;
-	ID3D11ShaderResourceView* s_stencil_srv = nullptr;
-	ID3D11Resource* s_mv_res = nullptr; // the views above are of these
-	ID3D11Resource* s_depth_res = nullptr;
-	ID3D11VertexShader* s_vs = nullptr;
-	ID3D11PixelShader* s_ps = nullptr;
-	ID3D11Buffer* s_cb = nullptr;
-	ID3D11RasterizerState* s_rs = nullptr;
-	ID3D11DepthStencilState* s_ds = nullptr;
-	ID3D11BlendState* s_bs = nullptr;
+	ID3DTexture2D* s_tex = nullptr;
+	ID3DRenderTargetView* s_rtv = nullptr;
+	ID3DShaderResourceView* s_mv_srv = nullptr;
+	ID3DShaderResourceView* s_stencil_srv = nullptr;
+	ID3DBaseTexture* s_mv_res = nullptr; // the views above are of these
+	ID3DBaseTexture* s_depth_res = nullptr;
+	ID3DVertexShader* s_vs = nullptr;
+	ID3DPixelShader* s_ps = nullptr;
+	ID3DBuffer* s_cb = nullptr;
+	ID3DRasterizerState* s_rs = nullptr;
+	ID3DDepthStencilState* s_ds = nullptr;
+	ID3DBlendState* s_bs = nullptr;
 	u32 s_w = 0, s_h = 0;
 	bool s_failed = false;
 
@@ -114,7 +114,7 @@ namespace upscale_mask
 		return !s_failed;
 	}
 
-	static bool ensure_targets(u32 w, u32 h, ID3D11Resource* mv, ID3D11Resource* depth)
+	static bool ensure_targets(u32 w, u32 h, ID3DBaseTexture* mv, ID3DBaseTexture* depth)
 	{
 		if (s_tex && s_w == w && s_h == h && s_mv_res == mv && s_depth_res == depth)
 			return true;
@@ -164,7 +164,7 @@ namespace upscale_mask
 
 	// The mask for this frame, or null when nothing is masked. Raw D3D11: the caller resets the context and
 	// RCache's state afterwards (phase_upscale does around the upscaler anyway)
-	ID3D11Resource* build(u32 w, u32 h, ID3D11Resource* mv, ID3D11Resource* depth)
+	ID3DBaseTexture* build(u32 w, u32 h, ID3DBaseTexture* mv, ID3DBaseTexture* depth)
 	{
 		const Fvector4& wt = ps_r4_upscaler_mask;
 		if (wt.x <= 0.f && wt.y <= 0.f && wt.z <= 0.f)
@@ -172,7 +172,7 @@ namespace upscale_mask
 		if (!mv || !depth || !create_shaders() || !ensure_targets(w, h, mv, depth))
 			return nullptr;
 
-		ID3D11DeviceContext* ctx = HW.pContext;
+		ID3DDeviceContext* ctx = HW.pContext;
 		D3D11_MAPPED_SUBRESOURCE m;
 		if (FAILED(ctx->Map(s_cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m)))
 			return nullptr;
@@ -193,7 +193,7 @@ namespace upscale_mask
 		ctx->HSSetShader(nullptr, nullptr, 0);
 		ctx->DSSetShader(nullptr, nullptr, 0);
 		ctx->PSSetShader(s_ps, nullptr, 0);
-		ID3D11ShaderResourceView* srv[2] = { s_mv_srv, s_stencil_srv };
+		ID3DShaderResourceView* srv[2] = { s_mv_srv, s_stencil_srv };
 		ctx->PSSetShaderResources(0, 2, srv);
 		ctx->PSSetConstantBuffers(0, 1, &s_cb);
 		ctx->RSSetState(s_rs);
@@ -201,9 +201,9 @@ namespace upscale_mask
 		const float blend[4] = {};
 		ctx->OMSetBlendState(s_bs, blend, 0xffffffff);
 		ctx->Draw(3, 0);
-		ID3D11ShaderResourceView* none[2] = {};
+		ID3DShaderResourceView* none[2] = {};
 		ctx->PSSetShaderResources(0, 2, none);
-		ID3D11RenderTargetView* no_rtv = nullptr;
+		ID3DRenderTargetView* no_rtv = nullptr;
 		ctx->OMSetRenderTargets(1, &no_rtv, nullptr);
 		return s_tex;
 	}

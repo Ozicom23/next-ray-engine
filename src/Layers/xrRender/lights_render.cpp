@@ -16,9 +16,9 @@ namespace light_smap_keep
 
 	struct entry
 	{
-		ID3D11Texture2D* tex = nullptr;
-		ID3D11DepthStencilView* dsv = nullptr;
-		ID3D11ShaderResourceView* srv = nullptr;
+		ID3DTexture2D* tex = nullptr;
+		ID3DDepthStencilView* dsv = nullptr;
+		ID3DShaderResourceView* srv = nullptr;
 		u32 size = 0, bytes = 0, version = 0, used = 0, drawn = 0; // drawn: the time it was last drawn
 		Fmatrix combine;
 		bool valid = false;
@@ -85,7 +85,7 @@ namespace light_smap_keep
 		release(e);
 
 		D3D11_TEXTURE2D_DESC atlas = {};
-		((ID3D11Texture2D*)RImplementation.Target->rt_smap_depth->pSurface)->GetDesc(&atlas);
+		((ID3DTexture2D*)RImplementation.Target->rt_smap_depth->pSurface)->GetDesc(&atlas);
 		DXGI_FORMAT dsv_format, srv_format;
 		u32 bpp;
 		switch (atlas.Format)

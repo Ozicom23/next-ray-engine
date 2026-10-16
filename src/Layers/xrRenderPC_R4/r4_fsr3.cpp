@@ -30,7 +30,8 @@ static const uint32_t FSR3_PERMUTATION_ALLOW_FP16 = 1 << 7;
 extern int ps_r4_fsr_fp16;
 
 //////////////////////////////////////////////////////////////////////////
-// FidelityFX backend interface on D3D11
+// FidelityFX backend interface on D3D11. The DX12 renderer runs it unchanged through its D3D11-style context
+// (dx12.h), which inserts the transitions and UAV barriers between the dispatches
 
 namespace
 {
@@ -42,25 +43,25 @@ namespace
 
 	struct Dx11Resource
 	{
-		ID3D11Resource* resource;
+		ID3DResource* resource;
 		bool owned;
 		bool is_uint;
 		FfxResourceDescription desc;
-		ID3D11ShaderResourceView* srv;
-		ID3D11UnorderedAccessView* uav[kMaxMips];
+		ID3DShaderResourceView* srv;
+		ID3DUnorderedAccessView* uav[kMaxMips];
 		DXGI_FORMAT view_format;
 	};
 
 	struct Backend
 	{
-		ID3D11Device* device;
-		ID3D11DeviceContext* context;
+		ID3DDevice* device;
+		ID3DDeviceContext* context;
 		Dx11Resource resources[kMaxResources];
 		u32 next_static;  // grows up from 1 (0 is the null resource)
 		u32 next_dynamic; // grows down: external (engine) textures, kept for the life of the context
-		ID3D11Buffer* cb[FFX_MAX_NUM_CONST_BUFFERS];
+		ID3DBuffer* cb[FFX_MAX_NUM_CONST_BUFFERS];
 		u32 cb_size[FFX_MAX_NUM_CONST_BUFFERS];
-		ID3D11SamplerState* samplers[2]; // s0 point clamp, s1 linear clamp
+		ID3DSamplerState* samplers[2]; // s0 point clamp, s1 linear clamp
 		xr_vector<FfxGpuJobDescription> jobs;
 		u32 staging_pos;
 		alignas(16) u8 staging[kStagingSize];
@@ -202,7 +203,7 @@ namespace
 		ZeroMemory(&r, sizeof(r));
 	}
 
-	ID3D11UnorderedAccessView* get_uav(Backend* b, Dx11Resource& r, u32 mip)
+	ID3DUnorderedAccessView* get_uav(Backend* b, Dx11Resource& r, u32 mip)
 	{
 		if (!r.resource || mip >= kMaxMips)
 			return nullptr;
@@ -221,8 +222,8 @@ namespace
 	// Creates the SRV (all mips) for a texture; UAVs are created on first use per mip
 	bool create_views(Backend* b, Dx11Resource& r)
 	{
-		ID3D11Texture2D* tex = nullptr;
-		if (FAILED(r.resource->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&tex)))
+		ID3DTexture2D* tex = nullptr;
+		if (FAILED(r.resource->QueryInterface(__uuidof(ID3DTexture2D), (void**)&tex)))
 			return false;
 		D3D11_TEXTURE2D_DESC td;
 		tex->GetDesc(&td);
@@ -334,7 +335,7 @@ namespace
 		if (init_ptr)
 			td.MipLevels = 1;
 
-		ID3D11Texture2D* tex = nullptr;
+		ID3DTexture2D* tex = nullptr;
 		if (FAILED(b->device->CreateTexture2D(&td, init_ptr, &tex)))
 		{
 			Msg("! FSR: failed to create %ls (%ux%u, format %d)", desc->name ? desc->name : L"", td.Width, td.Height, int(format));
@@ -376,7 +377,7 @@ namespace
 			return FFX_OK;
 		}
 
-		ID3D11Resource* res = (ID3D11Resource*)in->resource;
+		ID3DResource* res = (ID3DResource*)in->resource;
 		for (u32 i = b->next_dynamic + 1; i < kMaxResources; ++i)
 		{
 			if (b->resources[i].resource == res)
@@ -508,7 +509,7 @@ namespace
 			return FFX_ERROR_BACKEND_API_ERROR;
 		}
 
-		ID3D11ComputeShader* cs = nullptr;
+		ID3DComputeShader* cs = nullptr;
 		if (FAILED(b->device->CreateComputeShader(shader->code, shader->size, nullptr, &cs)))
 		{
 			Msg("! FSR: CreateComputeShader failed for %s", shader->pass);
@@ -550,7 +551,7 @@ namespace
 	{
 		if (pipeline && pipeline->pipeline)
 		{
-			((ID3D11ComputeShader*)pipeline->pipeline)->Release();
+			((ID3DComputeShader*)pipeline->pipeline)->Release();
 			pipeline->pipeline = nullptr;
 		}
 		return FFX_OK;
@@ -591,10 +592,10 @@ namespace
 
 	void execute_compute(Backend* b, const FfxComputeJobDescription& job)
 	{
-		ID3D11DeviceContext* ctx = b->context;
+		ID3DDeviceContext* ctx = b->context;
 		const FfxPipelineState& p = job.pipeline;
 
-		ctx->CSSetShader((ID3D11ComputeShader*)p.pipeline, nullptr, 0);
+		ctx->CSSetShader((ID3DComputeShader*)p.pipeline, nullptr, 0);
 		ctx->CSSetSamplers(0, 2, b->samplers);
 
 		for (u32 i = 0; i < p.constCount; ++i)
@@ -604,7 +605,7 @@ namespace
 				ctx->CSSetConstantBuffers(slot, 1, &b->cb[slot]);
 		}
 
-		ID3D11ShaderResourceView* srv[kMaxSrvSlots] = {};
+		ID3DShaderResourceView* srv[kMaxSrvSlots] = {};
 		u32 srv_count = 0;
 		for (u32 i = 0; i < p.srvTextureCount; ++i)
 		{
@@ -616,7 +617,7 @@ namespace
 			srv_count = _max(srv_count, slot + 1);
 		}
 
-		ID3D11UnorderedAccessView* uav[kMaxUavSlots] = {};
+		ID3DUnorderedAccessView* uav[kMaxUavSlots] = {};
 		u32 uav_count = 0;
 		for (u32 i = 0; i < p.uavTextureCount; ++i)
 		{
@@ -636,8 +637,8 @@ namespace
 		ctx->Dispatch(job.dimensions[0], job.dimensions[1], job.dimensions[2]);
 
 		// Unbind, the next pass may read what this one wrote
-		ID3D11ShaderResourceView* null_srv[kMaxSrvSlots] = {};
-		ID3D11UnorderedAccessView* null_uav[kMaxUavSlots] = {};
+		ID3DShaderResourceView* null_srv[kMaxSrvSlots] = {};
+		ID3DUnorderedAccessView* null_uav[kMaxUavSlots] = {};
 		if (srv_count)
 			ctx->CSSetShaderResources(0, srv_count, null_srv);
 		if (uav_count)
@@ -650,7 +651,7 @@ namespace
 		if (idx <= 0 || u32(idx) >= kMaxResources)
 			return;
 		Dx11Resource& r = b->resources[idx];
-		ID3D11UnorderedAccessView* view = get_uav(b, r, 0);
+		ID3DUnorderedAccessView* view = get_uav(b, r, 0);
 		if (!view)
 			return;
 		if (r.is_uint)
@@ -692,15 +693,15 @@ namespace
 		return FFX_OK;
 	}
 
-	FfxResource make_resource(ID3D11Resource* res, FfxResourceStates state, const wchar_t* name)
+	FfxResource make_resource(ID3DResource* res, FfxResourceStates state, const wchar_t* name)
 	{
 		FfxResource r = {};
 		r.resource = res;
 		r.state = state;
 		if (res)
 		{
-			ID3D11Texture2D* tex = nullptr;
-			if (SUCCEEDED(res->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&tex)))
+			ID3DTexture2D* tex = nullptr;
+			if (SUCCEEDED(res->QueryInterface(__uuidof(ID3DTexture2D), (void**)&tex)))
 			{
 				D3D11_TEXTURE2D_DESC td;
 				tex->GetDesc(&td);
@@ -728,11 +729,17 @@ bool CFSR3::Init()
 	if (m_initialized)
 		return m_available;
 	m_initialized = true;
+#ifdef USE_DX12
+	// D3D12 devices have cs_5_0 at the least
+	m_available = true;
+	Msg("* FSR: FidelityFX FSR 3.1.4 upscaler available (D3D11 backend on the D3D12 context)");
+#else
 	m_available = HW.FeatureLevel >= D3D_FEATURE_LEVEL_11_0;
 	if (!m_available)
 		Msg("! FSR: Direct3D 11.0 compute shaders required");
 	else
 		Msg("* FSR: FidelityFX FSR 3.1.4 upscaler available (D3D11 backend)");
+#endif
 	return m_available;
 }
 
@@ -796,11 +803,19 @@ bool CFSR3::CreateFeature(u32 render_w, u32 render_h, u32 out_w, u32 out_h, u32 
 	fi.device = HW.pDevice;
 
 	{
+#ifdef USE_DX12
+		// What the driver says about 16-bit minimum precision (vkd3d-proton: depends on shaderFloat16 of the Vulkan device)
+		D3D12_FEATURE_DATA_D3D12_OPTIONS opt = {};
+		HW.pDevice->Native()->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &opt, sizeof(opt));
+		Msg("* FSR: 16-bit math %s, driver min-precision support: %u", ps_r4_fsr_fp16 ? "on" : "off",
+			u32(opt.MinPrecisionSupport));
+#else
 		// What the driver says about 16-bit minimum precision (DXVK: depends on shaderFloat16 of the Vulkan device)
 		D3D11_FEATURE_DATA_SHADER_MIN_PRECISION_SUPPORT mp = {};
 		HW.pDevice->CheckFeatureSupport(D3D11_FEATURE_SHADER_MIN_PRECISION_SUPPORT, &mp, sizeof(mp));
 		Msg("* FSR: 16-bit math %s, driver min-precision support: compute %u, pixel %u", ps_r4_fsr_fp16 ? "on" : "off",
 			mp.AllOtherShaderStagesMinPrecision, mp.PixelShaderMinPrecision);
+#endif
 	}
 
 	FfxFsr3UpscalerContext* ctx = xr_new<FfxFsr3UpscalerContext>();

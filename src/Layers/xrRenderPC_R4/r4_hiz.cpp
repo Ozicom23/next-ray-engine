@@ -29,17 +29,17 @@ namespace
 		"	tiles[id.xy] = m;\n"
 		"}\n";
 
-	ID3D11ComputeShader* s_reduce = nullptr;
+	ID3DComputeShader* s_reduce = nullptr;
 	bool s_reduce_failed = false;
 
 	// Copy of the scene depth the shader can read, the tiles it writes, their CPU copies
-	ID3D11Texture2D* s_depth = nullptr;
-	ID3D11ShaderResourceView* s_depth_srv = nullptr;
-	ID3D11Texture2D* s_tiles_gpu = nullptr;
-	ID3D11UnorderedAccessView* s_tiles_uav = nullptr;
+	ID3DTexture2D* s_depth = nullptr;
+	ID3DShaderResourceView* s_depth_srv = nullptr;
+	ID3DTexture2D* s_tiles_gpu = nullptr;
+	ID3DUnorderedAccessView* s_tiles_uav = nullptr;
 	struct Slot
 	{
-		ID3D11Texture2D* staging = nullptr;
+		ID3DTexture2D* staging = nullptr;
 		Fmatrix view_proj;
 	};
 	Slot s_slots[kSlots];
@@ -99,7 +99,7 @@ namespace
 		return s_reduce != nullptr;
 	}
 
-	bool ensure_targets(ID3D11Texture2D* src)
+	bool ensure_targets(ID3DTexture2D* src)
 	{
 		D3D11_TEXTURE2D_DESC desc;
 		src->GetDesc(&desc);
@@ -161,12 +161,16 @@ namespace
 	// The depth's tiles on the GPU, leaving the compute stage as it was
 	void reduce()
 	{
-		ID3D11ComputeShader* prev_cs = nullptr;
+		ID3DComputeShader* prev_cs = nullptr;
+#ifdef USE_DX12
+		HW.pContext->CSGetShader(&prev_cs, nullptr, nullptr);
+#else
 		ID3D11ClassInstance* prev_inst[256];
 		UINT prev_inst_count = 256;
-		ID3D11ShaderResourceView* prev_srv = nullptr;
-		ID3D11UnorderedAccessView* prev_uav = nullptr;
 		HW.pContext->CSGetShader(&prev_cs, prev_inst, &prev_inst_count);
+#endif
+		ID3DShaderResourceView* prev_srv = nullptr;
+		ID3DUnorderedAccessView* prev_uav = nullptr;
 		HW.pContext->CSGetShaderResources(0, 1, &prev_srv);
 		HW.pContext->CSGetUnorderedAccessViews(0, 1, &prev_uav);
 
@@ -175,15 +179,21 @@ namespace
 		HW.pContext->CSSetUnorderedAccessViews(0, 1, &s_tiles_uav, nullptr);
 		HW.pContext->Dispatch((s_tiles_w + 7) / 8, (s_tiles_h + 7) / 8, 1);
 
-		ID3D11ShaderResourceView* no_srv = nullptr;
+		ID3DShaderResourceView* no_srv = nullptr;
 		HW.pContext->CSSetShaderResources(0, 1, &no_srv);
+#ifdef USE_DX12
+		HW.pContext->CSSetShader(prev_cs, nullptr, 0);
+#else
 		HW.pContext->CSSetShader(prev_cs, prev_inst, prev_inst_count);
+#endif
 		HW.pContext->CSSetShaderResources(0, 1, &prev_srv);
 		UINT keep = UINT(-1);
 		HW.pContext->CSSetUnorderedAccessViews(0, 1, &prev_uav, &keep);
 		_RELEASE(prev_cs);
+#ifndef USE_DX12
 		for (UINT i = 0; i < prev_inst_count; i++)
 			_RELEASE(prev_inst[i]);
+#endif
 		_RELEASE(prev_srv);
 		_RELEASE(prev_uav);
 	}
@@ -256,15 +266,15 @@ void frame_begin(bool usable)
 		s_frames_with_tiles++;
 }
 
-void capture(ID3D11DepthStencilView* depth, const Fmatrix& view_proj)
+void capture(ID3DDepthStencilView* depth, const Fmatrix& view_proj)
 {
 	if (!active() || !depth || !create_shader())
 		return;
-	ID3D11Resource* res = nullptr;
+	ID3DBaseTexture* res = nullptr;
 	depth->GetResource(&res);
-	ID3D11Texture2D* tex = nullptr;
+	ID3DTexture2D* tex = nullptr;
 	if (res)
-		res->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&tex);
+		res->QueryInterface(__uuidof(ID3DTexture2D), (void**)&tex);
 	_RELEASE(res);
 	if (!tex)
 		return;
@@ -351,7 +361,7 @@ bool test_dynamic(const Fsphere& sphere)
 	return test_box(box, kind_dynamic);
 }
 
-bool depth_copy(ID3D11ShaderResourceView*& srv, Fmatrix& view_proj, u32& width, u32& height)
+bool depth_copy(ID3DShaderResourceView*& srv, Fmatrix& view_proj, u32& width, u32& height)
 {
 	if (s_copy_frame != Device.dwFrame || !s_depth_srv)
 		return false;

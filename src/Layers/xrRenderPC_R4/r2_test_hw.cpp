@@ -105,8 +105,38 @@ bool TestDX11Present()
 	return SUCCEEDED(hr);
 }
 
+#ifdef USE_DX12
+// D3D12 renderer: a feature level 11_0 D3D12 device on the default adapter (the device itself is not created)
+bool TestDX12Present()
+{
+	HMODULE hD3D12 = LoadLibrary("d3d12.dll");
+	if (!hD3D12)
+	{
+		Msg("* DX12: failed to load d3d12.dll");
+		return false;
+	}
+	PFN_D3D12_CREATE_DEVICE pD3D12CreateDevice = (PFN_D3D12_CREATE_DEVICE)GetProcAddress(hD3D12, "D3D12CreateDevice");
+	if (!pD3D12CreateDevice)
+	{
+		Msg("* DX12: failed to get address of D3D12CreateDevice");
+		FreeLibrary(hD3D12);
+		return false;
+	}
+	// S_FALSE: a device could be created (nothing is created with a null output)
+	const HRESULT hr = pD3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), nullptr);
+	if (FAILED(hr))
+		Msg("* D3D12: device creation failed with hr=0x%08x", hr);
+	FreeLibrary(hD3D12);
+	return SUCCEEDED(hr);
+}
+#endif
+
 BOOL xrRender_test_hw()
 {
+#ifdef USE_DX12
+	return TestDX12Present();
+#else
+
 	//CHW							_HW;
 	//HRESULT						hr;
 	//_HW.CreateD3D				()		;
@@ -114,4 +144,5 @@ BOOL xrRender_test_hw()
 	//_HW.DestroyD3D				()		;
 
 	return TestDX11Present(); //SUCCEEDED(hr);
+#endif
 }

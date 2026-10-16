@@ -311,7 +311,14 @@ void dxRenderDeviceRender::ResourcesDumpMemoryUsage()
 dxRenderDeviceRender::DeviceState dxRenderDeviceRender::GetDeviceState()
 {
 	HW.Validate();
-#if defined(USE_DX10) || defined(USE_DX11)
+#if defined(USE_DX12)
+	const HRESULT _hr = HW.pDevice->GetDeviceRemovedReason();
+	if (FAILED(_hr))
+	{
+		HW.pDevice->ReportRemoval("device state");
+		return dsLost;
+	}
+#elif defined(USE_DX10) || defined(USE_DX11)
     HRESULT _hr = HW.m_pSwapChain->Present(0, DXGI_PRESENT_TEST);
 
 	if (FAILED(_hr))
@@ -443,13 +450,22 @@ void dxRenderDeviceRender::End()
 		frame_pacing::present_begin();
 		g_PerfOverlay.PresentBegin();
 #endif
+#ifdef USE_DX12
+		// The frame's commands go to the queue, then the swap chain presents
+		HW.pContext->Present(HW.m_pSwapChain, present_interval, present_flags);
+#else
 		HW.m_pSwapChain->Present(present_interval, present_flags);
+#endif
 #ifdef USE_DX11
 		g_PerfOverlay.PresentEnd();
 		HW.m_FrameWaitOwed = true;
 		frame_pacing::present_end();
 #endif
 	}
+#ifdef USE_DX12
+	else
+		HW.pContext->EndFrame(); // a frame drawn without presenting (second viewport) still goes to the GPU
+#endif
 #else //!USE_DX10 || USE_DX11
 	CHK_DX(HW.pDevice->EndScene());
 
