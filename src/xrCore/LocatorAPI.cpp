@@ -1080,6 +1080,7 @@ void CLocatorAPI::_initialize(u32 flags, LPCSTR target_folder, LPCSTR fs_name)
 	CTimer t;
 	t.Start();
 	Log("Initializing File System...");
+	bool fs_index_stats = false; // measuring: fs_index_serial, fs_index_threads, fs_index_dump or fs_index_stats
 	size_t M1 = Memory.mem_usage();
 
 	m_Flags.set(flags, TRUE);
@@ -1126,7 +1127,17 @@ void CLocatorAPI::_initialize(u32 flags, LPCSTR target_folder, LPCSTR fs_name)
 					fs_index::s_threads = u32(count);
 				fclose(f);
 			}
-			Msg("* FS: file index %s (%s)", index_threads ? "listed on worker threads" : "listed on this thread only", serial);
+			// The index's timing and fingerprint in the log only with one of these files (or fs_index_stats) there
+			string_path stats_file;
+			xr_strcpy(stats_file, sizeof(stats_file), threads_file);
+			stats_file[xr_strlen(stats_file) - xr_strlen("fs_index_threads")] = 0;
+			xr_strcat(stats_file, "fs_index_stats");
+			fs_index_stats = !index_threads || fs_index::s_threads || GetFileAttributes(stats_file) != INVALID_FILE_ATTRIBUTES;
+			stats_file[xr_strlen(stats_file) - xr_strlen("fs_index_stats")] = 0;
+			xr_strcat(stats_file, "fs_index_dump");
+			fs_index_stats = fs_index_stats || GetFileAttributes(stats_file) != INVALID_FILE_ATTRIBUTES;
+			if (fs_index_stats)
+				Msg("* FS: file index %s (%s)", index_threads ? "listed on worker threads" : "listed on this thread only", serial);
 		}
 		const u64 t_index = CPU::QPC();
 		// Folders already listed with their subfolders. fsgame.ltx names many folders inside others ($game_data$, then
@@ -1218,7 +1229,8 @@ void CLocatorAPI::_initialize(u32 flags, LPCSTR target_folder, LPCSTR fs_name)
 		fs_index::stop();
 		R_ASSERT(path_exist("$app_data_root$"));
 		Msg("* FS: %u folders inside an already listed folder not listed again", skipped_lists);
-		Msg("* FS: index in %.1f s, %u folders listed ahead by %u worker threads, %u taken, waited for them %.1f s",
+		if (fs_index_stats)
+			Msg("* FS: index in %.1f s, %u folders listed ahead by %u worker threads, %u taken, waited for them %.1f s",
 			double(CPU::QPC() - t_index) / double(CPU::qpc_freq), g_fs_index_listed, u32(fs_index::s_workers_started), g_fs_index_taken,
 			double(g_fs_index_wait) / double(CPU::qpc_freq));
 	};
@@ -1227,6 +1239,7 @@ void CLocatorAPI::_initialize(u32 flags, LPCSTR target_folder, LPCSTR fs_name)
 	Msg("File System Ready...");
 	size_t M2 = Memory.mem_usage();
 	Msg("FS: %d files cached %d archives, %lldKb memory used.", m_files.size(), m_archives.size(), (M2 - M1) / 1024);
+	if (fs_index_stats)
 	{
 		// The whole index in one number, to compare ways of building it (names in order, archive, offsets, sizes, times)
 		u64 h = 14695981039346656037ull;
