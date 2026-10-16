@@ -673,6 +673,7 @@ public:
 		HW.pContext->TraceFrames(UINT(clampr(frames, 1, 4)));
 	}
 };
+extern int ps_r4_framegen; // r4_framegen.cpp
 // r__dx12_threaded 0/1: D3D12 commands recorded on a worker thread (1), as DXVK records on its own thread, or on the
 // render thread at each call (0); switches at once
 int ps_r__dx12_threaded = 1;
@@ -1413,6 +1414,7 @@ void xrRender_initconsole()
 	CMD1(CCC_Dx12Trace, "r__dx12_trace");
 	CMD1(CCC_Dx12Stats, "stat_dx12");
 	CMD2(CCC_Dx12Threaded, "r__dx12_threaded", &ps_r__dx12_threaded);
+	CMD4(CCC_Integer, "r4_framegen", &ps_r4_framegen, 0, 1); // FSR frame generation, vid_restart; needs an upscaler on
 #endif
 
 	//	Igor: just to test bug with rain/particles corruption

@@ -302,6 +302,7 @@ extern u32 g_screenmode;
 extern int ps_r4_swap_wait;     // r4_frame_pacing.cpp
 #ifdef USE_DX12
 extern int ps_r__dx12_threaded; // xrRender_console.cpp
+#include "../xrRenderPC_R4/r4_framegen.h"
 #endif
 extern int ps_r4_frame_latency;
 #endif
@@ -729,7 +730,9 @@ UINT CHW::SwapChainFlags() const
 void CHW::CreateSwapChain()
 {
 #if defined(USE_DX12)
-    R_CHK(m_pFactory->CreateSwapChainForHwnd(pDevice->Queue(), m_hWnd, &m_ChainDesc, &m_ChainDescFullscreen, NULL, &m_pSwapChain));
+    // FSR frame generation (r4_framegen): AMD's frame interpolation swap chain in place of DXGI's
+    if (!framegen::create_swap_chain(m_pFactory, pDevice->Queue(), m_hWnd, &m_ChainDesc, &m_ChainDescFullscreen, &m_pSwapChain))
+        R_CHK(m_pFactory->CreateSwapChainForHwnd(pDevice->Queue(), m_hWnd, &m_ChainDesc, &m_ChainDescFullscreen, NULL, &m_pSwapChain));
 #else
     R_CHK(m_pFactory->CreateSwapChainForHwnd(pDevice, m_hWnd, &m_ChainDesc, &m_ChainDescFullscreen, NULL, &m_pSwapChain));
 #endif
@@ -766,6 +769,7 @@ void CHW::CreateSwapChain()
 void CHW::DestroySwapChain()
 {
 #if defined(USE_DX12)
+    framegen::shutdown();
     if (pDevice)
         pDevice->ReleaseBackBuffers();
 #endif

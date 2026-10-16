@@ -5,6 +5,9 @@
 #ifdef USE_DX11
 #include "../xrRenderPC_R4/r4_perf_overlay.h"
 #include "../xrRenderPC_R4/r4_frame_pacing.h"
+#ifdef USE_DX12
+#include "../xrRenderPC_R4/r4_framegen.h"
+#endif
 #endif
 
 dxRenderDeviceRender::dxRenderDeviceRender()
@@ -459,6 +462,7 @@ void dxRenderDeviceRender::End()
 #endif
 #ifdef USE_DX12
 		// The frame's commands go to the queue, then the swap chain presents
+		framegen::skip_frame();
 		HW.pContext->Present(HW.m_pSwapChain, present_interval, present_flags);
 #else
 		HW.m_pSwapChain->Present(present_interval, present_flags);

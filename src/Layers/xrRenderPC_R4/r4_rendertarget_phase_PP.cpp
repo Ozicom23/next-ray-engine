@@ -1,6 +1,9 @@
 #include "stdafx.h"
 #include "r4_rendertarget.h"
 #include "r4_upscaler.h"
+#ifdef USE_DX12
+#include "r4_framegen.h"
+#endif
 extern int ps_r4_upscaler_jitter; // below, with upscale_end_scene
 
 // The upscaler's mask (r4_upscaler_mask): where it should trust the current frame over its history. 3D scope lenses
@@ -508,6 +511,31 @@ void CRenderTarget::phase_upscale()
 		p.reactive = upscale_mask::build(m_upscale_render_w, m_upscale_render_h, p.motion, p.depth);
 		m_upscale_done = m_upscaler->Evaluate(p);
 		RCache.OnFrameEnd();
+#ifdef USE_DX12
+		// FSR frame generation takes the same inputs, after the frame's post-processing (phase_combine)
+		if (framegen::active())
+		{
+			framegen::FrameParams& f = framegen::g_pending;
+			f.depth = p.depth;
+			f.motion = p.motion;
+			f.jitter_x = p.jitter_x;
+			f.jitter_y = p.jitter_y;
+			f.mv_scale_x = p.mv_scale_x;
+			f.mv_scale_y = p.mv_scale_y;
+			f.render_w = p.render_w;
+			f.render_h = p.render_h;
+			f.frame_time_ms = p.frame_time_ms;
+			f.camera_near = p.camera_near;
+			f.camera_far = p.camera_far;
+			f.camera_fov_y = p.camera_fov_y;
+			f.reset = p.reset;
+			f.camera_position.set(Device.vCameraPosition);
+			f.camera_up.set(Device.vCameraTop);
+			f.camera_right.set(Device.vCameraRight);
+			f.camera_forward.set(Device.vCameraDirection);
+			framegen::g_pending_ready = m_upscale_done;
+		}
+#endif
 
 		// The screen overlays held back for this (phase_combine). Without an upscaled image at render resolution,
 		// onto rt_Color, which phase_pp stretches

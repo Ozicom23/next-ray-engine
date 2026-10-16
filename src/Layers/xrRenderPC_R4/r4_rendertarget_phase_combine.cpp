@@ -3,6 +3,9 @@
 #include "../../xrEngine/environment.h"
 
 #include "../xrRender/dxEnvironmentRender.h"
+#ifdef USE_DX12
+#include "r4_framegen.h"
+#endif
 
 #define STENCIL_CULL 0
 
@@ -770,6 +773,26 @@ void CRenderTarget::phase_combine()
 		PIX_EVENT(phase_pp);
 		phase_pp();
 	}
+
+#ifdef USE_DX12
+	// FSR frame generation: the image before the UI (the UI is told apart by comparing with the presented one) and
+	// this frame's interpolation inputs
+	if (framegen::g_pending_ready)
+	{
+		framegen::g_pending_ready = false;
+		dx12::Texture2D* bb = HW.pDevice->BackBufferAlias();
+		framegen::FrameParams f = framegen::g_pending;
+		f.display_w = bb ? bb->m_width : 0;
+		f.display_h = bb ? bb->m_height : 0;
+		f.hudless = framegen::hudless_target(f.display_w, f.display_h);
+		if (f.hudless)
+		{
+			PIX_EVENT(framegen_prepare);
+			HW.pContext->CopyResource(f.hudless, bb);
+			framegen::frame(f);
+		}
+	}
+#endif
 
 	//	Re-adapt luminance
 	RCache.set_Stencil(FALSE);
