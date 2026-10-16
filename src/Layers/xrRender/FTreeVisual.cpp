@@ -295,7 +295,7 @@ void FTreeVisual::Render(float LOD)
 				c_prevgrass[k + 16].set(far_dir);
 			}
 		}
-		RCache.set_c(c_nextray_benders, float(count_cur), float(count_prev), 0.f, 0.f);
+		RCache.set_c(c_nextray_benders, float(count_cur), float(count_prev), 1.f, 0.f); // z = 1: the counts are valid
 	}
 #endif
 }

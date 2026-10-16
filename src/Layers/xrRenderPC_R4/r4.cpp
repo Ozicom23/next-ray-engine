@@ -2136,6 +2136,17 @@ HRESULT CRender::shader_compile(
 		++len;
 	}
 
+	// NEXTRAY_SDR: the scene's color buffers are 8 bit (0..1), not HDR10's 16 bit floats; shaders may rely on the
+	// range (the neXt-Ray patch mod's fog scattering early-out). In the variant name: compiled code differs
+	if (!o.dx11_hdr10)
+	{
+		defines[def_it].Name = "NEXTRAY_SDR";
+		defines[def_it].Definition = "1";
+		def_it++;
+	}
+	sh_name[len] = '0' + char(!o.dx11_hdr10);
+	++len;
+
 	sh_name[len] = 0;
 	{
 		string_path cached;
