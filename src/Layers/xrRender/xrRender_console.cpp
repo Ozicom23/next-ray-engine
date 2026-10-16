@@ -639,6 +639,18 @@ extern int ps_r4_tex_stream;
 extern int ps_r4_tex_stream_keep;
 extern int ps_r4_lights_parallel_query;
 extern int ps_r4_main_parallel_cull;
+#ifdef USE_DX12
+// r__dx12_dump_rt [all | names]: render targets at the end of the next frame to PNGs in the screenshots folder, their
+// channel ranges in the log
+void dx12_request_rt_dump(LPCSTR args);
+class CCC_Dx12DumpRT : public IConsole_Command
+{
+public:
+	CCC_Dx12DumpRT(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; }
+	virtual void Execute(LPCSTR args) { dx12_request_rt_dump(args); }
+};
+#endif
+
 class CCC_TexStreamStats : public IConsole_Command
 {
 public:
@@ -1334,6 +1346,9 @@ void xrRender_initconsole()
 
 	// Common
 	CMD1(CCC_Screenshot, "screenshot");
+#ifdef USE_DX12
+	CMD1(CCC_Dx12DumpRT, "r__dx12_dump_rt");
+#endif
 
 	//	Igor: just to test bug with rain/particles corruption
 	CMD1(CCC_RestoreQuadIBData, "r_restore_quad_ib_data");

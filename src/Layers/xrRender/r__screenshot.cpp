@@ -601,8 +601,257 @@ namespace dx12_screenshot
 	static bool s_at_frame_end = false;
 }
 
+// r__dx12_dump_rt: render targets at the end of a frame to PNG files in the screenshots folder, with each channel's
+// min / max / mean in the log (a debugging aid of the DX12 renderer)
+namespace dx12_screenshot
+{
+	static xr_vector<xr_string> s_dump;
+
+	static float half_to_float(u16 h)
+	{
+		const u32 sign = u32(h >> 15) << 31, exp = (h >> 10) & 0x1f, mant = h & 0x3ff;
+		u32 bits;
+		if (exp == 0)
+		{
+			if (!mant)
+				bits = sign;
+			else
+			{
+				u32 e = 113, m = mant;
+				while (!(m & 0x400))
+				{
+					m <<= 1;
+					--e;
+				}
+				bits = sign | (e << 23) | ((m & 0x3ff) << 13);
+			}
+		}
+		else if (exp == 31)
+			bits = sign | 0x7f800000 | (mant << 13);
+		else
+			bits = sign | ((exp + 112) << 23) | (mant << 13);
+		float f;
+		memcpy(&f, &bits, 4);
+		return f;
+	}
+
+	static float r11g11b10_part(u32 v, u32 mant_bits)
+	{
+		const u32 exp = v >> mant_bits, mant = v & ((1u << mant_bits) - 1);
+		if (!exp)
+			return ldexpf(float(mant) / float(1u << mant_bits), -14);
+		if (exp == 31)
+			return 65504.f;
+		return ldexpf(1.f + float(mant) / float(1u << mant_bits), int(exp) - 15);
+	}
+
+	// One texel to RGBA floats; false for formats not handled
+	static bool decode(DXGI_FORMAT f, const u8* p, float* c)
+	{
+		c[0] = c[1] = c[2] = 0.f;
+		c[3] = 1.f;
+		switch (f)
+		{
+		case DXGI_FORMAT_R8G8B8A8_UNORM: case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB: case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+			for (int i = 0; i < 4; ++i) c[i] = p[i] / 255.f;
+			return true;
+		case DXGI_FORMAT_R8G8B8A8_SNORM:
+			for (int i = 0; i < 4; ++i) c[i] = _max(-1.f, s8(p[i]) / 127.f);
+			return true;
+		case DXGI_FORMAT_B8G8R8A8_UNORM: case DXGI_FORMAT_B8G8R8X8_UNORM: case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+			c[0] = p[2] / 255.f; c[1] = p[1] / 255.f; c[2] = p[0] / 255.f; c[3] = p[3] / 255.f;
+			return true;
+		case DXGI_FORMAT_R10G10B10A2_UNORM: case DXGI_FORMAT_R10G10B10A2_TYPELESS:
+		{
+			const u32 v = *reinterpret_cast<const u32*>(p);
+			c[0] = (v & 0x3ff) / 1023.f; c[1] = ((v >> 10) & 0x3ff) / 1023.f; c[2] = ((v >> 20) & 0x3ff) / 1023.f; c[3] = (v >> 30) / 3.f;
+			return true;
+		}
+		case DXGI_FORMAT_R16G16B16A16_FLOAT: case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+			for (int i = 0; i < 4; ++i) c[i] = half_to_float(reinterpret_cast<const u16*>(p)[i]);
+			return true;
+		case DXGI_FORMAT_R16G16B16A16_UNORM:
+			for (int i = 0; i < 4; ++i) c[i] = reinterpret_cast<const u16*>(p)[i] / 65535.f;
+			return true;
+		case DXGI_FORMAT_R32G32B32A32_FLOAT:
+			memcpy(c, p, 16);
+			return true;
+		case DXGI_FORMAT_R16G16_FLOAT:
+			c[0] = half_to_float(reinterpret_cast<const u16*>(p)[0]); c[1] = half_to_float(reinterpret_cast<const u16*>(p)[1]);
+			return true;
+		case DXGI_FORMAT_R11G11B10_FLOAT:
+		{
+			const u32 v = *reinterpret_cast<const u32*>(p);
+			c[0] = r11g11b10_part(v & 0x7ff, 6); c[1] = r11g11b10_part((v >> 11) & 0x7ff, 6); c[2] = r11g11b10_part(v >> 22, 5);
+			return true;
+		}
+		case DXGI_FORMAT_R32_FLOAT: case DXGI_FORMAT_R32_TYPELESS:
+			memcpy(c, p, 4); c[1] = c[2] = c[0];
+			return true;
+		case DXGI_FORMAT_R16_FLOAT: case DXGI_FORMAT_R16_TYPELESS:
+			c[0] = c[1] = c[2] = half_to_float(*reinterpret_cast<const u16*>(p));
+			return true;
+		case DXGI_FORMAT_R16_UNORM:
+			c[0] = c[1] = c[2] = *reinterpret_cast<const u16*>(p) / 65535.f;
+			return true;
+		case DXGI_FORMAT_R8_UNORM: case DXGI_FORMAT_A8_UNORM:
+			c[0] = c[1] = c[2] = p[0] / 255.f;
+			return true;
+		case DXGI_FORMAT_R24G8_TYPELESS: case DXGI_FORMAT_D24_UNORM_S8_UINT:
+			c[0] = c[1] = c[2] = (*reinterpret_cast<const u32*>(p) & 0xffffff) / 16777215.f;
+			return true;
+		default:
+			return false;
+		}
+	}
+
+	static u32 texel_bytes(DXGI_FORMAT f)
+	{
+		switch (f)
+		{
+		case DXGI_FORMAT_R32G32B32A32_FLOAT: return 16;
+		case DXGI_FORMAT_R16G16B16A16_FLOAT: case DXGI_FORMAT_R16G16B16A16_TYPELESS: case DXGI_FORMAT_R16G16B16A16_UNORM: return 8;
+		case DXGI_FORMAT_R16_FLOAT: case DXGI_FORMAT_R16_TYPELESS: case DXGI_FORMAT_R16_UNORM: return 2;
+		case DXGI_FORMAT_R8_UNORM: case DXGI_FORMAT_A8_UNORM: return 1;
+		default: return 4;
+		}
+	}
+
+	static void dump_target(LPCSTR name)
+	{
+		ref_texture tex;
+		tex.create(name);
+		ID3DBaseTexture* surf = tex._get() ? tex->surface_get() : nullptr;
+		if (!surf)
+		{
+			Msg("! dump %s: no surface", name);
+			return;
+		}
+		D3D11_RESOURCE_DIMENSION dim;
+		surf->GetType(&dim);
+		if (dim != D3D11_RESOURCE_DIMENSION_TEXTURE2D)
+		{
+			Msg("! dump %s: not a 2D texture", name);
+			_RELEASE(surf);
+			return;
+		}
+		ID3DTexture2D* t2 = static_cast<ID3DTexture2D*>(surf);
+		D3D11_TEXTURE2D_DESC d;
+		t2->GetDesc(&d);
+		if (d.SampleDesc.Count > 1)
+		{
+			Msg("! dump %s: multisampled, skipped", name);
+			_RELEASE(surf);
+			return;
+		}
+		D3D11_TEXTURE2D_DESC sd = d;
+		sd.MipLevels = 1;
+		sd.ArraySize = 1;
+		sd.Usage = D3D11_USAGE_STAGING;
+		sd.BindFlags = 0;
+		sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+		sd.MiscFlags = 0;
+		ID3DTexture2D* staging = nullptr;
+		if (FAILED(HW.pDevice->CreateTexture2D(&sd, nullptr, &staging)) || !staging)
+		{
+			Msg("! dump %s: staging creation failed (format %d)", name, int(d.Format));
+			_RELEASE(surf);
+			return;
+		}
+		HW.pContext->CopySubresourceRegion(staging, 0, 0, 0, 0, t2, 0, nullptr);
+		_RELEASE(surf);
+		D3D11_MAPPED_SUBRESOURCE m;
+		if (FAILED(HW.pContext->Map(staging, 0, D3D11_MAP_READ, 0, &m)))
+		{
+			Msg("! dump %s: map failed", name);
+			_RELEASE(staging);
+			return;
+		}
+		const u32 w = d.Width, h = d.Height, bpp = texel_bytes(d.Format);
+		xr_vector<float> px(size_t(w) * h * 4);
+		float lo[4] = { FLT_MAX, FLT_MAX, FLT_MAX, FLT_MAX }, hi[4] = { -FLT_MAX, -FLT_MAX, -FLT_MAX, -FLT_MAX };
+		double sum[4] = {};
+		bool ok = true;
+		for (u32 y = 0; y < h && ok; ++y)
+			for (u32 x = 0; x < w; ++x)
+			{
+				float* c = &px[(size_t(y) * w + x) * 4];
+				if (!decode(d.Format, static_cast<const u8*>(m.pData) + size_t(y) * m.RowPitch + size_t(x) * bpp, c))
+				{
+					ok = false;
+					break;
+				}
+				for (int i = 0; i < 4; ++i)
+				{
+					if (!_valid(c[i]))
+						c[i] = 0.f;
+					lo[i] = _min(lo[i], c[i]);
+					hi[i] = _max(hi[i], c[i]);
+					sum[i] += c[i];
+				}
+			}
+		HW.pContext->Unmap(staging, 0);
+		_RELEASE(staging);
+		if (!ok)
+		{
+			Msg("! dump %s: format %d not handled", name, int(d.Format));
+			return;
+		}
+		const double n = double(w) * h;
+		Msg("* dump %s %ux%u format %d: min (%.3f %.3f %.3f %.3f) max (%.3f %.3f %.3f %.3f) mean (%.3f %.3f %.3f %.3f)", name, w, h,
+		    int(d.Format), lo[0], lo[1], lo[2], lo[3], hi[0], hi[1], hi[2], hi[3], sum[0] / n, sum[1] / n, sum[2] / n, sum[3] / n);
+		// Values outside 0..1 are stretched per channel to be visible
+		xr_vector<u32> rgba(size_t(w) * h);
+		for (size_t i = 0; i < rgba.size(); ++i)
+		{
+			u32 v[3];
+			for (int k = 0; k < 3; ++k)
+			{
+				float c = px[i * 4 + k];
+				if (lo[k] < -0.001f || hi[k] > 1.001f)
+					c = hi[k] > lo[k] ? (c - lo[k]) / (hi[k] - lo[k]) : 0.f;
+				v[k] = u32(iFloor(clampr(c, 0.f, 1.f) * 255.f + 0.5f));
+			}
+			rgba[i] = 0xff000000u | (v[0] << 16) | (v[1] << 8) | v[2];
+		}
+		xr_vector<u8> png;
+		encode_png(rgba.data(), w, h, png);
+		string_path file;
+		xr_strcpy(file, "dx12_");
+		xr_strcat(file, name);
+		for (char* c = file; *c; ++c)
+			if (*c == '$' || *c == '\\' || *c == '/' || *c == ':')
+				*c = '_';
+		xr_strcat(file, ".png");
+		write_file("$screenshots$", file, png);
+	}
+}
+
+void dx12_request_rt_dump(LPCSTR args)
+{
+	static const char* all[] = { "$user$position", "$user$albedo", "$user$accum", "$user$generic0", "$user$generic1",
+		"$user$generic", "$user$tonemap", "$user$upscale_output", "$user$smap_depth", "$user$heat", "$user$ssfx_motion_vectors" };
+	string4096 buf;
+	xr_strcpy(buf, args ? args : "");
+	if (!buf[0] || !xr_strcmp(buf, "all"))
+	{
+		for (const char* n : all)
+			dx12_screenshot::s_dump.push_back(n);
+		return;
+	}
+	for (char* tok = strtok(buf, " ,;"); tok; tok = strtok(nullptr, " ,;"))
+		dx12_screenshot::s_dump.push_back(tok);
+}
+
 void dx12_take_pending_screenshots()
 {
+	if (!dx12_screenshot::s_dump.empty())
+	{
+		xr_vector<xr_string> names;
+		names.swap(dx12_screenshot::s_dump);
+		for (const xr_string& n : names)
+			dx12_screenshot::dump_target(n.c_str());
+	}
 	if (dx12_screenshot::s_pending.empty())
 		return;
 	xr_vector<dx12_screenshot::Pending> pending;
