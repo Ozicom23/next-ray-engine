@@ -281,14 +281,6 @@ public:
 	virtual void CalculateBones(BOOL bForceExact = FALSE); // Recalculate skeleton
 	void CalculateBones_Invalidate();
 	virtual void CalculateTracks();
-	virtual void CalculateBonesDeferred();
-	virtual void CalculateBonesCallback();
-
-private:
-	void CalculateBones_impl(BOOL bForceExact, bool defer_callback);
-	bool m_callback_pending = false; // CalculateBonesDeferred skipped the update callback
-
-public:
 
 	void Callback(UpdateCallback C, void* Param)
 	{
