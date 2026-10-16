@@ -202,7 +202,10 @@ struct Device::Impl
 	void SubmitInitLocked(); // under init_lock; queue_lock taken inside
 	u64 SubmitFrame(ID3D12CommandList* list); // the pending initial uploads, then the list, in one submission
 	bool UploadInitial(Resource* res, const D3D12_RESOURCE_DESC& desc, const D3D11_SUBRESOURCE_DATA* init,
-	                   D3D12_RESOURCE_STATES rest_state);
+	                   D3D12_RESOURCE_STATES rest_state, D3D12_RESOURCE_STATES texture_state = D3D12_RESOURCE_STATE_COPY_DEST);
+	// A STAGING (CPU write) texture's data into a texture the renderer has not used yet, through the initial uploads
+	// (the context's calls from loader threads)
+	bool UploadStaging(Resource* dst, Resource* src);
 
 	// State object deduplication (the device keeps one reference of each)
 	std::mutex state_lock;

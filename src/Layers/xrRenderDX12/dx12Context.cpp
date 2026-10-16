@@ -1395,7 +1395,7 @@ struct Context::Front
 			return;
 		}
 		if (GetCurrentThreadId() != caller_thread)
-			DX12_WARN_ONCE("! D3D12: a context call from another thread while recording is threaded");
+			ForeignCall();
 		typedef CmdOf<typename std::decay<F>::type> C;
 		C* cmd = new (Reserve(sizeof(C), alignof(C), 0)) C(std::forward<F>(fn));
 		if (open->last)
@@ -1417,6 +1417,22 @@ struct Context::Front
 			return reinterpret_cast<T*>(scratch.data());
 		}
 		return static_cast<T*>(Reserve(bytes, 16, 1024));
+	}
+
+	// A call from a thread other than the render thread races with it: the first ones go to the log with their stack
+	// (offsets in the exe, for the PDB)
+	static void ForeignCall()
+	{
+		static std::atomic<int> logged{ 0 };
+		if (logged++ >= 24)
+			return;
+		void* frames[12];
+		const USHORT n = CaptureStackBackTrace(2, 12, frames, nullptr);
+		const u64 base = u64(GetModuleHandle(nullptr));
+		std::string out = make_string("! D3D12: a context call from thread %u while recording is threaded:", GetCurrentThreadId());
+		for (USHORT i = 0; i < n; ++i)
+			out += make_string(" +0x%llx", u64(frames[i]) - base);
+		Msg("%s", out.c_str());
 	}
 
 	u64 Tag() const { return threaded ? open_id.load() : 0; } // the chunk the next command goes into
@@ -1762,6 +1778,7 @@ Context::Context(Device* device)
 	f.device = device;
 	f.dev = c.dev;
 	f.d3d = d3d;
+	f.caller_thread = GetCurrentThreadId();
 	f.upload.Init(device->m_allocator);
 }
 
@@ -2544,6 +2561,10 @@ void Context::CopyResource(Resource* dst, Resource* src)
 
 	if (!src->m_cpu_data.empty())
 	{
+		// From a loader thread (parallel texture loads): the texture is new to the renderer, its data goes with the
+		// initial uploads, ahead of the next submission
+		if (GetCurrentThreadId() != f.caller_thread && f.dev->UploadStaging(dst, src))
+			return;
 		// STAGING (CPU write) texture into a GPU texture: through upload memory, subresource by subresource (each
 		// copy queued before the next is staged: a recycling of upload memory in between finds it submitted)
 		const UINT count = _min(UINT(src->m_layouts.size()), dst->m_subresources);

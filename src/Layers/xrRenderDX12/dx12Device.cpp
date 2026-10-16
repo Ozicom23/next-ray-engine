@@ -625,7 +625,7 @@ u64 Device::Impl::SubmitFrame(ID3D12CommandList* list)
 }
 
 bool Device::Impl::UploadInitial(Resource* res, const D3D12_RESOURCE_DESC& desc, const D3D11_SUBRESOURCE_DATA* init,
-                                 D3D12_RESOURCE_STATES rest_state)
+                                 D3D12_RESOURCE_STATES rest_state, D3D12_RESOURCE_STATES texture_state)
 {
 	ID3D12Device* device = g_device->m_device;
 	const bool buffer = desc.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER;
@@ -696,6 +696,17 @@ bool Device::Impl::UploadInitial(Resource* res, const D3D12_RESOURCE_DESC& desc,
 		list->CopyBufferRegion(res->m_resource, 0, upload, 0, desc.Width);
 	}
 	else
+	{
+		if (texture_state != D3D12_RESOURCE_STATE_COPY_DEST)
+		{
+			D3D12_RESOURCE_BARRIER b = {};
+			b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+			b.Transition.pResource = res->m_resource;
+			b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+			b.Transition.StateBefore = texture_state;
+			b.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+			list->ResourceBarrier(1, &b);
+		}
 		for (UINT s = 0; s < count; ++s)
 		{
 			D3D12_TEXTURE_COPY_LOCATION d = {};
@@ -708,6 +719,7 @@ bool Device::Impl::UploadInitial(Resource* res, const D3D12_RESOURCE_DESC& desc,
 			src.PlacedFootprint = footprints[s];
 			list->CopyTextureRegion(&d, 0, 0, 0, &src, nullptr);
 		}
+	}
 	D3D12_RESOURCE_BARRIER b = {};
 	b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 	b.Transition.pResource = res->m_resource;
@@ -729,6 +741,24 @@ bool Device::Impl::UploadInitial(Resource* res, const D3D12_RESOURCE_DESC& desc,
 	if (init_bytes > (256ull << 20))
 		SubmitInitLocked();
 	return true;
+}
+
+bool Device::Impl::UploadStaging(Resource* dst, Resource* src)
+{
+	if (!dst->m_resource || dst->IsBuffer() || !dst->m_states.empty() || src->m_layouts.empty())
+		return false;
+	const D3D12_RESOURCE_DESC desc = dst->m_resource->GetDesc();
+	const UINT count = UINT(desc.MipLevels) * (desc.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D ? 1 : desc.DepthOrArraySize);
+	std::vector<D3D11_SUBRESOURCE_DATA> init(count);
+	for (UINT s = 0; s < count && s < src->m_layouts.size(); ++s)
+	{
+		const SubresourceLayout& l = src->m_layouts[s];
+		init[s].pSysMem = src->m_cpu_data.data() + l.offset;
+		init[s].SysMemPitch = l.row_pitch;
+		init[s].SysMemSlicePitch = l.depth_pitch;
+	}
+	const D3D12_RESOURCE_STATES state = dst->m_state;
+	return UploadInitial(dst, desc, init.data(), state == D3D12_RESOURCE_STATE_COMMON ? ShaderReadState() : state, state);
 }
 
 //===================================================================================================================
