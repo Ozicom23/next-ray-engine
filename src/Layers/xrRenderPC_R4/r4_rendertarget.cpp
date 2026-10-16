@@ -533,6 +533,8 @@ CRenderTarget::CRenderTarget()
 	{
 		u32 w = Device.dwRenderWidth, h = Device.dwRenderHeight;
 		rt_Position.create(r2_RT_P, w, h, D3DFMT_A16B16G16R16F, SampleCount);
+		if (RImplementation.o.nextray_depth)
+			rt_nextray_depth.create(r2_RT_nextray_depth, w, h, D3DFMT_R16F);
 
 		if (RImplementation.o.dx10_msaa)
 		{
@@ -1372,6 +1374,7 @@ CRenderTarget::CRenderTarget()
 }
 
 void upscale_mask_release();
+void nextray_depth_release();
 
 int ps_r4_post_pingpong = 1;
 
@@ -1464,6 +1467,7 @@ CRenderTarget::~CRenderTarget()
 {
 	upscale_end_scene();
 	upscale_mask_release();
+	nextray_depth_release();
 	if (m_upscaler)
 		m_upscaler->ReleaseFeature();
 	g_svp_keep_main_prev = false;

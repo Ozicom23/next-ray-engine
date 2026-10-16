@@ -501,6 +501,8 @@ void CRender::create()
 	o.ssfx_motionblur = FS.exist(fn, "$game_shaders$", "r3\\ssfx_motion_blur", ".ps") ? 1 : 0;
 	o.ssfx_motionvectors = FS.exist(fn, "$game_shaders$", "r3\\screenspace_mvectors", ".h") ? 1 : 0;
 	o.ssfx_glass = FS.exist(fn, "$game_shaders$", "r3\\ssfx_glass", ".ps") ? 1 : 0; 
+	o.nextray_depth_mod = FS.exist(fn, "$game_shaders$", "r3\\nextray_depth", ".h") ? 1 : 0;
+	nextray_depth_latch();
 
 	Msg("- Supports SSS UPDATE 23");
 	Msg("- SSS CORE INSTALLED %i", o.ssfx_core);
@@ -588,8 +590,19 @@ void CRender::destroy()
 	Device.ModelDefferClear = nullptr;
 }
 
+// r4_shader_patches 0x400: the G-buffer's view depth (rt_Position.z, a 16 bit float) copied into a target of its own
+// (rt_nextray_depth, 16 bit float) once the G-buffer is complete; the patch mod's screen-space ray marches (SSR, SSS
+// shadows) take their depth taps there: the same values at a quarter of the bytes per tap. Decided when the shaders
+// are created (start, vid_restart), so the copy and the shaders that read it never disagree
+extern int ps_r4_shader_patches; // below, with the shader warm-up
+void CRender::nextray_depth_latch()
+{
+	o.nextray_depth = o.nextray_depth_mod && (ps_r4_shader_patches & 0x400) && !o.dx10_msaa ? 1 : 0;
+}
+
 void CRender::reset_begin()
 {
+	nextray_depth_latch();
 	//AVO: let's reload details while changed details options on vid_restart
 	if (b_loaded && ((dm_current_size != dm_size) || (ps_r__Detail_density != ps_current_detail_density) || (
 		ps_r__Detail_height != ps_current_detail_height)))
@@ -2151,6 +2164,15 @@ HRESULT CRender::shader_compile(
 	}
 	sh_name[len] = '0' + char(!o.dx11_hdr10);
 	++len;
+
+	// NEXTRAY_DEPTH: rt_nextray_depth holds the G-buffer's depth (r4_shader_patches 0x400, CRender::nextray_depth_latch);
+	// the patch bits are in the variant name already
+	if (o.nextray_depth)
+	{
+		defines[def_it].Name = "NEXTRAY_DEPTH";
+		defines[def_it].Definition = "1";
+		def_it++;
+	}
 
 	// NEXTRAY_PATCHES: the bits of r4_shader_patches, three hex digits in the variant name
 	char c_nextray_patches[8];

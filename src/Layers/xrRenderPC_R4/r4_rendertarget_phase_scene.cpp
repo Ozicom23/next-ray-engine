@@ -115,3 +115,130 @@ void CRenderTarget::phase_scene_end()
 	RCache.set_Geometry(g_combine);
 	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
 }
+
+// r4_shader_patches 0x400 (CRender::nextray_depth_latch): the G-buffer's view depth copied into rt_nextray_depth once
+// the G-buffer is complete (after wall marks and rain), for the patch mod's screen-space ray marches. rt_Position.z is
+// a 16 bit float and so is the copy: the same values. Raw D3D11 like the sun cache's window copy, with the backend's
+// state dropped before and after (it binds its targets and state anew); viewport and scissor rects are kept
+namespace nextray_depth
+{
+	ID3D11VertexShader* s_vs = nullptr;
+	ID3D11PixelShader* s_ps = nullptr;
+	ID3D11RasterizerState* s_rs = nullptr;
+	ID3D11DepthStencilState* s_ds = nullptr;
+	ID3D11ShaderResourceView* s_srv = nullptr;
+	ID3D11Resource* s_srv_res = nullptr; // s_srv is of this
+	bool s_failed = false;
+
+	const char* kShader =
+		"Texture2D<float4> s_pos : register(t0);\n"
+		"float4 vs(uint id : SV_VertexID) : SV_Position\n"
+		"{\n"
+		"	float2 uv = float2((id << 1) & 2, id & 2);\n"
+		"	return float4(uv * float2(2, -2) + float2(-1, 1), 0, 1);\n"
+		"}\n"
+		"float ps(float4 pos : SV_Position) : SV_Target\n"
+		"{\n"
+		"	return s_pos.Load(int3(pos.xy, 0)).z;\n"
+		"}\n";
+
+	void release()
+	{
+		_RELEASE(s_vs);
+		_RELEASE(s_ps);
+		_RELEASE(s_rs);
+		_RELEASE(s_ds);
+		_RELEASE(s_srv);
+		s_srv_res = nullptr;
+		s_failed = false;
+	}
+
+	bool create(ID3D11Resource* pos)
+	{
+		if (s_failed)
+			return false;
+		HRESULT hr = S_OK;
+		if (!s_ps)
+		{
+			ID3DBlob* vs = nullptr;
+			ID3DBlob* ps = nullptr;
+			ID3DBlob* err = nullptr;
+			hr = D3DCompile(kShader, xr_strlen(kShader), "nextray_depth", nullptr, nullptr, "vs", "vs_5_0", 0, 0, &vs, &err);
+			if (SUCCEEDED(hr))
+				hr = D3DCompile(kShader, xr_strlen(kShader), "nextray_depth", nullptr, nullptr, "ps", "ps_5_0", 0, 0, &ps, &err);
+			if (SUCCEEDED(hr))
+				hr = HW.pDevice->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, &s_vs);
+			if (SUCCEEDED(hr))
+				hr = HW.pDevice->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, &s_ps);
+			if (SUCCEEDED(hr))
+			{
+				D3D11_RASTERIZER_DESC rd = {};
+				rd.FillMode = D3D11_FILL_SOLID;
+				rd.CullMode = D3D11_CULL_NONE;
+				rd.DepthClipEnable = TRUE;
+				hr = HW.pDevice->CreateRasterizerState(&rd, &s_rs);
+			}
+			if (SUCCEEDED(hr))
+			{
+				D3D11_DEPTH_STENCIL_DESC dd = {}; // no depth, no stencil
+				hr = HW.pDevice->CreateDepthStencilState(&dd, &s_ds);
+			}
+			if (FAILED(hr))
+				Msg("! nextray depth copy: shader setup failed: %s", err ? (const char*)err->GetBufferPointer() : "");
+			_RELEASE(vs);
+			_RELEASE(ps);
+			_RELEASE(err);
+		}
+		if (SUCCEEDED(hr) && s_srv_res != pos)
+		{
+			_RELEASE(s_srv);
+			s_srv_res = nullptr;
+			hr = HW.pDevice->CreateShaderResourceView(pos, nullptr, &s_srv);
+			if (SUCCEEDED(hr))
+				s_srv_res = pos;
+		}
+		if (FAILED(hr))
+		{
+			Msg("! nextray depth copy: setup failed (0x%08x)", hr);
+			s_failed = true;
+		}
+		return !s_failed;
+	}
+}
+
+void nextray_depth_release() { nextray_depth::release(); }
+
+void CRenderTarget::phase_nextray_depth()
+{
+	if (!RImplementation.o.nextray_depth || !rt_nextray_depth._get() || !nextray_depth::create(rt_Position->pSurface))
+		return;
+	PIX_EVENT(NEXTRAY_DEPTH_COPY);
+
+	ID3D11DeviceContext* ctx = HW.pContext;
+	D3D11_VIEWPORT vp_saved[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
+	UINT vp_count = D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
+	ctx->RSGetViewports(&vp_count, vp_saved);
+	D3D11_RECT sc_saved[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
+	UINT sc_count = D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
+	ctx->RSGetScissorRects(&sc_count, sc_saved);
+
+	RCache.OnFrameEnd(); // nothing of the backend's stays bound (rt_Position as a target)
+	ID3D11RenderTargetView* rtv = rt_nextray_depth->pRT;
+	ctx->OMSetRenderTargets(1, &rtv, nullptr);
+	D3D11_VIEWPORT vp = { 0.f, 0.f, float(rt_nextray_depth->dwWidth), float(rt_nextray_depth->dwHeight), 0.f, 1.f };
+	ctx->RSSetViewports(1, &vp);
+	ctx->IASetInputLayout(nullptr);
+	ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	ctx->VSSetShader(nextray_depth::s_vs, nullptr, 0);
+	ctx->PSSetShader(nextray_depth::s_ps, nullptr, 0);
+	ctx->PSSetShaderResources(0, 1, &nextray_depth::s_srv);
+	ctx->RSSetState(nextray_depth::s_rs);
+	ctx->OMSetDepthStencilState(nextray_depth::s_ds, 0);
+	ctx->Draw(3, 0);
+	RCache.OnFrameEnd(); // the backend sets its targets and state anew
+
+	if (vp_count)
+		ctx->RSSetViewports(vp_count, vp_saved);
+	if (sc_count)
+		ctx->RSSetScissorRects(sc_count, sc_saved);
+}

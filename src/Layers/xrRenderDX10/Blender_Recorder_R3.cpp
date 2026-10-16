@@ -58,6 +58,13 @@ void CBlender_Compile::r_dx10Texture(LPCSTR ResourceName, LPCSTR texture)
 	u32 stage = C->samp.index;
 
 	passTextures.push_back(mk_pair(stage, ref_texture(DEV->_CreateTexture(TexName))));
+
+#ifdef USE_DX11
+	// The G-buffer's depth copy goes wherever the G-buffer's position does (r4_shader_patches 0x400): the patch mod's
+	// ray marches read it as s_nextray_depth. Shaders without it have no such resource and bind nothing
+	if (RImplementation.o.nextray_depth && !xr_strcmp(ResourceName, "s_position") && !xr_strcmp(texture, r2_RT_P))
+		r_dx10Texture("s_nextray_depth", r2_RT_nextray_depth);
+#endif
 }
 
 void CBlender_Compile::i_dx10Address(u32 s, u32 address)

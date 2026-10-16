@@ -59,6 +59,8 @@ public:
 		u32 ssfx_taa : 1;
 		u32 ssfx_motionvectors : 1;
 		u32 ssfx_glass : 1;
+		u32 nextray_depth_mod : 1; // the patch mod's shaders can read the depth copy (r3\nextray_depth.h)
+		u32 nextray_depth : 1; // depth copy in use (r4_shader_patches 0x400), latched when the shaders are (re)created
 
 		u32 bug : 1;
 
@@ -321,6 +323,7 @@ public:
 	virtual void create();
 	virtual void destroy();
 	virtual void reset_begin();
+	void nextray_depth_latch();
 	virtual void reset_end();
 
 	virtual void level_Load(IReader*);
