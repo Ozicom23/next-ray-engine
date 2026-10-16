@@ -24,6 +24,7 @@
 #if (NEXTRAY_PATCHES & 0x200)
 // neXt-Ray: the upscaler's jitter (zero without an upscaler), so this matches the frame FSR/DLSS resolve
 uniform float4 nextray_upscale_jitter;
+uniform float4 nextray_upscale_jitter_prev; // xy: the frame before's jitter in pixels (its scene is s_prev_frame)
 
 #endif
 #define REFLECTIONS_FACTOR 0.3
@@ -796,9 +797,10 @@ if (RETICLE_TYPE == RT_DFP_ALT)
 #if !(NEXTRAY_PATCHES & 0x200)
 	float2 screen_tc = I.hpos.xy * screen_res.zw;
 #else
-	// neXt-Ray: the back image is this frame's scene, rendered with the upscaler's jitter j. Unjittered, lens pixel q shows
-	// the scene at S(q) (the magnification below); this lens pixel is q + j, so it takes S(p - j), and that content sits
-	// at S(p - j) + j in the jittered scene. Without it the magnified jitter (j * zoom) was left after FSR removed j
+	// neXt-Ray: the back image is the frame before's scene (rt_Generic_temp, copied after its combine), rendered with its
+	// jitter j_prev; this frame has jitter j. Unjittered, lens pixel q shows the scene at S(q) (the magnification below);
+	// this lens pixel is q + j, so it takes S(p - j), which the frame before's scene holds at S(p - j) + j_prev. Without
+	// it the image jumped with the magnified difference of the two jitters after FSR removed j
 	float2 screen_tc = (I.hpos.xy - nextray_upscale_jitter.zw) * screen_res.zw;
 #endif
 	float zoom = lerp(1, IMAGE_SIZE, m_hud_params.x);
@@ -816,7 +818,7 @@ if (RETICLE_TYPE == RT_DFP_ALT)
 	}
 #if (NEXTRAY_PATCHES & 0x200)
 
-	scope_tc += nextray_upscale_jitter.zw * screen_res.zw; // neXt-Ray: + j, where the jittered scene holds it
+	scope_tc += nextray_upscale_jitter_prev.xy * screen_res.zw; // neXt-Ray: + j_prev, where the frame before's scene holds it
 #endif
 
 	float3 back;

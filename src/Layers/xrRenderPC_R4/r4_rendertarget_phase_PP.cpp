@@ -422,6 +422,11 @@ void CRenderTarget::upscale_begin_scene()
 
 void CRenderTarget::upscale_end_scene()
 {
+	// This frame's scene (copied to rt_Generic_temp in phase_combine) carries this jitter; the next frame reads it there
+	if (m_upscale_done)
+		RImplementation.upscale_jitter_prev_px.set(m_upscale_jitter);
+	else
+		RImplementation.upscale_jitter_prev_px.set(0.f, 0.f);
 	RImplementation.upscale_jitter_on = false;
 	RImplementation.upscale_scene_active = false;
 	if (!m_upscale_in_scene)
