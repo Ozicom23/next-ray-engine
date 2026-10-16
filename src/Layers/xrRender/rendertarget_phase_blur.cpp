@@ -222,6 +222,7 @@ void CRenderTarget::phase_ssfx_ssr()
 
 	// Draw COLOR
 	RCache.set_Element(s_ssfx_ssr->E[5]);
+	RCache.set_c("ssr_setup", ps_ssfx_ssr); // the patch mod's gloss pass (r4_shader_patches 0x800) checks the SSR resolution
 	RCache.set_Geometry(g_combine);
 	{ PIX_EVENT(ssr_gloss); RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2); }
 	///////////////////////////////////////////////////////////////////////////
