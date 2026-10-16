@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "r4_rendertarget.h"
 #include "r4_upscaler.h"
+#include "../../xrEngine/igame_persistent.h" // hud_params (r4_upscaler_jitter 2)
 extern int ps_r4_upscaler_jitter; // below, with upscale_end_scene
 
 // The upscaler's mask (r4_upscaler_mask): where it should trust the current frame over its history. 3D scope lenses
@@ -410,8 +411,11 @@ void CRenderTarget::upscale_begin_scene()
 	{
 		float jx, jy;
 		CUpscaler::GetJitter(m_upscale_jitter_index, m_upscale_jitter_phases, jx, jy);
-		// r4_upscaler_jitter: 1 on, 0 off, 2 off while a 3D scope's second viewport is active
-		if (ps_r4_upscaler_jitter == 0 || (ps_r4_upscaler_jitter == 2 && Device.m_SecondViewport.IsSVPActive()))
+		// r4_upscaler_jitter: 1 on, 0 off, 2 off while aiming down sights (the weapon's aim-in factor, hud_params.x,
+		// past the 0.05 the second viewport switches at). 3DSS lenses magnify the frame (GAMMA's zooming scopes don't
+		// use the second viewport), so the jitter jumped through them by the magnification
+		const bool aiming = g_pGamePersistent && g_pGamePersistent->m_pGShaderConstants->hud_params.x > 0.05f;
+		if (ps_r4_upscaler_jitter == 0 || (ps_r4_upscaler_jitter == 2 && aiming))
 			jx = jy = 0.f;
 		m_upscale_jitter.set(jx, jy);
 		// Pixel offset to clip space, pixel Y goes down
@@ -424,7 +428,7 @@ void CRenderTarget::upscale_begin_scene()
 	RImplementation.rmNormal();
 }
 
-int ps_r4_upscaler_jitter = 1;
+int ps_r4_upscaler_jitter = 2;
 // stat_upscale_frames <n>: the next n frames' second viewport and upscaler state to the log
 int g_upscale_frames_log = 0;
 
