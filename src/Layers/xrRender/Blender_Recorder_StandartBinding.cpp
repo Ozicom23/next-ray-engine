@@ -1233,6 +1233,21 @@ static class nextray_upscale_jitter_prev : public R_constant_setup
 	}
 }    nextray_upscale_jitter_prev;
 
+// nextray_lens_res: while the 3DSS lenses draw after the upscaler, their pixel grid (output w, h, 1/w, 1/h); 0 otherwise.
+// screen_res stays at render resolution there (the lenses' reads of render resolution buffers), so the lens shader
+// takes its screen position from this. Set at every bind, it changes within a render
+static class nextray_lens_res : public R_constant_setup
+{
+	virtual void setup(R_constant* C)
+	{
+#if defined(USE_DX11)
+		RCache.set_c(C, RImplementation.upscale_lens_res);
+#else
+		RCache.set_c(C, 0.f, 0.f, 0.f, 0.f);
+#endif
+	}
+}    nextray_lens_res;
+
 static class ssfx_fTimeDelta : public R_constant_setup
 {
 	virtual void setup(R_constant* C)
@@ -1513,6 +1528,7 @@ void CBlender_Compile::SetMapping()
 	r_Constant_per_frame("ssfx_jitter", &ssfx_jitter);
 	r_Constant_per_frame("nextray_upscale_jitter", &nextray_upscale_jitter);
 	r_Constant_per_frame("nextray_upscale_jitter_prev", &nextray_upscale_jitter_prev);
+	r_Constant("nextray_lens_res", &nextray_lens_res);
 	r_Constant_per_frame("ssfx_pom", &ssfx_pom);
 
 	r_Constant_per_frame("ssfx_terrain_pom", &ssfx_terrain_pom);

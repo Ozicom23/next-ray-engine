@@ -529,7 +529,12 @@ void CRenderTarget::phase_combine()
 		{ PIX_EVENT(phase_ssfx_motion_blur); phase_ssfx_motion_blur(); }
 	}
 
-	if (scope_3D_fake_enabled)
+	// With an upscaler the 3DSS lenses draw after it, at output resolution, magnifying the upscaled image
+	// (r4_upscaler_scope_late, phase_upscale): before it they magnified the render resolution scene, pixelated
+	extern int ps_r4_upscaler_scope_late;
+	m_lens_after_upscale = scope_3D_fake_enabled && m_upscale_in_scene && !Device.m_SecondViewport.IsSVPFrame() &&
+		ps_r4_upscaler_scope_late && rt_upscale_lens_src._get() && rt_upscale_lens_depth._get();
+	if (scope_3D_fake_enabled && !m_lens_after_upscale)
 	{
 		phase_3DSSReticle(); // Redotix99: for 3D Shader Based Scopes
 	}
