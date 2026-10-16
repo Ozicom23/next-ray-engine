@@ -157,6 +157,7 @@ extern int KEYBOARDBUFFERSIZE;
 extern BOOL print_bone_warnings;
 extern BOOL print_dltx_warnings;
 extern BOOL dltx_use_cache;
+extern XRCORE_API int g_ini_index; // Xr_ini.cpp
 extern BOOL poltergeist_spawn_corpse_on_death;
 extern BOOL useNewZoomDeltaAlgorithm;
 extern BOOL g_aimmode_remember;
@@ -2675,6 +2676,8 @@ void CCC_RegisterCommands()
 	// Frames rendered behind the loading screen after a level load, the camera turning around once (textures and
 	// shaders of the surroundings get loaded). Not saved while measuring
 	CMD4(CCC_IntegerNotSaved, "precache_frames", &g_precache_frames, 2, 120);
+	// Ini section lookups by a hash index (1) or the binary search (0); 2 both, counting differences (stat_script_load)
+	CMD4(CCC_IntegerNotSaved, "ini_index", &g_ini_index, 0, 2);
 
     // Moved lua_gcstep outside of DEBUG to allow for easier experimentation.
 	CMD4(CCC_Integer, "lua_gcstep", &psLUA_GCSTEP, 1, 1000);

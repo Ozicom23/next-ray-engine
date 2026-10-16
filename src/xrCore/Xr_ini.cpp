@@ -9,6 +9,7 @@
 #include <unordered_set>
 #include <vector>
 #include <algorithm>
+#include <atomic>
 #include <sstream>
 #include "mezz_stringbuffer.h"
 
@@ -144,6 +145,93 @@ void CInifile::InsertIntoDATA(xr_unordered_flat_map<shared_str, Items>& FinalDat
 	{
 		return xr_strcmp(a.Name, b.Name) < 0;
 	});
+	BuildSectIndex();
+}
+
+// ini_index: 0 binary search only, 1 hash index (default), 2 both, counting where they disagree (stat_script_load)
+XRCORE_API int g_ini_index = 1;
+static std::atomic<u32> s_ini_index_checked{ 0 }, s_ini_index_mismatch{ 0 };
+
+static IC u32 sect_hash(LPCSTR s)
+{
+	u32 h = 2166136261u; // FNV-1a
+	for (; *s; ++s)
+		h = (h ^ u8(*s)) * 16777619u;
+	return h;
+}
+
+void CInifile::BuildSectIndex()
+{
+	SectIndex& X = m_sect_index;
+	X.slots.clear();
+	X.mask = 0;
+	X.data = nullptr;
+	X.size = 0;
+	// Small files: the binary search is quick enough, no memory for an index
+	if (DATA.size() < 32)
+	{
+		X.slots.shrink_to_fit();
+		return;
+	}
+	for (const Sect& sect : DATA)
+		if (!sect.Name.c_str())
+			return;
+	u32 cap = 64;
+	while (cap < DATA.size() * 2)
+		cap <<= 1;
+	X.slots.assign(cap, 0);
+	X.mask = cap - 1;
+	for (size_t p = 0; p < DATA.size(); p++)
+	{
+		LPCSTR name = *DATA[p].Name;
+		const u32 h = sect_hash(name);
+		u32 i = h & X.mask;
+		bool known = false;
+		for (; X.slots[i]; i = (i + 1) & X.mask)
+		{
+			const u64 v = X.slots[i];
+			// The same name twice: the binary search finds the first one
+			if (u32(v >> 32) == h && xr_strcmp(*DATA[u32(v) - 1].Name, name) == 0)
+			{
+				known = true;
+				break;
+			}
+		}
+		if (!known)
+			X.slots[i] = (u64(h) << 32) | u64(p + 1);
+	}
+	X.data = DATA.data();
+	X.size = DATA.size();
+}
+
+CInifile::RootCIt CInifile::FindSect(LPCSTR S) const
+{
+	const SectIndex& X = m_sect_index;
+	if (g_ini_index && S && X.mask && X.data == DATA.data() && X.size == DATA.size())
+	{
+		const u32 h = sect_hash(S);
+		RootCIt found = DATA.end();
+		for (u32 i = h & X.mask; X.slots[i]; i = (i + 1) & X.mask)
+		{
+			const u64 v = X.slots[i];
+			if (u32(v >> 32) == h && xr_strcmp(*DATA[u32(v) - 1].Name, S) == 0)
+			{
+				found = DATA.begin() + (u32(v) - 1);
+				break;
+			}
+		}
+		if (g_ini_index != 2)
+			return found;
+		RootCIt I = std::lower_bound(DATA.begin(), DATA.end(), S, sect_pred);
+		if (!(I != DATA.end() && xr_strcmp(*(*I).Name, S) == 0))
+			I = DATA.end();
+		s_ini_index_checked++;
+		if (I != found)
+			s_ini_index_mismatch++;
+		return I;
+	}
+	RootCIt I = std::lower_bound(DATA.begin(), DATA.end(), S, sect_pred);
+	return (I != DATA.end() && xr_strcmp(*(*I).Name, S) == 0) ? I : DATA.end();
 }
 
 CInifile::CInifile(IReader* F, LPCSTR path
@@ -199,6 +287,13 @@ XRCORE_API void ini_load_stats_dump()
 	std::sort(list.begin(), list.end(), [](const auto& a, const auto& b) { return a.second.ticks > b.second.ticks; });
 	const double ms = 1000.0 / double(CPU::qpc_freq);
 	Msg("* [Ini load] %u loads of %u files: %.0f ms", loads, u32(list.size()), double(total) * ms);
+	if (s_ini_index_checked)
+	{
+		Msg("* [Ini index] %u section lookups checked against the binary search, %u different", u32(s_ini_index_checked),
+			u32(s_ini_index_mismatch));
+		s_ini_index_checked = 0;
+		s_ini_index_mismatch = 0;
+	}
 	for (size_t i = 0; i < list.size() && i < 15; i++)
 		Msg("*   %-70s %7.1f ms, %u loads, %u from cache", list[i].first.c_str(), double(list[i].second.ticks) * ms,
 			list[i].second.loads, list[i].second.cached);
@@ -250,6 +345,7 @@ CInifile::CInifile(LPCSTR szFileName,
 				if (print_dltx_warnings)
 					Msg("[DLTX] [%s] Found data in cache", m_file_name);
                 DATA = CachedDataIt->second;
+				BuildSectIndex();
 				timing.cached = true;
 				return;
 			}
@@ -1613,8 +1709,7 @@ bool CInifile::save_as(LPCSTR new_fname)
 
 BOOL CInifile::section_exist(LPCSTR S) const
 {
-	RootCIt I = std::lower_bound(DATA.begin(), DATA.end(), S, sect_pred);
-	return (I != DATA.end() && xr_strcmp(*(*I).Name, S) == 0);
+	return FindSect(S) != DATA.end();
 }
 
 BOOL CInifile::line_exist(LPCSTR S, LPCSTR L) const
@@ -1659,8 +1754,8 @@ CInifile::Sect& CInifile::r_section(LPCSTR S) const
 	char section[256];
 	xr_strcpy(section, sizeof(section), S);
 	strlwr(section);
-	RootCIt I = std::lower_bound(DATA.begin(), DATA.end(), section, sect_pred);
-	if (!(I != DATA.end() && xr_strcmp(*(*I).Name, section) == 0))
+	RootCIt I = FindSect(section);
+	if (I == DATA.end())
 	{
 		Debug.fatal(DEBUG_INFO, "Can't open section '%s'. Please attach [*.ini_log] file to your bug report", S);
 	}
@@ -1893,6 +1988,11 @@ void CInifile::w_string(LPCSTR S, LPCSTR L, LPCSTR V, LPCSTR comment)
 		// create _new_ section
 		RootIt I = std::lower_bound(DATA.begin(), DATA.end(), sect, sect_pred);
 		DATA.insert(I, Sect{ sect });
+		// Positions moved: the binary search answers for this file from now on
+		m_sect_index.slots.clear();
+		m_sect_index.slots.shrink_to_fit();
+		m_sect_index.mask = 0;
+		m_sect_index.data = nullptr;
 	}
 
 	// parse line/value

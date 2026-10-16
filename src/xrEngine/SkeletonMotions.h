@@ -219,6 +219,8 @@ struct ENGINE_API motions_value
 {
 	accel_map m_motion_map; // motion associations
 	accel_map m_cycle; // motion data itself (shared)
+	// m_cycle by its names' shared string (one per text): the same answers as m_cycle.find, no string compares
+	xr_unordered_flat_map<const void*, u16> m_cycle_index;
 	accel_map m_fx; // motion data itself (shared)
 	CPartition m_partition; // partition
 	u32 m_dwReference;
@@ -314,6 +316,12 @@ public:
 	{
 		VERIFY(p_);
 		return &p_->m_cycle;
+	}
+
+	const xr_unordered_flat_map<const void*, u16>* cycle_index()
+	{
+		VERIFY(p_);
+		return &p_->m_cycle_index;
 	}
 
 	accel_map* fx()

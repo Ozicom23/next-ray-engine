@@ -92,6 +92,19 @@ public:
 private:
 	string_path m_file_name;
 	Root DATA;
+	// Hash index of DATA by section name (ini_index): the same answers as the binary search over the sorted names,
+	// without its string compares (system.ltx has tens of thousands of sections, mods look them up by the million
+	// while scripts load). Positions in DATA; valid while DATA's buffer and size are the ones it was built for
+	// (built after every change made here), otherwise the binary search answers
+	struct SectIndex
+	{
+		xr_vector<u64> slots; // hash << 32 | position + 1, 0 = empty
+		u32 mask = 0;
+		const Sect* data = nullptr;
+		size_t size = 0;
+	} m_sect_index;
+	void BuildSectIndex();
+	RootCIt FindSect(LPCSTR S) const;
 	void Load(IReader* F, LPCSTR path
 #ifndef _EDITOR
 	          , allow_include_func_t allow_include_func = NULL
