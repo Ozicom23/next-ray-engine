@@ -12,7 +12,7 @@ namespace light_smap_keep
 {
 	int ps_keep = 1;
 	int ps_keep_trees = 20; // r4_light_smap_keep_trees: meters from the camera beyond which a lamp with trees is kept, 0 never
-	int ps_keep_dynamic = 0; // r4_light_smap_keep_dynamic: dynamic casters that are where and as they were drawn are kept too
+	int ps_keep_dynamic = 1; // r4_light_smap_keep_dynamic: dynamic casters that are where and as they were drawn are kept too
 	float ps_keep_trees_refresh = 1.f; // r4_light_smap_keep_trees_refresh: seconds between redraws of such a map, 0 never
 
 	struct entry
@@ -177,12 +177,34 @@ namespace light_smap_keep
 				}
 			}
 		}
+		// A skeleton's bones hashed once per frame, whatever the number of lamps it is in
+		struct bones_hash
+		{
+			CKinematics* K;
+			u32 frame;
+			u64 h;
+		};
+		static xr_vector<bones_hash> cache;
+		static u32 cache_frame = 0;
+		if (cache_frame != Device.dwFrame)
+		{
+			cache_frame = Device.dwFrame;
+			cache.clear();
+		}
 		for (CKinematics* K : skeletons)
 		{
-			u64 h = 1469598103934665603ull;
-			h = hash_bytes(&K, sizeof(K), h);
-			for (u16 b = 0; b < K->LL_BoneCount(); ++b)
-				h = hash_bytes(&K->LL_GetTransform_R(b), sizeof(Fmatrix), h);
+			u64 h = 0;
+			auto found = std::find_if(cache.begin(), cache.end(), [K](const bones_hash& c) { return c.K == K; });
+			if (found != cache.end())
+				h = found->h;
+			else
+			{
+				h = 1469598103934665603ull;
+				h = hash_bytes(&K, sizeof(K), h);
+				for (u16 b = 0; b < K->LL_BoneCount(); ++b)
+					h = hash_bytes(&K->LL_GetTransform_R(b), sizeof(Fmatrix), h);
+				cache.push_back({ K, cache_frame, h });
+			}
 			sum += h;
 		}
 		return count ? (sum ^ (count << 56)) | 1 : 0;
