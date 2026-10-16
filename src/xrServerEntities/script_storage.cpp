@@ -817,8 +817,84 @@ bool CScriptStorage::parse_namespace(LPCSTR caNamespaceName, LPSTR b, u32 const 
 	return (true);
 }
 
+// script_chunk_cache: the compiled main chunks of the script files, by file, for this run of the game. A level load
+// runs every script file again from its source: the same text each time, compiled again (~0.3 s of every level load on
+// the Steam Deck). A chunk whose source text is the same (length and two hashes of the whole text, after unlocalizing
+// and the namespace header) loads from its bytecode, dumped with its debug info: the same function, source name and
+// line numbers. Only what compiled without an error is kept
+int g_script_chunk_cache = 1;
+namespace script_chunk_cache
+{
+	struct entry
+	{
+		size_t size = 0;
+		u64 h1 = 0, h2 = 0;
+		xr_vector<char> bytecode;
+	};
+	static xr_unordered_map<xr_string, entry> s_chunks;
+	static u32 s_hits = 0, s_misses = 0;
+
+	static void hash(const char* p, size_t n, u64& h1, u64& h2)
+	{
+		u64 a = 14695981039346656037ull; // FNV-1a
+		u64 b = 0x9E3779B97F4A7C15ull ^ n;
+		for (size_t i = 0; i < n; i++)
+		{
+			const u8 c = u8(p[i]);
+			a = (a ^ c) * 1099511628211ull;
+			b = (b + c) * 0xC2B2AE3D27D4EB4Full;
+			b ^= b >> 29;
+		}
+		h1 = a;
+		h2 = b;
+	}
+
+	static int writer(lua_State*, const void* p, size_t sz, void* ud)
+	{
+		auto* v = static_cast<xr_vector<char>*>(ud);
+		v->insert(v->end(), static_cast<const char*>(p), static_cast<const char*>(p) + sz);
+		return 0;
+	}
+
+	static int load(lua_State* L, const char* buf, size_t size, const char* name)
+	{
+		if (!g_script_chunk_cache)
+			return luaL_loadbuffer(L, buf, size, name);
+		u64 h1, h2;
+		hash(buf, size, h1, h2);
+		// One entry per file and length: _g.script runs as _G and again as the namespace _g (with its header)
+		xr_string key = name;
+		key += '|';
+		key += std::to_string(size).c_str();
+		auto it = s_chunks.find(key);
+		if (it != s_chunks.end() && it->second.size == size && it->second.h1 == h1 && it->second.h2 == h2)
+		{
+			const int r = luaL_loadbuffer(L, it->second.bytecode.data(), it->second.bytecode.size(), name);
+			if (r == 0)
+			{
+				s_hits++;
+				return 0;
+			}
+			lua_pop(L, 1); // the error message: compile the source
+		}
+		s_misses++;
+		const int r = luaL_loadbuffer(L, buf, size, name);
+		if (r == 0)
+		{
+			entry& e = s_chunks[key];
+			e.size = size;
+			e.h1 = h1;
+			e.h2 = h2;
+			e.bytecode.clear();
+			if (lua_dump(L, writer, &e.bytecode) != 0 || e.bytecode.empty())
+				s_chunks.erase(key);
+		}
+		return r;
+	}
+}
+
 bool CScriptStorage::load_buffer(lua_State* L, LPCSTR caBuffer, size_t tSize, LPCSTR caScriptName,
-                                 LPCSTR caNameSpaceName)
+                                 LPCSTR caNameSpaceName, bool cache_chunk)
 {
 	int l_iErrorCode;
 	if (caNameSpaceName && xr_strcmp("_G", caNameSpaceName))
@@ -865,7 +941,8 @@ bool CScriptStorage::load_buffer(lua_State* L, LPCSTR caBuffer, size_t tSize, LP
 		xr_strcpy(script, total_size, insert);
 		CopyMemory(script + str_len, caBuffer, u32(tSize));
 
-		l_iErrorCode = luaL_loadbuffer(L, script, tSize + str_len, caScriptName);
+		l_iErrorCode = cache_chunk ? script_chunk_cache::load(L, script, tSize + str_len, caScriptName)
+			: luaL_loadbuffer(L, script, tSize + str_len, caScriptName);
 
 		if (dynamic_allocation)
 			xr_free(script);
@@ -874,7 +951,8 @@ bool CScriptStorage::load_buffer(lua_State* L, LPCSTR caBuffer, size_t tSize, LP
 	{
 		//		try
 		{
-			l_iErrorCode = luaL_loadbuffer(L, caBuffer, tSize, caScriptName);
+			l_iErrorCode = cache_chunk ? script_chunk_cache::load(L, caBuffer, tSize, caScriptName)
+				: luaL_loadbuffer(L, caBuffer, tSize, caScriptName);
 		}
 		//		catch(...) {
 		//			l_iErrorCode= LUA_ERRSYNTAX;
@@ -965,6 +1043,9 @@ namespace script_load_stats
 		g_fs_prefetch_wait = 0;
 		g_fs_rescan_enum = g_fs_rescan_check = g_fs_rescan_register = 0;
 		g_fs_rescan_files = g_fs_rescan_checked = 0;
+		Msg("* [Script load] compiled chunks: %u loaded from their bytecode, %u compiled", script_chunk_cache::s_hits,
+			script_chunk_cache::s_misses);
+		script_chunk_cache::s_hits = script_chunk_cache::s_misses = 0;
 		Msg("* [Lua strings] %llu created or looked up, %llu hash chain entries visited (%.2f per call), %llu same length"
 			" compares that failed", lj_str_stat_calls, lj_str_stat_steps,
 			lj_str_stat_calls ? double(lj_str_stat_steps) / double(lj_str_stat_calls) : 0.0, lj_str_stat_samelen);
@@ -1183,10 +1264,10 @@ bool CScriptStorage::do_file(LPCSTR caScriptName, LPCSTR caNameSpaceName)
 
 	bool bufferLoaded = false;
 	if (unlocalPerformed) {
-		bufferLoaded = load_buffer(lua(), scriptContents, scriptLength, l_caLuaFileName, caNameSpaceName);
+		bufferLoaded = load_buffer(lua(), scriptContents, scriptLength, l_caLuaFileName, caNameSpaceName, true);
 	} else {
 		l_tpFileReader->rewind();
-		bufferLoaded = load_buffer(lua(), static_cast<LPCSTR>(l_tpFileReader->pointer()), (size_t)l_tpFileReader->length(), l_caLuaFileName, caNameSpaceName);
+		bufferLoaded = load_buffer(lua(), static_cast<LPCSTR>(l_tpFileReader->pointer()), (size_t)l_tpFileReader->length(), l_caLuaFileName, caNameSpaceName, true);
 	}
 
 	const u64 t_compiled = now();
