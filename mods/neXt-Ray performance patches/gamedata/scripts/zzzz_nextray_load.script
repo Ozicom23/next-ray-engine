@@ -29,6 +29,7 @@ local function source_hash(f)
 		bytes[nb] = string.char(reader:r_u8())
 	end
 	local text = table.concat(bytes)
+	getFS():r_close(reader)
 	local lines, n = {}, 0
 	for line in (text .. "\n"):gmatch("(.-)\n") do
 		n = n + 1
