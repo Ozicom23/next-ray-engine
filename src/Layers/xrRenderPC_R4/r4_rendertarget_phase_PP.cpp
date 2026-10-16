@@ -220,13 +220,13 @@ namespace upscale_mask
 // the mask: the caller resets the context and RCache's state afterwards
 namespace upscale_lens_depth
 {
-	ID3D11ShaderResourceView* s_srv = nullptr;
-	ID3D11Resource* s_srv_res = nullptr; // s_srv is of this
-	ID3D11VertexShader* s_vs = nullptr;
-	ID3D11PixelShader* s_ps = nullptr;
-	ID3D11Buffer* s_cb = nullptr;
-	ID3D11RasterizerState* s_rs = nullptr;
-	ID3D11DepthStencilState* s_ds = nullptr;
+	ID3DShaderResourceView* s_srv = nullptr;
+	ID3DBaseTexture* s_srv_res = nullptr; // s_srv is of this
+	ID3DVertexShader* s_vs = nullptr;
+	ID3DPixelShader* s_ps = nullptr;
+	ID3DBuffer* s_cb = nullptr;
+	ID3DRasterizerState* s_rs = nullptr;
+	ID3DDepthStencilState* s_ds = nullptr;
 	bool s_failed = false;
 
 	const char* kShader =
@@ -306,7 +306,7 @@ namespace upscale_lens_depth
 		return !s_failed;
 	}
 
-	bool build(ID3D11DepthStencilView* dsv, ID3D11Resource* depth, u32 rw, u32 rh, u32 ow, u32 oh)
+	bool build(ID3DDepthStencilView* dsv, ID3DBaseTexture* depth, u32 rw, u32 rh, u32 ow, u32 oh)
 	{
 		if (!dsv || !depth || !create_shaders())
 			return false;
@@ -327,7 +327,7 @@ namespace upscale_lens_depth
 			s_srv_res = depth;
 		}
 
-		ID3D11DeviceContext* ctx = HW.pContext;
+		ID3DDeviceContext* ctx = HW.pContext;
 		D3D11_MAPPED_SUBRESOURCE m;
 		if (FAILED(ctx->Map(s_cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m)))
 			return false;
@@ -352,7 +352,7 @@ namespace upscale_lens_depth
 		ctx->RSSetState(s_rs);
 		ctx->OMSetDepthStencilState(s_ds, 0);
 		ctx->Draw(3, 0);
-		ID3D11ShaderResourceView* none = nullptr;
+		ID3DShaderResourceView* none = nullptr;
 		ctx->PSSetShaderResources(0, 1, &none);
 		ctx->OMSetRenderTargets(0, nullptr, nullptr);
 		return true;
