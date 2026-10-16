@@ -26,6 +26,14 @@ struct StageBinding
 	bool srv_dirty = true, sampler_dirty = true, uav_dirty = true;
 	bool srv_valid = false, sampler_valid = false, uav_valid = false, cbv_table_valid = false;
 	D3D12_GPU_VIRTUAL_ADDRESS cb_applied[kMaxCB] = {};
+	u64 srv_table_applied = 0; // GPU handle of the SRV table set (valid while srv_valid)
+};
+
+// stat_dx12: commands per frame, the barriers per PIX event
+struct ContextStats
+{
+	u64 frames, draws, dispatches, barrier_calls, barriers, pso_sets, root_sets, srv_tables, srv_table_hits,
+		srv_table_sets, sampler_tables, cbv_sets, rt_sets, vb_sets, ib_sets, vp_sets, sc_sets, clears, copies, submits;
 };
 
 struct Context::Impl
@@ -127,6 +135,15 @@ struct Context::Impl
 	// within a long pass every kSubmitDraws. With one submission per frame the GPU waited for the CPU to record the
 	// whole frame, CPU and GPU time added up (40 fps under vsync where D3D11 made 60, GPU clocks down while it idled)
 	static const UINT kSubmitPass = 48, kSubmitDraws = 256;
+
+	// SRV tables of this frame by content (view ids, null slots by dimension): a draw with the textures of an earlier
+	// one sets that table again, without allocating and copying descriptors
+	std::unordered_map<u64, u64> srv_tables;
+
+	ContextStats stats = {};
+	bool stats_on = false;
+	u64 stats_end_ms = 0;
+	std::unordered_map<std::wstring, u64> stats_event_barriers;
 	UINT draws_since_submit = 0;
 	u32 submits_this_frame = 0, submits_last_frame = 0;
 
@@ -219,7 +236,11 @@ struct Context::Impl
 			SubmitEarly();
 		const bool ok = PrepareDraw();
 		if (ok)
+		{
 			++draws_since_submit;
+			if (stats_on)
+				++stats.draws;
+		}
 		if (trace_frames)
 			TraceDraw(ok ? what : "SKIPPED", count);
 		return ok;
@@ -338,6 +359,12 @@ struct Context::Impl
 		if (barriers.empty())
 			return;
 		list->ResourceBarrier(UINT(barriers.size()), barriers.data());
+		if (stats_on)
+		{
+			++stats.barrier_calls;
+			stats.barriers += barriers.size();
+			stats_event_barriers[events.empty() ? std::wstring(L"(none)") : events.back()] += barriers.size();
+		}
 		barriers.clear();
 		Record();
 	}
@@ -375,6 +402,7 @@ struct Context::Impl
 			device->WaitIdle();
 			for (UINT& n : segment_next)
 				n = 0;
+			srv_tables.clear();
 			ring_wrapped = true;
 		}
 		const UINT index = kStaticViews + frame_index * segment_size + next;
@@ -409,13 +437,15 @@ struct Context::Impl
 			}
 			index = sampler_next;
 			sampler_next += count;
+			D3D12_CPU_DESCRIPTOR_HANDLE src[kMaxSamplers];
+			static const UINT ones[kMaxSamplers] = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
 			for (UINT i = 0; i < count; ++i)
-			{
-				D3D12_CPU_DESCRIPTOR_HANDLE dst = { sampler_cpu0.ptr + SIZE_T(index + i) * sampler_inc };
-				const D3D12_CPU_DESCRIPTOR_HANDLE src = b.sampler[i] ? b.sampler[i]->m_cpu : dev->default_sampler;
-				d3d->CopyDescriptorsSimple(1, dst, src, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
-			}
+				src[i] = b.sampler[i] ? b.sampler[i]->m_cpu : dev->default_sampler;
+			const D3D12_CPU_DESCRIPTOR_HANDLE dst = { sampler_cpu0.ptr + SIZE_T(index) * sampler_inc };
+			d3d->CopyDescriptors(1, &dst, &count, count, src, ones, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
 			sampler_tables[key] = index;
+			if (stats_on)
+				++stats.sampler_tables;
 		}
 		return D3D12_GPU_DESCRIPTOR_HANDLE{ sampler_gpu0.ptr + u64(index) * sampler_inc };
 	}
@@ -467,28 +497,60 @@ struct Context::Impl
 
 		if (sp.srv_count && (b.srv_dirty || !b.srv_valid))
 		{
-			D3D12_CPU_DESCRIPTOR_HANDLE cpu;
-			D3D12_GPU_DESCRIPTOR_HANDLE gpu;
-			AllocViews(sp.srv_count, cpu, gpu);
 			const ShaderBindings* bindings = b.shader ? &b.shader->m_bindings : nullptr;
+			u64 ids[kMaxSRV];
+			D3D12_CPU_DESCRIPTOR_HANDLE src[kMaxSRV];
 			for (UINT i = 0; i < sp.srv_count; ++i)
 			{
 				const ShaderResourceView* v = b.srv[i];
-				D3D12_CPU_DESCRIPTOR_HANDLE src;
 				if (v && !(b.hazard & (1u << i)))
-					src = v->m_cpu;
+				{
+					ids[i] = v->Id();
+					src[i] = v->m_cpu;
+				}
 				else
 				{
-					const UINT dim = bindings ? bindings->srv_dim[i] : 0;
-					src = dev->null_srv[dim <= 10 ? dim : 0];
+					UINT dim = bindings ? bindings->srv_dim[i] : 0;
+					dim = dim <= 10 ? dim : 0;
+					ids[i] = (1ull << 63) | dim; // a null view of that dimension (object ids count up from 1)
+					src[i] = dev->null_srv[dim];
 				}
-				D3D12_CPU_DESCRIPTOR_HANDLE dst = { cpu.ptr + SIZE_T(i) * view_inc };
-				d3d->CopyDescriptorsSimple(1, dst, src, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 			}
-			if (compute)
-				list->SetComputeRootDescriptorTable(sp.srv_param, gpu);
+			const u64 key = HashBytes(ids, sizeof(u64) * sp.srv_count, sp.srv_count);
+			u64 table;
+			auto it = srv_tables.find(key);
+			if (it != srv_tables.end())
+			{
+				table = it->second;
+				if (stats_on)
+					++stats.srv_table_hits;
+			}
 			else
-				list->SetGraphicsRootDescriptorTable(sp.srv_param, gpu);
+			{
+				D3D12_CPU_DESCRIPTOR_HANDLE cpu;
+				D3D12_GPU_DESCRIPTOR_HANDLE gpu;
+				AllocViews(sp.srv_count, cpu, gpu);
+				// One call for the table: the destination range, one source range per view
+				static const UINT ones[kMaxSRV] = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+					1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+				const UINT count = sp.srv_count;
+				d3d->CopyDescriptors(1, &cpu, &count, count, src, ones, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+				table = gpu.ptr;
+				srv_tables.emplace(key, table);
+				if (stats_on)
+					++stats.srv_tables;
+			}
+			if (!b.srv_valid || b.srv_table_applied != table)
+			{
+				const D3D12_GPU_DESCRIPTOR_HANDLE gpu = { table };
+				if (compute)
+					list->SetComputeRootDescriptorTable(sp.srv_param, gpu);
+				else
+					list->SetGraphicsRootDescriptorTable(sp.srv_param, gpu);
+				b.srv_table_applied = table;
+				if (stats_on)
+					++stats.srv_table_sets;
+			}
 			b.srv_dirty = false;
 			b.srv_valid = true;
 		}
@@ -534,6 +596,8 @@ struct Context::Impl
 				else
 					list->SetGraphicsRootConstantBufferView(sp.cb_param[slot], va);
 				b.cb_applied[slot] = va;
+				if (stats_on)
+					++stats.cbv_sets;
 			}
 		}
 		else
@@ -772,6 +836,8 @@ struct Context::Impl
 			{
 				list->SetGraphicsRootSignature(gfx_root->signature);
 				bound_gfx_root = gfx_root;
+				if (stats_on)
+					++stats.root_sets;
 				for (UINT s = StageVS; s <= StagePS; ++s)
 				{
 					StageBinding& b = stages[s];
@@ -783,6 +849,8 @@ struct Context::Impl
 			{
 				list->SetPipelineState(gfx_pso);
 				applied_pso = gfx_pso;
+				if (stats_on)
+					++stats.pso_sets;
 			}
 			for (UINT s = StageVS; s <= StagePS; ++s)
 				ApplyStage(s, gfx_root, false);
@@ -817,6 +885,8 @@ struct Context::Impl
 			{
 				if (vb_count)
 					list->IASetVertexBuffers(0, vb_count, views);
+				if (stats_on)
+					++stats.vb_sets;
 				memcpy(vb_applied, views, sizeof(views));
 				vb_applied_count = vb_count;
 				vb_applied_valid = true;
@@ -832,6 +902,8 @@ struct Context::Impl
 			if (!ib_applied_valid || memcmp(&view, &ib_applied, sizeof(view)))
 			{
 				list->IASetIndexBuffer(&view);
+				if (stats_on)
+					++stats.ib_sets;
 				ib_applied = view;
 				ib_applied_valid = true;
 			}
@@ -856,6 +928,8 @@ struct Context::Impl
 			if (rt_dirty)
 			{
 				list->OMSetRenderTargets(count, count ? handles : nullptr, FALSE, dsv ? &dsv->m_cpu : nullptr);
+				if (stats_on)
+					++stats.rt_sets;
 				memcpy(rtv_applied, handles, sizeof(handles));
 				rt_dirty = false;
 			}
@@ -864,6 +938,8 @@ struct Context::Impl
 		{
 			if (viewport_count)
 				list->RSSetViewports(viewport_count, reinterpret_cast<const D3D12_VIEWPORT*>(viewports));
+			if (stats_on)
+				++stats.vp_sets;
 			vp_dirty = false;
 		}
 		if (sc_dirty)
@@ -884,6 +960,8 @@ struct Context::Impl
 			}
 			list->RSSetScissorRects(count, rects);
 			sc_dirty = false;
+			if (stats_on)
+				++stats.sc_sets;
 		}
 		if (ref_dirty)
 		{
@@ -1018,6 +1096,8 @@ struct Context::Impl
 		recorded = false;
 		draws_since_submit = 0;
 		++submits_this_frame;
+		if (stats_on)
+			++stats.submits;
 		if (reopen)
 		{
 			list->Reset(allocator[frame_index], nullptr);
@@ -1049,6 +1129,13 @@ struct Context::Impl
 			Msg("[dx12 trace] end, %u submissions in the frame", submits_this_frame);
 		submits_last_frame = submits_this_frame;
 		submits_this_frame = 0;
+		srv_tables.clear();
+		if (stats_on)
+		{
+			++stats.frames;
+			if (GetTickCount64() >= stats_end_ms)
+				ReportStats();
+		}
 		if (trace_requested && !trace_frames)
 		{
 			trace_frames = trace_requested;
@@ -1056,6 +1143,32 @@ struct Context::Impl
 			trace_index = 0;
 			Msg("[dx12 trace] frame %llu, %u frame(s)", frame_number, trace_frames);
 		}
+	}
+
+	void ReportStats()
+	{
+		stats_on = false;
+		const ContextStats& t = stats;
+		const double n = double(t.frames ? t.frames : 1);
+		Msg("* [stat_dx12] per frame over %llu frames: %.0f draws, %.0f dispatches, %.0f barriers in %.0f calls, %.0f pipeline "
+		    "sets, %.0f root signature sets, SRV tables %.0f new + %.0f reused (%.0f sets), %.0f sampler tables new, %.0f root CBV "
+		    "sets, %.0f render target sets, %.0f vertex / %.0f index buffer sets, %.0f viewport / %.0f scissor sets, %.0f clears, "
+		    "%.0f copies, %.0f submissions",
+		    t.frames, t.draws / n, t.dispatches / n, t.barriers / n, t.barrier_calls / n, t.pso_sets / n, t.root_sets / n,
+		    t.srv_tables / n, t.srv_table_hits / n, t.srv_table_sets / n, t.sampler_tables / n, t.cbv_sets / n, t.rt_sets / n,
+		    t.vb_sets / n, t.ib_sets / n, t.vp_sets / n, t.sc_sets / n, t.clears / n, t.copies / n, t.submits / n);
+		std::vector<std::pair<u64, std::wstring>> top;
+		for (const auto& e : stats_event_barriers)
+			top.emplace_back(e.second, e.first);
+		std::sort(top.begin(), top.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+		for (size_t i = 0; i < top.size() && i < 12; ++i)
+		{
+			std::string name;
+			for (wchar_t ch : top[i].second)
+				name += char(ch < 128 ? ch : '?');
+			Msg("*   barriers in %-40s %.1f per frame", name.c_str(), top[i].first / n);
+		}
+		stats_event_barriers.clear();
 	}
 
 	bool CommandsPending(u64 fence) const { return fence >= dev->pending_fence.load(); }
@@ -1210,7 +1323,8 @@ void Context::SetShader(Stage stage, Shader* shader)
 		c.pso_dirty = true;
 		if (ShaderBindingKey(shader) != old_key)
 			c.shaders_changed = true;
-		b.srv_dirty = true; // the null views' dimensions follow the shader
+		// The table's size and its null views' dimensions follow the shader (the table cache finds equal tables)
+		b.srv_dirty = true;
 	}
 }
 
@@ -1366,9 +1480,11 @@ void Context::RSSetState(RasterizerState* state)
 	Impl& c = *m_impl;
 	if (c.raster == state)
 		return;
+	const BOOL scissor_before = c.raster ? c.raster->m_desc.ScissorEnable : FALSE;
 	Rebind(c.raster, state);
 	c.pso_dirty = true;
-	c.sc_dirty = true;
+	if ((state ? state->m_desc.ScissorEnable : FALSE) != scissor_before)
+		c.sc_dirty = true;
 }
 
 void Context::RSSetViewports(UINT count, const D3D11_VIEWPORT* viewports)
@@ -1532,6 +1648,8 @@ void Context::Dispatch(UINT x, UINT y, UINT z)
 	if (!ok)
 		return;
 	++c.draws_since_submit;
+	if (c.stats_on)
+		++c.stats.dispatches;
 	c.list->Dispatch(x, y, z);
 	StageBinding& b = c.stages[StageCS];
 	for (UINT i = 0; i < kMaxUAV; ++i)
@@ -1553,6 +1671,8 @@ void Context::ClearRenderTargetView(RenderTargetView* rtv, const FLOAT color[4])
 	else
 		c.RequireView(rtv, r, D3D12_RESOURCE_STATE_RENDER_TARGET);
 	c.FlushBarriers();
+	if (c.stats_on)
+		++c.stats.clears;
 	if (c.trace_frames)
 	{
 		std::string out = make_string("[dx12 trace] %u clear %s (%.3f %.3f %.3f %.3f)", c.trace_index++,
@@ -1668,6 +1788,8 @@ void Context::CopyResource(Resource* dst, Resource* src)
 	if (!dst || !src)
 		return;
 	Impl& c = *m_impl;
+	if (c.stats_on)
+		++c.stats.copies;
 	if (c.trace_frames)
 	{
 		std::string out = make_string("[dx12 trace] %u copy %s <- %s", c.trace_index++, Impl::ResName(dst).c_str(), Impl::ResName(src).c_str());
@@ -2257,6 +2379,16 @@ void Context::EndFrame()
 }
 
 void Context::TraceFrames(UINT frames) { m_impl->trace_requested = frames ? frames : 1; }
+
+void Context::StartStats(float seconds)
+{
+	Impl& c = *m_impl;
+	c.stats = ContextStats();
+	c.stats_event_barriers.clear();
+	c.stats_end_ms = GetTickCount64() + u64(seconds * 1000.f);
+	c.stats_on = true;
+	Msg("* [stat_dx12] measuring for %.0f s", seconds);
+}
 
 ID3D12GraphicsCommandList* Context::NativeList()
 {

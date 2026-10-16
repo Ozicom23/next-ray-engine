@@ -661,6 +661,18 @@ public:
 		HW.pContext->TraceFrames(UINT(clampr(frames, 1, 4)));
 	}
 };
+// stat_dx12 [seconds]: D3D12 commands per frame (draws, barriers, pipeline and table sets, submissions) and the
+// barriers by pass, averaged over the time, in the log
+class CCC_Dx12Stats : public IConsole_Command
+{
+public:
+	CCC_Dx12Stats(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; }
+	virtual void Execute(LPCSTR args)
+	{
+		const float seconds = args && args[0] ? float(atof(args)) : 10.f;
+		HW.pContext->StartStats(clampr(seconds, 1.f, 120.f));
+	}
+};
 #endif
 
 class CCC_TexStreamStats : public IConsole_Command
@@ -1373,6 +1385,7 @@ void xrRender_initconsole()
 #ifdef USE_DX12
 	CMD1(CCC_Dx12DumpRT, "r__dx12_dump_rt");
 	CMD1(CCC_Dx12Trace, "r__dx12_trace");
+	CMD1(CCC_Dx12Stats, "stat_dx12");
 #endif
 
 	//	Igor: just to test bug with rain/particles corruption

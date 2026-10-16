@@ -543,6 +543,8 @@ public:
 	void EndFrame();
 	// r__dx12_trace: every draw, dispatch, clear and copy of the next frames in the log (shaders, targets, views)
 	void TraceFrames(UINT frames);
+	// stat_dx12: commands per frame over some seconds in the log, the barriers by PIX event
+	void StartStats(float seconds);
 
 	// Native access: the command list being recorded, with all pending barriers issued. After native recording the
 	// context's bindings are set again at the next draw (InvalidateNative); Transition moves a resource to a state
