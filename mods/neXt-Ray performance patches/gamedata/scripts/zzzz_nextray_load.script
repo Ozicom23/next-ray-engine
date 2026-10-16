@@ -1,0 +1,84 @@
+-- neXt-Ray performance patches: level load costs of mods. Like zzzz_nextray_perf.script, the original mods stay
+-- untouched and what they compute stays the same: a patched function is wrapped only when its source text is exactly
+-- the known one, and the engine functions it needs exist (other executables run the originals).
+--   nextray_perf_off: a file in appdata turns every patch off (for comparisons).
+--
+-- 1. story_objects.get_story_se_item(story_id): finds the first object (lowest id) whose section is story_id by calling
+--    alife():object(i) and section_name() for every id from 1 to 65534 (~30 ms a call with GAMMA's 28000 objects), and
+--    keeps the answer for the story id. Level change mods call it for a dozen story ids on every first update. The
+--    engine finds the same id in its object registry (alife_first_id_of_section_native) and the answer goes into the
+--    original's own table, so the original returns it as for an id it already looked up.
+
+local function msg(fmt, ...)
+	log(string.format("[neXt-Ray load] " .. fmt, ...))
+end
+
+-- The function's source lines as the game reads its script file now (also from the game's archives), end of lines
+-- without "\r", hashed like _g_patches' fingerprint
+local function source_hash(f)
+	local info = debug and debug.getinfo and debug.getinfo(f, "S")
+	if not (info and info.source and info.source:sub(1, 1) == "@" and info.linedefined and info.lastlinedefined) then
+		return nil
+	end
+	local name = info.source:match("([^\\/]+)$")
+	local reader = name and getFS():r_open("$game_scripts$", name)
+	if not reader then return nil end
+	local bytes, nb = {}, 0
+	while not reader:r_eof() do
+		nb = nb + 1
+		bytes[nb] = string.char(reader:r_u8())
+	end
+	local text = table.concat(bytes)
+	local lines, n = {}, 0
+	for line in (text .. "\n"):gmatch("(.-)\n") do
+		n = n + 1
+		if n >= info.linedefined then
+			lines[#lines + 1] = line:gsub("\r$", "")
+		end
+		if n >= info.lastlinedefined then break end
+	end
+	local s = table.concat(lines, "\n")
+	local h = 0
+	for i = 1, #s do h = (h * 31 + s:byte(i)) % 2147483647 end
+	return #s .. ":" .. h
+end
+
+---------------------------------------------------------------------------------------------------------------------
+-- 1. story_objects.get_story_se_item
+
+local function story_patch()
+	local m = story_objects
+	local native = alife_first_id_of_section_native
+	if not (native and m and type(m.get_story_se_item) == "function") then return false end
+	local orig = m.get_story_se_item
+	local fp = source_hash(orig)
+	if fp ~= "543:92797217" then
+		msg("story_objects.get_story_se_item is not the known one (%s), kept", tostring(fp))
+		return false
+	end
+	local env = getfenv(orig)
+	m.get_story_se_item = function(story_id)
+		local t = env.item_object_id_by_story_id
+		if type(story_id) == "string" and type(t) == "table" and t[story_id] == nil then
+			local found = native(story_id)
+			if found ~= nil then
+				t[story_id] = found
+			end
+		end
+		return orig(story_id)
+	end
+	return true
+end
+
+---------------------------------------------------------------------------------------------------------------------
+
+function on_game_start()
+	local f = getFS()
+	local off = io.open(f:update_path("$app_data_root$", "nextray_perf_off"), "r")
+	if off then
+		off:close()
+		return
+	end
+	local story_on = story_patch()
+	msg("story_objects.get_story_se_item through the engine %s", story_on and "on" or "off")
+end
