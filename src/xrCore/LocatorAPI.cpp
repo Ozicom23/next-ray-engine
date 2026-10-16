@@ -11,6 +11,9 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <unordered_map>
+#include <string>
+#include <vector>
 #include <fcntl.h>
 #include <sys\stat.h>
 #define _SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING
@@ -682,6 +685,175 @@ namespace fs_prefetch
 	}
 }
 
+// The file index at the game's start: the folders of fsgame.ltx's recursive paths listed on worker threads, ahead of
+// Recurse, which registers them one folder after another as before (same order, same entries: a folder's listing is
+// what the system returns for it, taken a moment earlier). Under Proton and Mod Organizer's virtual file system each
+// folder listing merges the folders of every mod and took most of the start (63 s for 114,000 files on the Steam
+// Deck). A file fs_index_serial next to fsgame.ltx lists them on the main thread only, as before
+XRCORE_API u32 g_fs_index_listed = 0, g_fs_index_taken = 0;
+XRCORE_API u64 g_fs_index_wait = 0;
+namespace fs_index
+{
+	struct listing
+	{
+		xr_vector<_finddata_t> entries;
+		int state = 0; // 0 queued, 1 being listed, 2 listed, 3 the folder can't be listed
+	};
+	static std::mutex s_lock;
+	static std::condition_variable s_cv;
+	static std::unordered_map<std::string, std::shared_ptr<listing>> s_listings; // std containers: statics
+	static std::vector<std::string> s_queue; // last in, first out: deeper folders first, as Recurse walks them
+	static std::vector<std::thread> s_workers;
+	static bool s_active = false, s_stop = false;
+
+	static void queue_folder_locked(const std::string& path)
+	{
+		if (s_listings.find(path) != s_listings.end())
+			return;
+		s_listings.emplace(path, std::make_shared<listing>());
+		s_queue.push_back(path);
+	}
+
+	// Lists the folder; its subfolders (as ProcessOne names them) are queued when recursive
+	static void list_folder(const std::string& path, std::shared_ptr<listing> L, bool recursive)
+	{
+		string_path scan;
+		xr_strcpy(scan, sizeof(scan), path.c_str());
+		xr_strcat(scan, ".xrignore");
+		struct stat buffer;
+		const bool ignored = !stat(scan, &buffer);
+		xr_vector<_finddata_t> entries;
+		bool found = false;
+		if (!ignored)
+		{
+			xr_strcpy(scan, sizeof(scan), path.c_str());
+			xr_strcat(scan, "*.*");
+			_finddata_t fd;
+			const intptr_t handle = _findfirst(scan, &fd);
+			if (handle != -1)
+			{
+				found = true;
+				intptr_t next = handle;
+				while (next != -1)
+				{
+					entries.push_back(fd);
+					next = _findnext(handle, &fd);
+				}
+				_findclose(handle);
+			}
+		}
+		std::lock_guard<std::mutex> g(s_lock);
+		L->entries.swap(entries);
+		L->state = found ? 2 : 3;
+		if (found && recursive)
+		{
+			for (const _finddata_t& e : L->entries)
+			{
+				if (!(e.attrib & _A_SUBDIR) || (e.attrib & _A_HIDDEN))
+					continue;
+				if (!xr_strcmp(e.name, ".") || !xr_strcmp(e.name, "..") || ignore_name(e.name))
+					continue;
+				string_path child;
+				xr_strcpy(child, sizeof(child), path.c_str());
+				xr_strcat(child, e.name);
+				xr_strlwr(child);
+				xr_strcat(child, "\\");
+				queue_folder_locked(child);
+			}
+		}
+		s_cv.notify_all();
+	}
+
+	static void worker()
+	{
+		std::unique_lock<std::mutex> g(s_lock);
+		for (;;)
+		{
+			s_cv.wait(g, [] { return s_stop || !s_queue.empty(); });
+			if (s_stop)
+				return;
+			std::string path = s_queue.back();
+			s_queue.pop_back();
+			auto it = s_listings.find(path);
+			if (it == s_listings.end() || it->second->state != 0)
+				continue;
+			auto L = it->second;
+			L->state = 1;
+			g.unlock();
+			list_folder(path, L, true);
+			g.lock();
+			g_fs_index_listed++;
+		}
+	}
+
+	// A recursive path of fsgame.ltx: its folders get listed ahead
+	static void start(LPCSTR root)
+	{
+		std::lock_guard<std::mutex> g(s_lock);
+		if (!s_active)
+		{
+			s_active = true;
+			s_stop = false;
+			u32 n = std::thread::hardware_concurrency();
+			n = n < 2 ? 2 : (n > 6 ? 6 : n);
+			for (u32 i = 0; i < n; i++)
+				s_workers.emplace_back(worker);
+		}
+		queue_folder_locked(root);
+		s_cv.notify_all();
+	}
+
+	static void stop()
+	{
+		{
+			std::lock_guard<std::mutex> g(s_lock);
+			if (!s_active)
+				return;
+			s_stop = true;
+			s_cv.notify_all();
+		}
+		for (std::thread& t : s_workers)
+			t.join();
+		std::lock_guard<std::mutex> g(s_lock);
+		s_workers.clear();
+		s_listings.clear();
+		s_queue.clear();
+		s_active = false;
+	}
+
+	// 0: no listing for it, 1: its entries, 2: the folder can't be listed
+	static int take(const char* path, xr_vector<_finddata_t>& out)
+	{
+		std::unique_lock<std::mutex> g(s_lock);
+		if (!s_active)
+			return 0;
+		auto it = s_listings.find(path);
+		if (it == s_listings.end())
+			return 0;
+		auto L = it->second;
+		if (L->state == 0)
+		{
+			// Not started: listed here (its subfolders queued as the workers do)
+			L->state = 1;
+			g.unlock();
+			list_folder(path, L, true);
+			g.lock();
+		}
+		else if (L->state == 1)
+		{
+			const u64 t0 = CPU::QPC();
+			s_cv.wait(g, [&] { return L->state >= 2; });
+			g_fs_index_wait += CPU::QPC() - t0;
+		}
+		s_listings.erase(std::string(path));
+		g_fs_index_taken++;
+		if (L->state == 3)
+			return 2;
+		out.swap(L->entries);
+		return 1;
+	}
+}
+
 void CLocatorAPI::prefetch_listing(LPCSTR path_alias)
 {
 	FS_Path* P = get_path(path_alias);
@@ -708,7 +880,10 @@ bool CLocatorAPI::Recurse(const char* path)
 	const bool timed = m_Flags.test(flNeedCheck);
 	const u64 t_begin = timed ? CPU::QPC() : 0;
 	xr_vector<_finddata_t> prefetched;
-	const bool use_prefetched = fs_prefetch::take(path, prefetched);
+	const int indexed = fs_index::take(path, prefetched);
+	if (indexed == 2)
+		return false; // _findfirst failed for it
+	const bool use_prefetched = indexed == 1 || fs_prefetch::take(path, prefetched);
 	_finddata_t findData;
 	intptr_t handle = -1;
 	size_t prefetched_pos = 0;
@@ -919,6 +1094,20 @@ void CLocatorAPI::_initialize(u32 flags, LPCSTR target_folder, LPCSTR fs_name)
 	else
 	{
 		IReader* pFSltx = setup_fs_ltx(fs_name);
+		// fs_index: off with a file fs_index_serial next to fsgame.ltx
+		bool index_threads = true;
+		{
+			string_path serial;
+			xr_strcpy(serial, sizeof(serial), fsRoot.generic_string().c_str());
+			const size_t n = xr_strlen(serial);
+			if (n && serial[n - 1] != '\\' && serial[n - 1] != '/')
+				xr_strcat(serial, "\\");
+			xr_strcat(serial, "fs_index_serial");
+			if (GetFileAttributes(serial) != INVALID_FILE_ATTRIBUTES)
+				index_threads = false;
+			Msg("* FS: file index %s (%s)", index_threads ? "listed on worker threads" : "listed on this thread only", serial);
+		}
+		const u64 t_index = CPU::QPC();
 		// Folders already listed with their subfolders. fsgame.ltx names many folders inside others ($game_data$, then
 		// its textures, meshes, sounds, configs and their subfolders again): listing those again only registers the
 		// same files a second time. Under Mod Organizer's virtual file system every listing merges all mod folders,
@@ -990,6 +1179,8 @@ void CLocatorAPI::_initialize(u32 flags, LPCSTR target_folder, LPCSTR fs_name)
 				skipped_lists++;
 			else
 			{
+				if (index_threads && !bNoRecurse)
+					fs_index::start(P->m_Path);
 				Recurse(P->m_Path);
 				const size_t len = xr_strlen(P->m_Path);
 				if (!bNoRecurse && len && (P->m_Path[len - 1] == '\\' || P->m_Path[len - 1] == '/'))
@@ -1003,14 +1194,34 @@ void CLocatorAPI::_initialize(u32 flags, LPCSTR target_folder, LPCSTR fs_name)
 			//CHECK_OR_EXIT		(I.second,"The file 'fsgame.ltx' is corrupted (it contains duplicated lines).\nPlease reinstall the game or fix the problem manually.");
 		}
 		r_close(pFSltx);
+		fs_index::stop();
 		R_ASSERT(path_exist("$app_data_root$"));
 		Msg("* FS: %u folders inside an already listed folder not listed again", skipped_lists);
+		Msg("* FS: index in %.1f s, %u folders listed ahead by worker threads, %u taken, waited for them %.1f s",
+			double(CPU::QPC() - t_index) / double(CPU::qpc_freq), g_fs_index_listed, g_fs_index_taken,
+			double(g_fs_index_wait) / double(CPU::qpc_freq));
 	};
 
 
 	Msg("File System Ready...");
 	size_t M2 = Memory.mem_usage();
 	Msg("FS: %d files cached %d archives, %lldKb memory used.", m_files.size(), m_archives.size(), (M2 - M1) / 1024);
+	{
+		// The whole index in one number, to compare ways of building it (names in order, archive, offsets, sizes, times)
+		u64 h = 14695981039346656037ull;
+		auto mix = [&h](u64 v) { h = (h ^ v) * 1099511628211ull; };
+		for (const file& f : m_files)
+		{
+			for (const char* c = f.name; *c; c++)
+				mix(u8(*c));
+			mix(f.vfs);
+			mix(f.ptr);
+			mix(f.size_real);
+			mix(f.size_compressed);
+			mix(f.modif);
+		}
+		Msg("* FS: index fingerprint %016llx", h);
+	}
 
 	m_Flags.set(flReady, TRUE);
 
