@@ -56,6 +56,53 @@ ref_light precache_light = 0;
 
 BOOL mt_calc_bones = TRUE;
 ENGINE_API int g_dbg_freeze = 0; // dbg_freeze (FrameMove)
+// dbg_freeze over a device reset (vid_restart): its precache frames turn the camera around, and with no time passing
+// no object updates to set it back (only the sky drew). The camera is kept at the reset and put back after them
+namespace
+{
+	struct FrozenCamera
+	{
+		bool valid = false;
+		Fvector position, direction, top, right;
+		Fmatrix view, view_hud, view_cam, project, project_hud, project_cam;
+		Fmatrix view_prev, view_hud_prev, view_cam_prev, project_prev, project_hud_prev, project_cam_prev;
+		float fov, aspect;
+	} s_frozen_camera;
+}
+
+void dbg_freeze_camera_keep()
+{
+	FrozenCamera& c = s_frozen_camera;
+	c.valid = g_dbg_freeze != 0;
+	if (!c.valid)
+		return;
+	c.position = Device.vCameraPosition; c.direction = Device.vCameraDirection;
+	c.top = Device.vCameraTop; c.right = Device.vCameraRight;
+	c.view = Device.mView; c.view_hud = Device.mViewHud; c.view_cam = Device.mViewCam;
+	c.project = Device.mProject; c.project_hud = Device.mProjectHud; c.project_cam = Device.mProjectCam;
+	c.view_prev = Device.mView_prev; c.view_hud_prev = Device.mViewHud_prev; c.view_cam_prev = Device.mViewCam_prev;
+	c.project_prev = Device.mProject_prev; c.project_hud_prev = Device.mProjectHud_prev;
+	c.project_cam_prev = Device.mProjectCam_prev;
+	c.fov = Device.fFOV; c.aspect = Device.fASPECT;
+}
+
+static void dbg_freeze_camera_restore()
+{
+	FrozenCamera& c = s_frozen_camera;
+	if (!c.valid)
+		return;
+	c.valid = false;
+	if (!g_dbg_freeze)
+		return;
+	Device.vCameraPosition = c.position; Device.vCameraDirection = c.direction;
+	Device.vCameraTop = c.top; Device.vCameraRight = c.right;
+	Device.mView = c.view; Device.mViewHud = c.view_hud; Device.mViewCam = c.view_cam;
+	Device.mProject = c.project; Device.mProjectHud = c.project_hud; Device.mProjectCam = c.project_cam;
+	Device.mView_prev = c.view_prev; Device.mViewHud_prev = c.view_hud_prev; Device.mViewCam_prev = c.view_cam_prev;
+	Device.mProject_prev = c.project_prev; Device.mProjectHud_prev = c.project_hud_prev;
+	Device.mProjectCam_prev = c.project_cam_prev;
+	Device.fFOV = c.fov; Device.fASPECT = c.aspect;
+}
 BOOL mt_calc_bones_parallel = TRUE; // the bones of the models in view on all cores (EngineThreading.cpp)
 BOOL psLua_ParallelGC = TRUE;
 BOOL psLua_ParallelGC_debug = FALSE;
@@ -136,6 +183,7 @@ void CRenderDevice::End(void)
 #endif // #ifdef INGAME_EDITOR
 
 			m_pRender->updateGamma();
+			dbg_freeze_camera_restore();
 
 			if (precache_light)
 			{

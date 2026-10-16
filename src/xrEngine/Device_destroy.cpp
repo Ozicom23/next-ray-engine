@@ -65,6 +65,7 @@ extern u32 g_screenmode;
 extern void GetMonitorResolution(u32& horizontal, u32& vertical);
 extern void GetMonitorPosition(int& x, int& y);
 extern ENGINE_API u32 psCurrentVidMode[];
+extern void dbg_freeze_camera_keep(); // device.cpp
 
 void CRenderDevice::Reset(bool precache)
 {
@@ -82,6 +83,8 @@ void CRenderDevice::Reset(bool precache)
 	ShowCursor(TRUE);
 	u32 tm_start = TimerAsync();
 
+	if (precache)
+		dbg_freeze_camera_keep(); // dbg_freeze: the camera is put back after the precache frames
 	m_pRender->Reset(m_hWnd, dwWidth, dwHeight, fWidth_2, fHeight_2);
 
 	if (g_pGamePersistent)

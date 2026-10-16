@@ -353,10 +353,6 @@ void CCameraManager::Update(const Fvector& P, const Fvector& D, const Fvector& N
 	float aspect = Device.fHeight_2 / Device.fWidth_2;
 	float src = 10 * Device.fTimeDelta;
 	clamp(src, 0.f, 1.f);
-	// dbg_freeze: no time passes, so the blend would never move; a device reset (vid_restart) leaves the far plane,
-	// fov and aspect at their reset values (only the sky drew). Taken as they are meant to be instead
-	if (g_dbg_freeze)
-		src = 1.f;
 	float dst = 1 - src;
 	m_cam_info.fFov = m_cam_info.fFov * dst + fFOV_Dest * src;
 	m_cam_info.fFar = m_cam_info.fFar * dst + fFAR_Dest * src;
