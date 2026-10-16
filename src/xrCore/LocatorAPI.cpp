@@ -800,7 +800,8 @@ namespace fs_index
 			if (!n)
 			{
 				n = std::thread::hardware_concurrency();
-				n = n < 2 ? 2 : (n > 6 ? 6 : n);
+				// Steam Deck (8 hardware threads): 6 threads 28 s, 8 25 s, 12 25 s, 24 36 s (the listings wait on each other)
+				n = n < 2 ? 2 : (n > 12 ? 12 : n);
 			}
 			for (u32 i = 0; i < n; i++)
 				s_workers.emplace_back(worker);
@@ -1240,17 +1241,26 @@ void CLocatorAPI::_initialize(u32 flags, LPCSTR target_folder, LPCSTR fs_name)
 			mix(f.modif);
 		}
 		Msg("* FS: index fingerprint %016llx", h);
-		// fs_index_dump next to fsgame.ltx: the whole index into fs_index_dump.txt there, to compare ways of building it
+		// fs_index_dump next to fsgame.ltx, holding a file name: the whole index into that file, to compare ways of
+		// building it (a name outside the game's folder: new files there go to Mod Organizer's overwrite folder)
 		string_path dump;
 		xr_strcpy(dump, sizeof(dump), fsRoot.generic_string().c_str());
 		const size_t n = xr_strlen(dump);
 		if (n && dump[n - 1] != '\\' && dump[n - 1] != '/')
 			xr_strcat(dump, "\\");
 		xr_strcat(dump, "fs_index_dump");
-		if (GetFileAttributes(dump) != INVALID_FILE_ATTRIBUTES)
+		string_path target = { 0 };
+		if (FILE* m = fopen(dump, "r"))
 		{
-			xr_strcat(dump, ".txt");
-			if (FILE* f = fopen(dump, "wb"))
+			if (!fgets(target, sizeof(target), m))
+				target[0] = 0;
+			fclose(m);
+			for (size_t i = xr_strlen(target); i > 0 && (target[i - 1] == '\n' || target[i - 1] == '\r' || target[i - 1] == ' '); i--)
+				target[i - 1] = 0;
+		}
+		if (target[0])
+		{
+			if (FILE* f = fopen(target, "wb"))
 			{
 				for (const file& fl : m_files)
 					fprintf(f, "%s|%u|%u|%u|%u|%u\n", fl.name, fl.vfs, fl.ptr, fl.size_real, fl.size_compressed, fl.modif);
