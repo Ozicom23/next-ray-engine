@@ -123,6 +123,20 @@ struct Context::Impl
 
 	//---------------------------------------------------------------------------------------------------------------
 	// r__dx12_trace
+	// Work goes to the GPU during the frame, not all at Present: at a change of render targets after kSubmitPass draws,
+	// within a long pass every kSubmitDraws. With one submission per frame the GPU waited for the CPU to record the
+	// whole frame, CPU and GPU time added up (40 fps under vsync where D3D11 made 60, GPU clocks down while it idled)
+	static const UINT kSubmitPass = 48, kSubmitDraws = 256;
+	UINT draws_since_submit = 0;
+	u32 submits_this_frame = 0, submits_last_frame = 0;
+
+	void SubmitEarly()
+	{
+		if (!recorded || !draws_since_submit)
+			return;
+		Submit(true);
+	}
+
 	UINT trace_frames = 0, trace_requested = 0;
 	UINT trace_index = 0;
 
@@ -201,7 +215,11 @@ struct Context::Impl
 
 	bool BeginDraw(const char* what, UINT count)
 	{
+		if (draws_since_submit >= kSubmitDraws)
+			SubmitEarly();
 		const bool ok = PrepareDraw();
+		if (ok)
+			++draws_since_submit;
 		if (trace_frames)
 			TraceDraw(ok ? what : "SKIPPED", count);
 		return ok;
@@ -998,6 +1016,8 @@ struct Context::Impl
 			signals.clear();
 		}
 		recorded = false;
+		draws_since_submit = 0;
+		++submits_this_frame;
 		if (reopen)
 		{
 			list->Reset(allocator[frame_index], nullptr);
@@ -1026,7 +1046,9 @@ struct Context::Impl
 		for (const std::wstring& e : events)
 			list->BeginEvent(0, e.c_str(), UINT((e.size() + 1) * sizeof(wchar_t)));
 		if (trace_frames && !--trace_frames)
-			Msg("[dx12 trace] end");
+			Msg("[dx12 trace] end, %u submissions in the frame", submits_this_frame);
+		submits_last_frame = submits_this_frame;
+		submits_this_frame = 0;
 		if (trace_requested && !trace_frames)
 		{
 			trace_frames = trace_requested;
@@ -1384,6 +1406,8 @@ void Context::RSSetScissorRects(UINT count, const D3D11_RECT* rects)
 void Context::OMSetRenderTargets(UINT count, RenderTargetView* const* rtvs, DepthStencilView* dsv)
 {
 	Impl& c = *m_impl;
+	if (c.draws_since_submit >= Impl::kSubmitPass)
+		c.SubmitEarly();
 	bool formats = false;
 	for (UINT i = 0; i < kMaxRT; ++i)
 	{
@@ -1507,6 +1531,7 @@ void Context::Dispatch(UINT x, UINT y, UINT z)
 	}
 	if (!ok)
 		return;
+	++c.draws_since_submit;
 	c.list->Dispatch(x, y, z);
 	StageBinding& b = c.stages[StageCS];
 	for (UINT i = 0; i < kMaxUAV; ++i)
