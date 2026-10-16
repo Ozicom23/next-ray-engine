@@ -90,9 +90,6 @@ void lj_str_resize(lua_State *L, MSize newmask)
   g->strhash = newhash;
 }
 
-/* Measuring aid (stat_script_load): calls, hash chain nodes visited, same length compares that failed */
-uint64_t lj_str_stat_calls = 0, lj_str_stat_steps = 0, lj_str_stat_samelen = 0;
-
 /* Intern a string and return string object. */
 GCstr *lj_str_new(lua_State *L, const char *str, size_t lenx)
 {
@@ -124,18 +121,13 @@ GCstr *lj_str_new(lua_State *L, const char *str, size_t lenx)
   h ^= b; h -= lj_rol(b, 16);
   /* Check if the string has already been interned. */
   o = gcref(g->strhash[h & g->strmask]);
-  lj_str_stat_calls++;
   if (LJ_LIKELY((((uintptr_t)str+len-1) & (LJ_PAGESIZE-1)) <= LJ_PAGESIZE-4)) {
     while (o != NULL) {
       GCstr *sx = gco2str(o);
-      lj_str_stat_steps++;
-      if (sx->len == len) {
-	if (str_fastcmp(str, strdata(sx), len) == 0) {
-	  /* Resurrect if dead. Can only happen with fixstring() (keywords). */
-	  if (isdead(g, o)) flipwhite(o);
-	  return sx;  /* Return existing string. */
-	}
-	lj_str_stat_samelen++;
+      if (sx->len == len && str_fastcmp(str, strdata(sx), len) == 0) {
+	/* Resurrect if dead. Can only happen with fixstring() (keywords). */
+	if (isdead(g, o)) flipwhite(o);
+	return sx;  /* Return existing string. */
       }
       o = gcnext(o);
     }
