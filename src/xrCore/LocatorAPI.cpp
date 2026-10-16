@@ -258,6 +258,7 @@ void CLocatorAPI::Register(LPCSTR name, u32 vfs, u32 crc, u32 ptr, u32 size_real
 
 	// otherwise insert file
 	m_files.insert(desc);
+	m_files_added++;
 
 	// Try to register folder(s)
 	string_path temp;
@@ -1621,6 +1622,7 @@ void CLocatorAPI::file_rename(LPCSTR src, LPCSTR dest, bool bOwerwrite)
 		// insert updated item
 		new_desc.name = xr_strlwr(xr_strdup(dest));
 		m_files.insert(new_desc);
+		m_files_added++;
 
 		// physically rename file
 		VerifyPath(dest);
