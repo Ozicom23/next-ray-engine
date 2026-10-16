@@ -1712,11 +1712,29 @@ BOOL CInifile::section_exist(LPCSTR S) const
 	return FindSect(S) != DATA.end();
 }
 
+const CInifile::Sect* CInifile::find_section(LPCSTR S) const
+{
+	RootCIt I = FindSect(S);
+	return I != DATA.end() ? &*I : nullptr;
+}
+
+// Names that r_section, which looks the name up in lower case, finds as they are
+static IC bool is_lower_name(LPCSTR S)
+{
+	size_t n = 0;
+	for (; S[n]; n++)
+		if (S[n] >= 'A' && S[n] <= 'Z')
+			return false;
+	return n < 256;
+}
+
 BOOL CInifile::line_exist(LPCSTR S, LPCSTR L) const
 {
-	if (!section_exist(S)) return FALSE;
+	RootCIt found = FindSect(S);
+	if (found == DATA.end()) return FALSE;
 
-	Sect& I = r_section(S);
+	// One lookup: r_section(S) is this section for a lower case name
+	const Sect& I = is_lower_name(S) ? *found : r_section(S);
 	auto A = std::lower_bound(I.Data.begin(), I.Data.end(), L, item_comparator());
 	return A != I.Data.end() && xr_strcmp(*A->first, L) == 0;
 }

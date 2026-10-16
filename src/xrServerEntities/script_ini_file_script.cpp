@@ -81,6 +81,30 @@ bool r_line(CScriptIniFile* self, LPCSTR S, int L, ::luabind::internal_string&N,
 int r_value_ex(CScriptIniFile* self, LPCSTR S, LPCSTR L, ::luabind::internal_string& V)
 {
 	V = "";
+	// The section once, and the line in it: section_exist, line_exist and r_string looked the section up seven times.
+	// The same answer for names r_section finds as they are (lower case) and a non-empty line name
+	if (S && L && L[0])
+	{
+		bool lower = true;
+		size_t n = 0;
+		for (; S[n]; n++)
+			if (S[n] >= 'A' && S[n] <= 'Z')
+				lower = false;
+		if (lower && n > 0 && n < 256)
+		{
+			const CInifile::Sect* sect = self->find_section(S);
+			if (!sect)
+				return 0;
+			auto A = std::lower_bound(sect->Data.begin(), sect->Data.end(), L, CInifile::item_comparator());
+			if (!(A != sect->Data.end() && xr_strcmp(*A->first, L) == 0))
+				return 0;
+			LPCSTR value = *A->second;
+			if (!value)
+				return 1;
+			V = value;
+			return 2;
+		}
+	}
 	if (!self->section_exist(S) || !self->line_exist(S, L))
 		return 0;
 	LPCSTR value = self->r_string(S, L);

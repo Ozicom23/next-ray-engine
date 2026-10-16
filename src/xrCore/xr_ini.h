@@ -285,6 +285,8 @@ public:
 	u32 section_count() const;
 	BOOL section_exist(LPCSTR S) const;
 	BOOL section_exist(const shared_str& S) const;
+	// The section named exactly S (as section_exist finds it), or null
+	const Sect* find_section(LPCSTR S) const;
 	Root& sections() { return DATA; }
 	Root const& sections() const { return DATA; }
 
