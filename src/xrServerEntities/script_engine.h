@@ -9,6 +9,8 @@
 #pragma once
 
 #include "script_storage.h"
+#include <unordered_set>
+#include <string_view>
 #include "script_export_space.h"
 #include "script_space_forward.h"
 #include "associative_vector.h"
@@ -78,8 +80,13 @@ protected:
 #endif // #ifdef USE_DEBUGGER
 
 private:
-	string128 m_last_no_file;
-	u32 m_last_no_file_length;
+	// Names of global lookups that missed and have no script file ($game_scripts$<name>.script). Every global
+	// that doesn't exist goes through auto_load; with only the last name kept, ~40 different names per frame
+	// (callback names, mods' optional globals) went to the file system each time. Valid while no file is added
+	// to the file index (FS.files_added()); the names are kept in m_no_file_storage
+	xr_deque<xr_string> m_no_file_storage;
+	std::unordered_set<std::string_view> m_no_files;
+	u32 m_no_files_fs_added;
 
 #ifdef USE_LUA_FUNCTOR_CACHE
 
@@ -123,6 +130,7 @@ public:
 
 	bool no_file_exists(LPCSTR file_name, u32 string_length);
 	void add_no_file(LPCSTR file_name, u32 string_length);
+	void clear_no_files();
 
 public:
 	CScriptEngine();

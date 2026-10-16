@@ -139,8 +139,7 @@ CScriptEngine::CScriptEngine()
 {
 	m_stack_level = 0;
 	m_reload_modules = false;
-	m_last_no_file_length = 0;
-	*m_last_no_file = 0;
+	m_no_files_fs_added = 0;
 
 #ifdef USE_LUA_FUNCTOR_CACHE
 	m_cache_valid = true;
@@ -182,8 +181,7 @@ CScriptEngine::~CScriptEngine()
 void CScriptEngine::unload()
 {
 	lua_settop(lua(), m_stack_level);
-	m_last_no_file_length = 0;
-	*m_last_no_file = 0;
+	clear_no_files();
 }
 
 int CScriptEngine::lua_panic(lua_State* L)
@@ -648,16 +646,28 @@ void CScriptEngine::restartDebugger				()
 
 bool CScriptEngine::no_file_exists(LPCSTR file_name, u32 string_length)
 {
-	if (m_last_no_file_length != string_length)
-		return (false);
-
-	return (!memcmp(m_last_no_file, file_name, string_length * sizeof(char)));
+	// A file added to the index since may be one of them
+	if (m_no_files_fs_added != FS.files_added())
+		clear_no_files();
+	return m_no_files.find(std::string_view(file_name, string_length)) != m_no_files.end();
 }
 
 void CScriptEngine::add_no_file(LPCSTR file_name, u32 string_length)
 {
-	m_last_no_file_length = string_length;
-	CopyMemory(m_last_no_file, file_name, (string_length + 1)*sizeof(char));
+	if (m_no_files_fs_added != FS.files_added())
+		clear_no_files();
+	const std::string_view name(file_name, string_length);
+	if (m_no_files.find(name) != m_no_files.end())
+		return;
+	const xr_string& kept = m_no_file_storage.emplace_back(file_name, string_length);
+	m_no_files.insert(std::string_view(kept.data(), kept.size()));
+}
+
+void CScriptEngine::clear_no_files()
+{
+	m_no_files.clear();
+	m_no_file_storage.clear();
+	m_no_files_fs_added = FS.files_added();
 }
 
 void CScriptEngine::collect_all_garbage()

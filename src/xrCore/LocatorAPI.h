@@ -71,6 +71,8 @@ private:
 	void check_pathes();
 
 	files_set m_files;
+	// Files added to the index (registered or renamed into it): lets callers cache that a file doesn't exist
+	u32 m_files_added = 0;
 	BOOL bNoRecurse;
 
 	xrCriticalSection m_auth_lock;
@@ -99,6 +101,7 @@ public:
 	};
 
 	Flags32 m_Flags;
+	u32 files_added() const { return m_files_added; }
 	u32 dwAllocGranularity;
 	u32 dwOpenCounter;
 
