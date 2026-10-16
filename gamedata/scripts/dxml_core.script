@@ -235,6 +235,58 @@ end
 local parser = slaxml.SLAXML()
 local parser_options = {stripWhitespace = true}
 
+-- getElement's split of an element's text (its name and attributes, in their order), by the text: queries
+-- (findElement, checkElement) split every element of a file again for every query. Each call still returns new tables
+-- filled the same way (callers change them). Made again when str_explode or str_explode_lim are other functions
+local element_split = {}
+local element_split_n = 0
+-- With the file appdata\dxml_check present every getElement also runs the splitting code and logs where they differ
+local dxml_check = nil
+do
+	local f = io.open(getFS():update_path("$app_data_root$", "dxml_check"), "r")
+	if f then
+		f:close()
+		dxml_check = { calls = 0, diffs = 0 }
+		_G.dxml_check_report = function()
+			log(string.format("* [dxml_check] %d getElement calls compared, %d differed", dxml_check.calls, dxml_check.diffs))
+		end
+	end
+end
+local split_explode, split_explode_lim
+local function split_element(s)
+	if split_explode ~= str_explode or split_explode_lim ~= str_explode_lim or element_split_n > 100000 then
+		element_split = {}
+		element_split_n = 0
+		split_explode, split_explode_lim = str_explode, str_explode_lim
+	end
+	local p = element_split[s]
+	if p == nil then
+		local e = str_explode_lim(s:sub(2), " ", 1)
+		p = { e[1], 0 }
+		if e[2] then
+			local attrs = str_explode(e[2], " ")
+			for i, attr in ipairs(attrs) do
+				local a = str_explode(attr, "=")
+				if a[1] == nil then
+					p = false -- a nil key: getElement's own code (its error)
+					break
+				end
+				local c = p[2]
+				p[3 + c * 2] = a[1]
+				if not a[2] then
+					p[4 + c * 2] = true
+				else
+					p[4 + c * 2] = a[2]
+				end
+				p[2] = c + 1
+			end
+		end
+		element_split[s] = p
+		element_split_n = element_split_n + 1
+	end
+	return p
+end
+
 function xml_object(xml_file_name, xml_string, xml_table)
 	local t = {
 		xml_string = xml_string,
@@ -268,6 +320,26 @@ function xml_object(xml_file_name, xml_string, xml_table)
 	-- If attribute has value - it will be string type, convert to number in your scripts if you need to
 	t.getElement = function(self, el)
 		if self:isElement(el) then
+			local p = split_element(el.el)
+			if p and not dxml_check then
+				local res = {}
+				res.name = p[1]
+				res.attr = {}
+				local attr = res.attr
+				for i = 1, p[2] do
+					attr[p[1 + i * 2]] = p[2 + i * 2]
+				end
+				return res
+			end
+			local fast
+			if p then
+				fast = {}
+				fast.name = p[1]
+				fast.attr = {}
+				for i = 1, p[2] do
+					fast.attr[p[1 + i * 2]] = p[2 + i * 2]
+				end
+			end
 			local res = {}
 			local e = str_explode_lim(el.el:sub(2), " ", 1)
 			res.name = e[1]
@@ -280,6 +352,24 @@ function xml_object(xml_file_name, xml_string, xml_table)
 						res.attr[a[1]] = true
 					else
 						res.attr[a[1]] = a[2]
+					end
+				end
+			end
+			if dxml_check then
+				dxml_check.calls = dxml_check.calls + 1
+				local same = fast and fast.name == res.name
+				if same then
+					for k, v in pairs(res.attr) do
+						if fast.attr[k] ~= v then same = false end
+					end
+					for k, v in pairs(fast.attr) do
+						if res.attr[k] ~= v then same = false end
+					end
+				end
+				if not same then
+					dxml_check.diffs = dxml_check.diffs + 1
+					if dxml_check.diffs <= 20 then
+						printf("! [dxml_check] getElement differs for %s", tostring(el.el))
 					end
 				end
 			end
@@ -1031,11 +1121,14 @@ function openXMLFile(xml_file_name)
 	local function loadFile(path)
 		local file_reader = getFS():r_open('$game_config$', path)
 		if file_reader then
-			local lua_s = ""
+			-- The bytes joined once (appending copied the whole string for every byte)
+			local bytes, n = {}, 0
+			local char = string.char
 			while not file_reader:r_eof() do
-				lua_s = lua_s .. string.char(file_reader:r_u8())
+				n = n + 1
+				bytes[n] = char(file_reader:r_u8())
 			end
-			return lua_s
+			return table.concat(bytes)
 		end
 	end
 

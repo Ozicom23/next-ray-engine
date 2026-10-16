@@ -102,21 +102,39 @@ function SLAXML()
 		return line
 	end
 
+	-- The same strings as appending to them piece by piece, built once at the end (appending copied the whole string
+	-- for every line and every byte of an included file)
 	parse_includes = function(s, rootFile)
-		local res = ""
+		local parts, n = {}, 0
 		if rootFile then
 			for line in s:gmatch('[^\r\n]+') do
-				res = res .. parse_include_line(line) .. "\n"
+				parts[n + 1] = parse_include_line(line)
+				parts[n + 2] = "\n"
+				n = n + 2
 			end
 		else
-			local lua_s = ""
+			local bytes, nb = {}, 0
+			local char = string.char
 			while not s:r_eof() do
-				lua_s = lua_s .. string.char(s:r_u8())
+				nb = nb + 1
+				bytes[nb] = char(s:r_u8())
 			end
+			local lua_s = table.concat(bytes)
 			-- getFS():r_close(s)
 			for line in lua_s:gmatch('[^\r\n]+') do
-				res = res .. parse_include_line(line) .. "\n"
+				parts[n + 1] = parse_include_line(line)
+				parts[n + 2] = "\n"
+				n = n + 2
 			end
+		end
+		local res = table.concat(parts)
+		if dxml_check_report and rootFile then
+			-- appdata\dxml_check (dxml_core): the string built by appending, compared
+			local old = ""
+			for line in s:gmatch('[^\r\n]+') do
+				old = old .. parse_include_line(line) .. "\n"
+			end
+			log(string.format("* [dxml_check] parse_includes %s (%d bytes)", old == res and "same" or "DIFFERS", #res))
 		end
 		-- res = sanitize(res)
 		-- printf_me("%s", res)
