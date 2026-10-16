@@ -129,11 +129,17 @@ void XRay::Engine::CalculateBonesThread()
 		for (const auto& snapshot : spatialsSnapshot)
 			snapshot.pKin->CalculateTracks();
 	}
-	// Then the bones of the models on all cores. A model's bones are its own state, calculated under its own lock;
-	// the bone callbacks (head and aim turning, ragdolls, attachments) read their own object only
+	// Then the bones of the models on all cores, each under its own lock. Their update callbacks (IK feet, head and aim
+	// turning, ragdolls) run after that, one model after another: the IK feet ray-pick the models around, which takes
+	// their locks, and two models doing that on two threads waited for each other (deadlock, two stalkers close by)
 	{
 		PROF_EVENT("CalculateBones: bones");
-		xr_parallel_for(0u, u32(spatialsSnapshot.size()), [](u32 i) { spatialsSnapshot[i].pKin->CalculateBones(TRUE); });
+		xr_parallel_for(0u, u32(spatialsSnapshot.size()), [](u32 i) { spatialsSnapshot[i].pKin->CalculateBonesDeferred(); });
+	}
+	{
+		PROF_EVENT("CalculateBones: callbacks");
+		for (const auto& snapshot : spatialsSnapshot)
+			snapshot.pKin->CalculateBonesCallback();
 	}
 }
 

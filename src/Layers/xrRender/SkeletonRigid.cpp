@@ -26,7 +26,20 @@ void CKinematics::CalculateTracks()
 	OnCalculateBones();
 }
 
-void CKinematics::CalculateBones(BOOL bForceExact)
+void CKinematics::CalculateBones(BOOL bForceExact) { CalculateBones_impl(bForceExact, false); }
+
+void CKinematics::CalculateBonesDeferred() { CalculateBones_impl(TRUE, true); }
+
+void CKinematics::CalculateBonesCallback()
+{
+	xrCriticalSectionGuard g(UCalc_Mutex);
+	if (!m_callback_pending)
+		return;
+	m_callback_pending = false;
+	if (Update_Callback) Update_Callback(this);
+}
+
+void CKinematics::CalculateBones_impl(BOOL bForceExact, bool defer_callback)
 {
 	PROF_EVENT("CKinematics::CalculateBones");
 	// early out.
@@ -177,7 +190,13 @@ void CKinematics::CalculateBones(BOOL bForceExact)
 	else
 		UCalc_ThisFrame = false;
 	//
-	if (Update_Callback) Update_Callback(this);
+	if (Update_Callback)
+	{
+		if (defer_callback)
+			m_callback_pending = true;
+		else
+			Update_Callback(this);
+	}
 }
 
 #ifdef DEBUG
