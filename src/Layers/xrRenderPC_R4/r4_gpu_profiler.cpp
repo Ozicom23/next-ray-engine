@@ -206,6 +206,9 @@ void frame_begin(bool enabled)
 	s.count = 0;
 	s_thread = GetCurrentThreadId();
 	s_recording = true;
+	// The whole frame as the outermost scope (closed by frame_end): what is drawn outside the timed scopes (UI, the
+	// present copy) shows as the difference to the scopes inside it
+	event_begin(L"FRAME");
 }
 
 void frame_end()
