@@ -48,7 +48,7 @@ namespace
 
 	// Long capture (stat_gpu_passes <seconds>), summed next to the overlay's short interval
 	bool s_capture = false;
-	u32 s_capture_end = 0; // Device.dwTimeGlobal
+	u32 s_capture_end = 0; // GetTickCount: real time, also under dbg_freeze (game time stands still)
 	float s_capture_seconds = 0.f;
 	xr_vector<Sum> s_capture_sums;
 	u32 s_capture_frames = 0;
@@ -185,7 +185,7 @@ void frame_begin(bool enabled)
 {
 	s_recording = false;
 	s_depth = 0;
-	if (s_capture && Device.dwTimeGlobal >= s_capture_end)
+	if (s_capture && s32(GetTickCount() - s_capture_end) >= 0)
 		finish_capture();
 	if (!(enabled || s_capture) || !create())
 		return;
@@ -266,7 +266,7 @@ void start_capture(float seconds)
 {
 	s_capture = true;
 	s_capture_seconds = seconds;
-	s_capture_end = Device.dwTimeGlobal + u32(seconds * 1000.f);
+	s_capture_end = GetTickCount() + u32(seconds * 1000.f);
 	s_capture_sums.clear();
 	s_capture_frames = 0;
 	Msg("* [GPU passes] measuring for %.0f s, keep the view still...", seconds);
