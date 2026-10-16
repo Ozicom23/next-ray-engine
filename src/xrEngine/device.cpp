@@ -603,7 +603,11 @@ void CRenderDevice::on_idle()
 #endif 
 	Device.isRendering = false;
 
-	secondary_tasks.wait();
+	{
+		// The main thread idle until the frame's secondary tasks (scheduler, bones, Lua GC step) are done
+		PROF_EVENT("Wait for secondary tasks");
+		secondary_tasks.wait();
+	}
 
 	if (psLua_ParallelGC_debug && psLua_ParallelGC && Device.LuaGCDebug)
 	{

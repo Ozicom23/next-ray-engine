@@ -1,8 +1,6 @@
-// neXt-Ray performance patches: 3DSS scope parts jittered with the upscaler (nextray_upscale_jitter), the scope image sampled at the jittered position. Bit 0x200 of r4_shader_patches (NEXTRAY_PATCHES) picks the
-// changed code, kept next to the original; engines without the define use it
-#ifndef NEXTRAY_PATCHES
-#define NEXTRAY_PATCHES 0xFFF
-#endif
+// neXt-Ray performance patches: 3DSS lens drawn after the upscaler (r4_upscaler_scope_late) at output resolution:
+// its screen position from nextray_lens_res there (screen_res stays at render resolution for the lens's other reads).
+// Without it (0) the original line. Otherwise the original 3DSS shader, unchanged
 /*
 	=====================================================================
 	Addon      : Shader 3D Scopes
@@ -20,13 +18,8 @@
 #include "common.h"
 #include "nv_utils.h"
 #include "thermal_utils.h"
+uniform float4 nextray_lens_res; // neXt-Ray: the lens's pixel grid when drawn after the upscaler, else 0
 
-#if (NEXTRAY_PATCHES & 0x200)
-// neXt-Ray: the upscaler's jitter (zero without an upscaler), so this matches the frame FSR/DLSS resolve
-uniform float4 nextray_upscale_jitter;
-uniform float4 nextray_upscale_jitter_prev; // xy: the frame before's jitter in pixels (its scene is s_prev_frame)
-
-#endif
 #define REFLECTIONS_FACTOR 0.3
 #define SPECULAR_FACTOR 2.0
 
@@ -794,15 +787,7 @@ if (RETICLE_TYPE == RT_DFP_ALT)
 	dirt = saturate(float4((1 - dirt.rgb) * 1.5 * calc_model_lq_lighting(lensnormal), dirt.a * DIRT_INTENSITY));
 
 	// Back image
-#if !(NEXTRAY_PATCHES & 0x200)
-	float2 screen_tc = I.hpos.xy * screen_res.zw;
-#else
-	// neXt-Ray: the back image is the frame before's scene (rt_Generic_temp, copied after its combine), rendered with its
-	// jitter j_prev; this frame has jitter j. Unjittered, lens pixel q shows the scene at S(q) (the magnification below);
-	// this lens pixel is q + j, so it takes S(p - j), which the frame before's scene holds at S(p - j) + j_prev. Without
-	// it the image jumped with the magnified difference of the two jitters after FSR removed j
-	float2 screen_tc = (I.hpos.xy - nextray_upscale_jitter.zw) * screen_res.zw;
-#endif
+	float2 screen_tc = I.hpos.xy * (nextray_lens_res.x > 0 ? nextray_lens_res.zw : screen_res.zw); // neXt-Ray
 	float zoom = lerp(1, IMAGE_SIZE, m_hud_params.x);
 	float shift = lerp(0, IMAGE_PROJECT, m_hud_params.x);
 	float2 scope_tc = (1.0 / zoom) * (screen_tc.xy - 0.5) + 0.5;
@@ -816,10 +801,6 @@ if (RETICLE_TYPE == RT_DFP_ALT)
 		if (distance(I.tc0, float2(-2.5 + smooth_zoom_part * 3, 0.5)) <= 1)
 			scope_tc.x += 0.2 * (1 - smooth_zoom_part);
 	}
-#if (NEXTRAY_PATCHES & 0x200)
-
-	scope_tc += nextray_upscale_jitter_prev.xy * screen_res.zw; // neXt-Ray: + j_prev, where the frame before's scene holds it
-#endif
 
 	float3 back;
 	if ((IMAGE_TYPE == IT_THERMAL || IMAGE_TYPE == IT_THERMAL_COLOR) && markswitch_current.x < 2) {

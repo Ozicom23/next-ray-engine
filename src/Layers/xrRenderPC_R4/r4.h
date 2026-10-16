@@ -197,6 +197,8 @@ public:
 	// The jitter of the frame before in render pixels, 0 when it wasn't upscaled (3D scope frames, upscaler off): for
 	// shaders that read the previous frame's scene (3DSS's lens magnifies rt_Generic_temp, copied in the frame before)
 	Fvector2 upscale_jitter_prev_px;
+	// 3DSS lenses drawn after the upscaler (r4_upscaler_scope_late): their pixel grid (output w, h, 1/w, 1/h), else 0
+	Fvector4 upscale_lens_res;
 	bool upscale_scene_active; // scene renders at upscaler resolution (also on 3D scope frames, which get no jitter)
 	u32 upscaler_check();
 	void upscaler_probe();
