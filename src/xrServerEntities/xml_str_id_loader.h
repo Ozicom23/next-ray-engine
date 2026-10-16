@@ -6,6 +6,7 @@
 #	include "xrUIXmlParser.h"
 #	include "object_broker.h"
 #endif // XRGAME_EXPORTS
+#include <unordered_set>
 
 
 //T_ID    - уникальный текстовый идентификатор (аттрибут id в XML файле)
@@ -156,7 +157,7 @@ typename void CSXML_IdToIndex::InitInternal()
 	// The ids so far by their shared string (one per text): the duplicate check compared each new id with every one
 	// before it, making a shared string of both for every compare (seconds at the start with GAMMA's thousands of
 	// characters and dialogs)
-	xr_unordered_set<const void*> known_ids;
+	std::unordered_set<const void*> known_ids;
 	// A plain tag name: the items are walked from one to the next instead of from the first one for every index
 	const bool walk = !strchr(tag_name, ':');
 	for (int it = 0; it < count; ++it)
