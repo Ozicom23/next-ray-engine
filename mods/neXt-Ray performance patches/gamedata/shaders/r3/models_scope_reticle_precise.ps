@@ -796,7 +796,10 @@ if (RETICLE_TYPE == RT_DFP_ALT)
 #if !(NEXTRAY_PATCHES & 0x200)
 	float2 screen_tc = I.hpos.xy * screen_res.zw;
 #else
-	float2 screen_tc = (I.hpos.xy - nextray_upscale_jitter.zw) * screen_res.zw; // neXt-Ray: the scope image carries the frame's jitter
+	// neXt-Ray: the back image is this frame's scene, rendered with the upscaler's jitter j. Unjittered, lens pixel q shows
+	// the scene at S(q) (the magnification below); this lens pixel is q + j, so it takes S(p - j), and that content sits
+	// at S(p - j) + j in the jittered scene. Without it the magnified jitter (j * zoom) was left after FSR removed j
+	float2 screen_tc = (I.hpos.xy - nextray_upscale_jitter.zw) * screen_res.zw;
 #endif
 	float zoom = lerp(1, IMAGE_SIZE, m_hud_params.x);
 	float shift = lerp(0, IMAGE_PROJECT, m_hud_params.x);
@@ -811,6 +814,10 @@ if (RETICLE_TYPE == RT_DFP_ALT)
 		if (distance(I.tc0, float2(-2.5 + smooth_zoom_part * 3, 0.5)) <= 1)
 			scope_tc.x += 0.2 * (1 - smooth_zoom_part);
 	}
+#if (NEXTRAY_PATCHES & 0x200)
+
+	scope_tc += nextray_upscale_jitter.zw * screen_res.zw; // neXt-Ray: + j, where the jittered scene holds it
+#endif
 
 	float3 back;
 	if ((IMAGE_TYPE == IT_THERMAL || IMAGE_TYPE == IT_THERMAL_COLOR) && markswitch_current.x < 2) {
