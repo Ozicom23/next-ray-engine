@@ -673,6 +673,7 @@ extern int ps_r4_post_pingpong;
 extern int ps_r4_upscaler_nvg_blur;
 extern int ps_r4_tree_bender_cull;
 extern int ps_r4_shader_warmup;
+extern int ps_r4_shader_patches;
 extern float ps_r4_frame_jit_margin;
 class CCC_FramePacingStats : public IConsole_Command
 {
@@ -1541,6 +1542,7 @@ void xrRender_initconsole()
 	CMD4(CCC_Integer, "r4_upscaler_nvg_blur", &ps_r4_upscaler_nvg_blur, 0, 1); // night vision blur at output resolution
 	CMD4(CCC_Integer, "r4_tree_bender_cull", &ps_r4_tree_bender_cull, 0, 1); // benders out of a tree's reach go last
 	CMD4(CCC_Integer, "r4_shader_warmup", &ps_r4_shader_warmup, 0, 1); // cached shaders created at the game start
+	CMD4(CCC_Integer, "r4_shader_patches", &ps_r4_shader_patches, 0, 0xFFF); // patch mod shader changes in use (bits), vid_restart
 	CMD1(CCC_FramePacingStats, "stat_frame_pacing");
 	CMD1(CCC_TexStreamStats, "stat_tex_stream");
 	CMD4(CCC_Integer, "r4_sky_on_demand", &ps_r4_sky_on_demand, 0, 1); // read when the weathers are created

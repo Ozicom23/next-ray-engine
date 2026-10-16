@@ -698,6 +698,9 @@ void CRender::reset_end()
 // The cache files carry one variant per settings combination, named by the settings (the same for every shader of
 // a session): the name of the last compiled shader picks them. Level loads are not touched.
 int ps_r4_shader_warmup = 1;
+// r4_shader_patches: bits of the neXt-Ray patch mod's shader changes in use, the shaders get it as NEXTRAY_PATCHES
+// (each change is kept next to the original code and picked by its bit; vid_restart recompiles). In the variant name
+int ps_r4_shader_patches = 0x1FF;
 namespace shader_warmup
 {
 	static std::thread s_thread;
@@ -2146,6 +2149,18 @@ HRESULT CRender::shader_compile(
 	}
 	sh_name[len] = '0' + char(!o.dx11_hdr10);
 	++len;
+
+	// NEXTRAY_PATCHES: the bits of r4_shader_patches, three hex digits in the variant name
+	char c_nextray_patches[8];
+	xr_sprintf(c_nextray_patches, "0x%03X", u32(ps_r4_shader_patches & 0xFFF));
+	defines[def_it].Name = "NEXTRAY_PATCHES";
+	defines[def_it].Definition = c_nextray_patches;
+	def_it++;
+	for (int i = 2; i < 5; ++i)
+	{
+		sh_name[len] = c_nextray_patches[i];
+		++len;
+	}
 
 	sh_name[len] = 0;
 	{

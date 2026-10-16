@@ -1,0 +1,146 @@
+// neXt-Ray performance patches: fog scattering: SampleLevel, no-fog pixels skip the blur. Bit 0x020 of r4_shader_patches (NEXTRAY_PATCHES) picks the
+// changed code, kept next to the original; engines without the define use it
+#ifndef NEXTRAY_PATCHES
+#define NEXTRAY_PATCHES 0xFFF
+#endif
+#if (NEXTRAY_PATCHES & 0x020)
+// neXt-Ray: Sample() -> SampleLevel(..., 0) (one-mip targets, samplers without anisotropy: the same values), so
+// the fetches stay inside the branches
+#endif
+/**
+ * @ Version: SCREEN SPACE SHADERS - UPDATE 23
+ * @ Description: Simple and fast Fog Scattering
+ * @ Modified time: 2025-05-11 21:28:20
+ * @ Author: https://www.moddb.com/members/ascii1457
+ * @ Mod: https://www.moddb.com/mods/stalker-anomaly/addons/screen-space-shaders
+ */
+
+#include "screenspace_common.h"
+#include "screenspace_fog.h"
+
+static const float2 dband_dir_Offsets[4] =
+{
+	float2( 1, 1),	// XOX
+	float2(-1,-1),	// O0O
+	float2(-1, 1),	// XOX
+	float2( 1,-1)	
+};
+
+float4 ssfx_scattering_setup;
+
+void dband_process_fog(inout float3 color, float2 tc, float noise, float2 dir, float loop_step)
+{
+	// Some vars
+	float3 sampled_pixel;
+	float3 diff;
+	float3 avg = 0, max_diff = 0;
+
+	float pixel_factor = loop_step / 2;
+
+	// Radius for the sample
+	float radius = noise * (48 * pixel_factor * pixel_factor) * ssfx_pixel_size;
+
+	// Sample 4 points arround the original pixel
+	[unroll (4)]
+	for (int taps = 0; taps <= 4; taps++)
+	{
+		// Sample pixel
+#if !(NEXTRAY_PATCHES & 0x020)
+		sampled_pixel = s_blur_2.Sample(smp_linear, tc + radius * (dir * dband_dir_Offsets[taps])).rgb;
+#else
+		sampled_pixel = s_blur_2.SampleLevel(smp_linear, tc + radius * (dir * dband_dir_Offsets[taps]), 0).rgb;
+#endif
+		
+		// Add to the average
+		avg += sampled_pixel;
+
+		// Difference between original pixel and sampled pixel
+		diff = abs(color - sampled_pixel);
+
+		// From the 4 samples save the biggest difference
+		max_diff = max(max_diff, diff);
+	}
+	 
+	// Normalize average
+	avg /= 4.0f;
+
+	// Difference between original pixel and average
+	diff = abs(color - avg);
+
+	// Calc how much the pixel difference is close to our threshold.
+	float3 threshold = saturate((1.0 - diff  / 0.039215f) * 3.0f) * saturate((1.0 - max_diff  / 0.039215f) * 3.0f);
+
+	// We use the original pixel or average?
+	color = lerp(color, avg, threshold);
+}
+
+float3 ssfx_debanding_fog(float3 color, float2 tc)
+{
+	// Noise
+	float db_noise = SSFX_permute(SSFX_permute(SSFX_permute(tc.x) + tc.y) + noise(tc));
+
+	// Get random direction [ -1 ~ 1 ]
+	float2 dir = float2(cos(db_noise), sin(db_noise));
+
+	[unroll (2)]
+	for (int loop_cnt = 1; loop_cnt <= 2; loop_cnt++)
+	{
+		// More variaton for each iteration
+		db_noise = SSFX_permute(db_noise);
+
+		// Process image
+		dband_process_fog(color, tc, db_noise * 0.0033f, dir, loop_cnt);
+	}
+
+	// Return result
+	return color;
+}
+
+
+float4 main(p_screen I) : SV_Target
+{
+	// Sample buffers
+#ifndef USE_MSAA
+#if !(NEXTRAY_PATCHES & 0x020)
+	float4 Pos = s_position.Sample( smp_nofilter, I.tc0 );
+#else
+	float4 Pos = s_position.SampleLevel( smp_nofilter, I.tc0 , 0);
+#endif
+#else
+	float4 Pos = s_position.Load( int3( I.hpos.xy, 0 ), 0 );
+#endif
+
+	float3 P = float3( Pos.z * ( I.hpos.xy * pos_decompression_params.zw - pos_decompression_params.xy ), Pos.z );
+
+	// Calc fog ( Vanilla + Height fog )
+	float fogresult = SSFX_CALC_FOG(P);
+	fogresult *= fogresult;
+
+#if (NEXTRAY_PATCHES & 0x020)
+#ifdef NEXTRAY_SDR
+	// neXt-Ray: with 8 bit buffers Delta = dot(blur, img) <= 3, so where fogresult * 9 <= 0.1 (and the smoothstep's
+	// upper edge is above 0.1) the blur weight is 0 and the result is img exactly: the blurred, debanded taps are skipped
+	[branch]
+	if (1.0f - (ssfx_scattering_setup.x * 0.8) > 0.1f && fogresult * 9.0f <= 0.1f)
+		return float4(s_image.SampleLevel(smp_nofilter, I.tc0, 0).rgb, 1);
+#endif
+
+#endif
+	// Scene & Blurred Scene
+#if !(NEXTRAY_PATCHES & 0x020)
+	float3 blur = ssfx_debanding_fog(s_blur_2.Sample(smp_linear, I.tc0).rgb, I.tc0);
+	float3 img = s_image.Sample(smp_nofilter, I.tc0);
+#else
+	float3 blur = ssfx_debanding_fog(s_blur_2.SampleLevel(smp_linear, I.tc0, 0).rgb, I.tc0);
+	float3 img = s_image.SampleLevel(smp_nofilter, I.tc0, 0);
+#endif
+
+	// Use color difference to adjust the blur weight. ( To avoid light leaking to fog )
+	float Delta = dot(blur, img);
+	fogresult *= Delta * Delta;
+
+	// Mix Scene with Blur
+	float3 fog_scattering = lerp(img, max(img, blur), smoothstep(0.1f, 1.0f - (ssfx_scattering_setup.x * 0.8), fogresult));
+
+	return float4(fog_scattering, 1);
+}
