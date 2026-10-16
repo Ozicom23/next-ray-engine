@@ -649,6 +649,18 @@ public:
 	CCC_Dx12DumpRT(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; }
 	virtual void Execute(LPCSTR args) { dx12_request_rt_dump(args); }
 };
+// r__dx12_trace [frames]: every draw, dispatch, clear and copy of the next frame(s) in the log, with shaders, targets
+// and the resources each stage reads (DROPPED: read while written by the same draw, bound as null)
+class CCC_Dx12Trace : public IConsole_Command
+{
+public:
+	CCC_Dx12Trace(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; }
+	virtual void Execute(LPCSTR args)
+	{
+		const int frames = args && args[0] ? atoi(args) : 1;
+		HW.pContext->TraceFrames(UINT(clampr(frames, 1, 4)));
+	}
+};
 #endif
 
 class CCC_TexStreamStats : public IConsole_Command
@@ -1348,6 +1360,7 @@ void xrRender_initconsole()
 	CMD1(CCC_Screenshot, "screenshot");
 #ifdef USE_DX12
 	CMD1(CCC_Dx12DumpRT, "r__dx12_dump_rt");
+	CMD1(CCC_Dx12Trace, "r__dx12_trace");
 #endif
 
 	//	Igor: just to test bug with rain/particles corruption

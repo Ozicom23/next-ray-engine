@@ -122,6 +122,92 @@ struct Context::Impl
 	Impl() { barriers.reserve(64); }
 
 	//---------------------------------------------------------------------------------------------------------------
+	// r__dx12_trace
+	UINT trace_frames = 0, trace_requested = 0;
+	UINT trace_index = 0;
+
+	static xr_string ShortName(const xr_string& path)
+	{
+		// "...\shaders_cache\r4\combine_2_naa.ps\<variant>" -> "combine_2_naa.ps"
+		const char* p = strstr(path.c_str(), "\\r4\\");
+		if (!p)
+			return path;
+		const char* end = strchr(p + 4, '\\');
+		return end ? xr_string(p + 4, end) : xr_string(p + 4);
+	}
+
+	static xr_string ResName(const Resource* r)
+	{
+		if (!r)
+			return "null";
+		if (!r->m_debug_name.empty())
+			return r->m_debug_name;
+		return make_string("#%llu:%ux%u:f%d", r->Id(), r->m_width, r->m_height, int(r->m_format));
+	}
+
+	void TraceStage(xr_string& out, UINT s, const char* label)
+	{
+		const StageBinding& b = stages[s];
+		if (!b.shader)
+			return;
+		out += make_string(" | %s %s", label, ShortName(b.shader->m_name).c_str());
+		for (UINT i = 0; i < b.shader->m_bindings.srv_count; ++i)
+		{
+			if (!b.shader->m_bindings.srv_dim[i])
+				continue;
+			const ShaderResourceView* v = b.srv[i];
+			out += make_string(" t%u=%s%s", i, (b.hazard & (1u << i)) ? "DROPPED:" : "", v ? ResName(v->m_res).c_str() : "null");
+		}
+		if (s == StageCS)
+			for (UINT i = 0; i < b.shader->m_bindings.uav_count; ++i)
+				if (b.shader->m_bindings.uav_dim[i])
+					out += make_string(" u%u=%s", i, b.uav[i] ? ResName(b.uav[i]->m_res).c_str() : "null");
+	}
+
+	void TraceLine(xr_string& out)
+	{
+		if (!events.empty())
+		{
+			const std::wstring& e = events.back();
+			out += " @";
+			for (wchar_t ch : e)
+				out += char(ch < 128 ? ch : '?');
+		}
+		if (out.size() > 3900)
+			out.resize(3900);
+		Msg("%s", out.c_str());
+	}
+
+	void TraceDraw(const char* what, UINT count)
+	{
+		xr_string out = make_string("[dx12 trace] %u %s %u", trace_index++, what, count);
+		for (UINT i = 0; i < kMaxRT; ++i)
+			if (rtv[i])
+			{
+				D3D12_CPU_DESCRIPTOR_HANDLE h;
+				out += make_string(" rt%u=%s", i, rtv[i]->m_back_buffer ? "backbuffer" : ResName(ResolveRTV(rtv[i], h)).c_str());
+			}
+		if (dsv)
+			out += make_string(" ds=%s%s", ResName(dsv->m_res).c_str(), dsv->m_read_only ? "(ro)" : "");
+		if (vb_count && vb[0])
+			out += make_string(" vb=%u/%u", vb_stride[0], vb_offset[0]);
+		if (layout)
+			out += make_string(" il=%u", UINT(layout->m_elements.size()));
+		TraceStage(out, StageVS, "VS");
+		TraceStage(out, StageGS, "GS");
+		TraceStage(out, StagePS, "PS");
+		TraceLine(out);
+	}
+
+	bool BeginDraw(const char* what, UINT count)
+	{
+		const bool ok = PrepareDraw();
+		if (trace_frames)
+			TraceDraw(ok ? what : "SKIPPED", count);
+		return ok;
+	}
+
+	//---------------------------------------------------------------------------------------------------------------
 	void Record() { recorded = true; }
 
 	void InvalidateApplied()
@@ -939,6 +1025,15 @@ struct Context::Impl
 		InvalidateApplied();
 		for (const std::wstring& e : events)
 			list->BeginEvent(0, e.c_str(), UINT((e.size() + 1) * sizeof(wchar_t)));
+		if (trace_frames && !--trace_frames)
+			Msg("[dx12 trace] end");
+		if (trace_requested && !trace_frames)
+		{
+			trace_frames = trace_requested;
+			trace_requested = 0;
+			trace_index = 0;
+			Msg("[dx12 trace] frame %llu, %u frame(s)", frame_number, trace_frames);
+		}
 	}
 
 	bool CommandsPending(u64 fence) const { return fence >= dev->pending_fence.load(); }
@@ -1378,32 +1473,39 @@ void Context::OMSetDepthStencilState(DepthStencilState* state, UINT stencil_ref)
 
 void Context::Draw(UINT vertex_count, UINT start_vertex)
 {
-	if (m_impl->PrepareDraw())
+	if (m_impl->BeginDraw("draw", vertex_count))
 		m_impl->list->DrawInstanced(vertex_count, 1, start_vertex, 0);
 }
 
 void Context::DrawIndexed(UINT index_count, UINT start_index, INT base_vertex)
 {
-	if (m_impl->PrepareDraw())
+	if (m_impl->BeginDraw("draw_indexed", index_count))
 		m_impl->list->DrawIndexedInstanced(index_count, 1, start_index, base_vertex, 0);
 }
 
 void Context::DrawInstanced(UINT vertex_count, UINT instance_count, UINT start_vertex, UINT start_instance)
 {
-	if (m_impl->PrepareDraw())
+	if (m_impl->BeginDraw("draw", vertex_count))
 		m_impl->list->DrawInstanced(vertex_count, instance_count, start_vertex, start_instance);
 }
 
 void Context::DrawIndexedInstanced(UINT index_count, UINT instance_count, UINT start_index, INT base_vertex, UINT start_instance)
 {
-	if (m_impl->PrepareDraw())
+	if (m_impl->BeginDraw("draw_indexed", index_count))
 		m_impl->list->DrawIndexedInstanced(index_count, instance_count, start_index, base_vertex, start_instance);
 }
 
 void Context::Dispatch(UINT x, UINT y, UINT z)
 {
 	Impl& c = *m_impl;
-	if (!c.PrepareDispatch())
+	const bool ok = c.PrepareDispatch();
+	if (c.trace_frames)
+	{
+		xr_string out = make_string("[dx12 trace] %u %s %ux%ux%u", c.trace_index++, ok ? "dispatch" : "SKIPPED dispatch", x, y, z);
+		c.TraceStage(out, StageCS, "CS");
+		c.TraceLine(out);
+	}
+	if (!ok)
 		return;
 	c.list->Dispatch(x, y, z);
 	StageBinding& b = c.stages[StageCS];
@@ -1426,6 +1528,12 @@ void Context::ClearRenderTargetView(RenderTargetView* rtv, const FLOAT color[4])
 	else
 		c.RequireView(rtv, r, D3D12_RESOURCE_STATE_RENDER_TARGET);
 	c.FlushBarriers();
+	if (c.trace_frames)
+	{
+		xr_string out = make_string("[dx12 trace] %u clear %s (%.3f %.3f %.3f %.3f)", c.trace_index++,
+		                            rtv->m_back_buffer ? "backbuffer" : Impl::ResName(r).c_str(), color[0], color[1], color[2], color[3]);
+		c.TraceLine(out);
+	}
 	c.list->ClearRenderTargetView(h, color, 0, nullptr);
 	c.Record();
 }
@@ -1535,6 +1643,11 @@ void Context::CopyResource(Resource* dst, Resource* src)
 	if (!dst || !src)
 		return;
 	Impl& c = *m_impl;
+	if (c.trace_frames)
+	{
+		xr_string out = make_string("[dx12 trace] %u copy %s <- %s", c.trace_index++, Impl::ResName(dst).c_str(), Impl::ResName(src).c_str());
+		c.TraceLine(out);
+	}
 	if (dst->IsBuffer())
 	{
 		// Buffers: from a GPU buffer, a dynamic buffer's ring slice or staging memory
@@ -2117,6 +2230,8 @@ void Context::EndFrame()
 	const u64 fence = c.Submit(false);
 	c.NextFrame(fence);
 }
+
+void Context::TraceFrames(UINT frames) { m_impl->trace_requested = frames ? frames : 1; }
 
 ID3D12GraphicsCommandList* Context::NativeList()
 {

@@ -142,6 +142,7 @@ public:
 
 	ID3D12Resource* m_resource = nullptr;
 	D3D12MA::Allocation* m_allocation = nullptr;
+	xr_string m_debug_name; // the engine's render target name, for r__dx12_trace
 
 	D3D12_RESOURCE_STATES m_state = D3D12_RESOURCE_STATE_COMMON;
 	std::vector<D3D12_RESOURCE_STATES> m_states;
@@ -540,6 +541,8 @@ public:
 	// Frame: the frame's commands are submitted and the next frame starts (with Present when a swap chain is given)
 	HRESULT Present(IDXGISwapChain1* swap_chain, UINT interval, UINT flags);
 	void EndFrame();
+	// r__dx12_trace: every draw, dispatch, clear and copy of the next frames in the log (shaders, targets, views)
+	void TraceFrames(UINT frames);
 
 	// Native access: the command list being recorded, with all pending barriers issued. After native recording the
 	// context's bindings are set again at the next draw (InvalidateNative); Transition moves a resource to a state
