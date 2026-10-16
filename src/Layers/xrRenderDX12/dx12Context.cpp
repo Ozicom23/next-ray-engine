@@ -1419,12 +1419,13 @@ struct Context::Front
 		return static_cast<T*>(Reserve(bytes, 16, 1024));
 	}
 
-	// A call from a thread other than the render thread races with it: the first ones go to the log with their stack
-	// (offsets in the exe, for the PDB)
+	// A call from another thread than the one that started the recording: the level load task draws the loading
+	// screen (under the engine's loading-title lock, never at the same time as the render thread); anything else
+	// would race. The first ones go to the log with their stack (offsets in the exe, for the PDB)
 	static void ForeignCall()
 	{
 		static std::atomic<int> logged{ 0 };
-		if (logged++ >= 24)
+		if (logged++ >= 3)
 			return;
 		void* frames[12];
 		const USHORT n = CaptureStackBackTrace(2, 12, frames, nullptr);
