@@ -674,6 +674,18 @@ extern int ps_r4_upscaler_nvg_blur;
 extern int ps_r4_tree_bender_cull;
 extern int ps_r4_shader_warmup;
 extern int ps_r4_shader_patches;
+extern int ps_r4_upscaler_jitter;
+extern int g_upscale_frames_log;
+class CCC_UpscaleFrames : public IConsole_Command
+{
+public:
+	CCC_UpscaleFrames(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; }
+	virtual void Execute(LPCSTR args)
+	{
+		const int n = atoi(args);
+		g_upscale_frames_log = n > 0 ? _min(n, 120) : 12;
+	}
+};
 extern float ps_r4_frame_jit_margin;
 class CCC_FramePacingStats : public IConsole_Command
 {
@@ -1543,6 +1555,8 @@ void xrRender_initconsole()
 	CMD4(CCC_Integer, "r4_tree_bender_cull", &ps_r4_tree_bender_cull, 0, 1); // benders out of a tree's reach go last
 	CMD4(CCC_Integer, "r4_shader_warmup", &ps_r4_shader_warmup, 0, 1); // cached shaders created at the game start
 	CMD4(CCC_Integer, "r4_shader_patches", &ps_r4_shader_patches, 0, 0xFFF); // patch mod shader changes in use (bits), vid_restart
+	CMD4(CCC_Integer, "r4_upscaler_jitter", &ps_r4_upscaler_jitter, 0, 2); // 1 on, 0 off, 2 off while a 3D scope view is active
+	CMD1(CCC_UpscaleFrames, "stat_upscale_frames"); // the next n frames' scope view and upscaler state to the log
 	CMD1(CCC_FramePacingStats, "stat_frame_pacing");
 	CMD1(CCC_TexStreamStats, "stat_tex_stream");
 	CMD4(CCC_Integer, "r4_sky_on_demand", &ps_r4_sky_on_demand, 0, 1); // read when the weathers are created
