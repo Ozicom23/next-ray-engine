@@ -1240,6 +1240,23 @@ void CLocatorAPI::_initialize(u32 flags, LPCSTR target_folder, LPCSTR fs_name)
 			mix(f.modif);
 		}
 		Msg("* FS: index fingerprint %016llx", h);
+		// fs_index_dump next to fsgame.ltx: the whole index into fs_index_dump.txt there, to compare ways of building it
+		string_path dump;
+		xr_strcpy(dump, sizeof(dump), fsRoot.generic_string().c_str());
+		const size_t n = xr_strlen(dump);
+		if (n && dump[n - 1] != '\\' && dump[n - 1] != '/')
+			xr_strcat(dump, "\\");
+		xr_strcat(dump, "fs_index_dump");
+		if (GetFileAttributes(dump) != INVALID_FILE_ATTRIBUTES)
+		{
+			xr_strcat(dump, ".txt");
+			if (FILE* f = fopen(dump, "wb"))
+			{
+				for (const file& fl : m_files)
+					fprintf(f, "%s|%u|%u|%u|%u|%u\n", fl.name, fl.vfs, fl.ptr, fl.size_real, fl.size_compressed, fl.modif);
+				fclose(f);
+			}
+		}
 	}
 
 	m_Flags.set(flReady, TRUE);
