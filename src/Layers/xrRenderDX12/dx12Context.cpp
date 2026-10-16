@@ -126,26 +126,26 @@ struct Context::Impl
 	UINT trace_frames = 0, trace_requested = 0;
 	UINT trace_index = 0;
 
-	static xr_string ShortName(const xr_string& path)
+	static std::string ShortName(const xr_string& path)
 	{
 		// "...\shaders_cache\r4\combine_2_naa.ps\<variant>" -> "combine_2_naa.ps"
 		const char* p = strstr(path.c_str(), "\\r4\\");
 		if (!p)
-			return path;
+			return path.c_str();
 		const char* end = strchr(p + 4, '\\');
-		return end ? xr_string(p + 4, end) : xr_string(p + 4);
+		return end ? std::string(p + 4, end) : std::string(p + 4);
 	}
 
-	static xr_string ResName(const Resource* r)
+	static std::string ResName(const Resource* r)
 	{
 		if (!r)
 			return "null";
 		if (!r->m_debug_name.empty())
-			return r->m_debug_name;
+			return r->m_debug_name.c_str();
 		return make_string("#%llu:%ux%u:f%d", r->Id(), r->m_width, r->m_height, int(r->m_format));
 	}
 
-	void TraceStage(xr_string& out, UINT s, const char* label)
+	void TraceStage(std::string& out, UINT s, const char* label)
 	{
 		const StageBinding& b = stages[s];
 		if (!b.shader)
@@ -164,7 +164,7 @@ struct Context::Impl
 					out += make_string(" u%u=%s", i, b.uav[i] ? ResName(b.uav[i]->m_res).c_str() : "null");
 	}
 
-	void TraceLine(xr_string& out)
+	void TraceLine(std::string& out)
 	{
 		if (!events.empty())
 		{
@@ -180,7 +180,7 @@ struct Context::Impl
 
 	void TraceDraw(const char* what, UINT count)
 	{
-		xr_string out = make_string("[dx12 trace] %u %s %u", trace_index++, what, count);
+		std::string out = make_string("[dx12 trace] %u %s %u", trace_index++, what, count);
 		for (UINT i = 0; i < kMaxRT; ++i)
 			if (rtv[i])
 			{
@@ -1501,7 +1501,7 @@ void Context::Dispatch(UINT x, UINT y, UINT z)
 	const bool ok = c.PrepareDispatch();
 	if (c.trace_frames)
 	{
-		xr_string out = make_string("[dx12 trace] %u %s %ux%ux%u", c.trace_index++, ok ? "dispatch" : "SKIPPED dispatch", x, y, z);
+		std::string out = make_string("[dx12 trace] %u %s %ux%ux%u", c.trace_index++, ok ? "dispatch" : "SKIPPED dispatch", x, y, z);
 		c.TraceStage(out, StageCS, "CS");
 		c.TraceLine(out);
 	}
@@ -1530,7 +1530,7 @@ void Context::ClearRenderTargetView(RenderTargetView* rtv, const FLOAT color[4])
 	c.FlushBarriers();
 	if (c.trace_frames)
 	{
-		xr_string out = make_string("[dx12 trace] %u clear %s (%.3f %.3f %.3f %.3f)", c.trace_index++,
+		std::string out = make_string("[dx12 trace] %u clear %s (%.3f %.3f %.3f %.3f)", c.trace_index++,
 		                            rtv->m_back_buffer ? "backbuffer" : Impl::ResName(r).c_str(), color[0], color[1], color[2], color[3]);
 		c.TraceLine(out);
 	}
@@ -1645,7 +1645,7 @@ void Context::CopyResource(Resource* dst, Resource* src)
 	Impl& c = *m_impl;
 	if (c.trace_frames)
 	{
-		xr_string out = make_string("[dx12 trace] %u copy %s <- %s", c.trace_index++, Impl::ResName(dst).c_str(), Impl::ResName(src).c_str());
+		std::string out = make_string("[dx12 trace] %u copy %s <- %s", c.trace_index++, Impl::ResName(dst).c_str(), Impl::ResName(src).c_str());
 		c.TraceLine(out);
 	}
 	if (dst->IsBuffer())
