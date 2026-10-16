@@ -1292,9 +1292,20 @@ HRESULT Device::CreateBuffer(const D3D11_BUFFER_DESC* desc, const D3D11_SUBRESOU
 	rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 	rd.Flags = (desc->BindFlags & D3D11_BIND_UNORDERED_ACCESS) ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS : D3D12_RESOURCE_FLAG_NONE;
 
+	if (desc->Usage == D3D11_USAGE_DYNAMIC && desc->ByteWidth <= 65536)
+	{
+		b->m_shadowed = true;
+		b->m_shadow.assign(desc->ByteWidth, 0);
+		if (init && init->pSysMem)
+			memcpy(b->m_shadow.data(), init->pSysMem, desc->ByteWidth);
+		b->m_ptr_frame = 0; // uploaded at the first use
+		*out = b;
+		return S_OK;
+	}
 	if (desc->Usage == D3D11_USAGE_DYNAMIC)
 	{
-		// Lives in the upload ring once mapped. Initial data gets an upload buffer of its own until the first map
+		// Large (vertex/index streams): lives in the upload ring once mapped, the renderer maps it every frame.
+		// Initial data gets an upload buffer of its own until the first map
 		if (init && init->pSysMem)
 		{
 			D3D12MA::ALLOCATION_DESC ad = {};

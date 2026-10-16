@@ -429,6 +429,13 @@ void dxRenderDeviceRender::End()
 		PROF_EVENT("Async Screenshot");
 		DoAsyncScreenshot();
 	}
+#ifdef USE_DX12
+	{
+		// Console screenshots of this frame: the back buffer is complete now
+		void dx12_take_pending_screenshots();
+		dx12_take_pending_screenshots();
+	}
+#endif
 
 #if defined(USE_DX10) || defined(USE_DX11)
     UINT present_flags = 0;

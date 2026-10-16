@@ -587,10 +587,47 @@ namespace dx12_screenshot
 #endif // USE_DX12
 
 #if defined(USE_DX12)
+// The swap chain has several buffers: at the console command (frame start) the current one holds an older frame. Shots
+// to files wait for the end of the frame, before Present, when the back buffer is the image that goes on screen
+namespace dx12_screenshot
+{
+	struct Pending
+	{
+		IRender_interface::ScreenshotMode mode;
+		xr_string name;
+		bool named;
+	};
+	static xr_vector<Pending> s_pending;
+	static bool s_at_frame_end = false;
+}
+
+void dx12_take_pending_screenshots()
+{
+	if (dx12_screenshot::s_pending.empty())
+		return;
+	xr_vector<dx12_screenshot::Pending> pending;
+	pending.swap(dx12_screenshot::s_pending);
+	dx12_screenshot::s_at_frame_end = true;
+	for (const dx12_screenshot::Pending& p : pending)
+		RImplementation.Screenshot(p.mode, p.named ? p.name.c_str() : nullptr);
+	dx12_screenshot::s_at_frame_end = false;
+}
+
 void CRender::ScreenshotImpl(ScreenshotMode mode, LPCSTR name, CMemoryWriter* memory_writer)
 {
 	// demonized: Disable screenshots if HDR is enabled
 	if (ps_r4_hdr10_on) {
+		return;
+	}
+
+	if (!memory_writer && !dx12_screenshot::s_at_frame_end)
+	{
+		dx12_screenshot::Pending p;
+		p.mode = mode;
+		p.named = name != nullptr;
+		if (name)
+			p.name = name;
+		dx12_screenshot::s_pending.push_back(p);
 		return;
 	}
 

@@ -316,9 +316,39 @@ struct Context::Impl
 		return D3D12_GPU_DESCRIPTOR_HANDLE{ sampler_gpu0.ptr + u64(index) * sampler_inc };
 	}
 
-	D3D12_GPU_VIRTUAL_ADDRESS BufferAddress(Buffer* b) const
+	// A shadowed dynamic buffer's data into this frame's upload memory
+	void UploadShadow(Buffer* b)
 	{
-		if (!b || !b->m_va)
+		UploadSlice slice;
+		const u64 size = (u64(b->m_desc.ByteWidth) + 255) & ~255ull;
+		if (!upload.Alloc(size, 256, slice))
+			return;
+		memcpy(slice.cpu, b->m_shadow.data(), b->m_shadow.size());
+		b->m_va = slice.va;
+		b->m_ptr = slice.cpu;
+		b->m_ptr_frame = upload_epoch;
+		b->m_map_buffer = slice.buffer;
+		b->m_map_footprint.Offset = slice.offset;
+	}
+
+	D3D12_GPU_VIRTUAL_ADDRESS BufferAddress(Buffer* b)
+	{
+		if (!b)
+			return zero_buffer->m_va;
+		if (b->m_usage == D3D11_USAGE_DYNAMIC)
+		{
+			if (b->m_shadowed)
+			{
+				if (b->m_ptr_frame != upload_epoch)
+					UploadShadow(b); // unchanged since an earlier frame, its upload memory may be reused
+			}
+			else if (b->m_ptr && b->m_ptr_frame != upload_epoch && !b->m_warned_stale)
+			{
+				b->m_warned_stale = true;
+				Msg("! D3D12: a large dynamic buffer (%u bytes) is used in a later frame than it was written", b->m_desc.ByteWidth);
+			}
+		}
+		if (!b->m_va)
 			return zero_buffer->m_va;
 		return b->m_va;
 	}
@@ -1528,7 +1558,16 @@ void Context::CopyResource(Resource* dst, Resource* src)
 		}
 		ID3D12Resource* from = nullptr;
 		u64 offset = 0;
-		if (!src->m_cpu_data.empty())
+		if (src->IsBuffer() && static_cast<Buffer*>(src)->m_shadowed)
+		{
+			UploadSlice slice;
+			if (!c.upload.Alloc(size, 256, slice))
+				return;
+			memcpy(slice.cpu, static_cast<Buffer*>(src)->m_shadow.data(), size);
+			from = slice.buffer;
+			offset = slice.offset;
+		}
+		else if (!src->m_cpu_data.empty())
 		{
 			UploadSlice slice;
 			if (!c.upload.Alloc(size, 256, slice))
@@ -1751,6 +1790,13 @@ HRESULT Context::Map(Resource* res, UINT sub, D3D11_MAP type, UINT flags, D3D11_
 		{
 			Buffer* b = static_cast<Buffer*>(res);
 			const UINT size = b->m_desc.ByteWidth;
+			if (b->m_shadowed)
+			{
+				// Written in CPU memory, uploaded at Unmap (the contents stay valid as in D3D11)
+				mapped->pData = b->m_shadow.data();
+				mapped->RowPitch = mapped->DepthPitch = size;
+				return S_OK;
+			}
 			if (type == D3D11_MAP_WRITE_NO_OVERWRITE && b->m_ptr && b->m_ptr_frame == c.upload_epoch)
 			{
 				mapped->pData = b->m_ptr;
@@ -1832,6 +1878,13 @@ void Context::Unmap(Resource* res, UINT sub)
 	if (!res)
 		return;
 	Impl& c = *m_impl;
+	if (res->m_usage == D3D11_USAGE_DYNAMIC && res->IsBuffer())
+	{
+		Buffer* b = static_cast<Buffer*>(res);
+		if (b->m_shadowed)
+			c.UploadShadow(b);
+		return;
+	}
 	if (res->m_usage == D3D11_USAGE_DYNAMIC && !res->IsBuffer() && res->m_map_ptr)
 	{
 		c.Require(res, sub % res->m_mips, 1, (sub / res->m_mips) % res->ArraySize(), 1, 0, 1, false,

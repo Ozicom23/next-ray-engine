@@ -247,6 +247,94 @@ static D3D12_PRIMITIVE_TOPOLOGY_TYPE TopologyType(UINT t)
 	return D3D12_PRIMITIVE_TOPOLOGY_TYPE(t);
 }
 
+
+// Why a pipeline state was refused, in the log: names, formats, states, and the signature checks D3D11 only did at
+// draw time (a vertex shader input the input layout lacks, a pixel shader input the previous stage doesn't write)
+static void DiagnosePipeline(const GraphicsPipelineKey& key, Shader* const shaders[5], const InputLayout* layout,
+                             const D3D11_BLEND_DESC& blend, const D3D11_RASTERIZER_DESC& raster,
+                             const D3D11_DEPTH_STENCIL_DESC& depth)
+{
+	static const char* stage_names[5] = { "VS", "HS", "DS", "GS", "PS" };
+	for (UINT i = 0; i < 5; ++i)
+		if (shaders[i])
+			Msg("!   %s %s (crc %u, cb 0x%x, srv %u, smp %u)", stage_names[i], shaders[i]->m_name.c_str(), shaders[i]->m_crc,
+			    UINT(shaders[i]->m_bindings.cb_mask), UINT(shaders[i]->m_bindings.srv_count), UINT(shaders[i]->m_bindings.sampler_count));
+	Msg("!   RTs %u [%d %d %d %d], DSV %d (read-only %u), samples %u/%u, mask 0x%x, topology type %u", UINT(key.rt_count),
+	    int(key.rtv[0]), int(key.rtv[1]), int(key.rtv[2]), int(key.rtv[3]), int(key.dsv), UINT(key.dsv_read_only),
+	    UINT(key.samples), key.sample_quality, key.sample_mask, UINT(key.topology_type));
+	Msg("!   blend a2c %d indep %d rt0 on %d %d/%d op %d alpha %d/%d op %d mask 0x%x", blend.AlphaToCoverageEnable,
+	    blend.IndependentBlendEnable, blend.RenderTarget[0].BlendEnable, int(blend.RenderTarget[0].SrcBlend),
+	    int(blend.RenderTarget[0].DestBlend), int(blend.RenderTarget[0].BlendOp), int(blend.RenderTarget[0].SrcBlendAlpha),
+	    int(blend.RenderTarget[0].DestBlendAlpha), int(blend.RenderTarget[0].BlendOpAlpha), UINT(blend.RenderTarget[0].RenderTargetWriteMask));
+	Msg("!   depth %d write %d func %d stencil %d r/w 0x%x/0x%x; raster fill %d cull %d ccw %d bias %d/%f/%f clip %d ms %d aa %d",
+	    depth.DepthEnable, int(depth.DepthWriteMask), int(depth.DepthFunc), depth.StencilEnable, UINT(depth.StencilReadMask),
+	    UINT(depth.StencilWriteMask), int(raster.FillMode), int(raster.CullMode), raster.FrontCounterClockwise, raster.DepthBias,
+	    raster.DepthBiasClamp, raster.SlopeScaledDepthBias, raster.DepthClipEnable, raster.MultisampleEnable, raster.AntialiasedLineEnable);
+
+	auto reflect = [](const Shader* sh) -> ID3D11ShaderReflection* {
+		ID3D11ShaderReflection* r = nullptr;
+		if (sh && FAILED(D3DReflect(sh->m_code.data(), sh->m_code.size(), IID_ID3D11ShaderReflection, reinterpret_cast<void**>(&r))))
+			r = nullptr;
+		return r;
+	};
+	if (ID3D11ShaderReflection* vs = reflect(shaders[0]))
+	{
+		D3D11_SHADER_DESC sd = {};
+		vs->GetDesc(&sd);
+		for (UINT i = 0; i < sd.InputParameters; ++i)
+		{
+			D3D11_SIGNATURE_PARAMETER_DESC p = {};
+			vs->GetInputParameterDesc(i, &p);
+			if (p.SystemValueType != D3D_NAME_UNDEFINED)
+				continue;
+			bool found = false;
+			if (layout)
+				for (const D3D12_INPUT_ELEMENT_DESC& e : layout->m_elements)
+					if (!_stricmp(e.SemanticName, p.SemanticName) && e.SemanticIndex == p.SemanticIndex)
+						found = true;
+			if (!found)
+				Msg("!   VS input %s%u is not in the input layout (%u elements)", p.SemanticName, p.SemanticIndex,
+				    layout ? UINT(layout->m_elements.size()) : 0u);
+		}
+		vs->Release();
+	}
+	const Shader* producer = shaders[3] ? shaders[3] : shaders[2] ? shaders[2] : shaders[0];
+	ID3D11ShaderReflection* out = reflect(producer);
+	ID3D11ShaderReflection* ps = reflect(shaders[4]);
+	if (out && ps)
+	{
+		D3D11_SHADER_DESC od = {}, pd = {};
+		out->GetDesc(&od);
+		ps->GetDesc(&pd);
+		for (UINT i = 0; i < pd.InputParameters; ++i)
+		{
+			D3D11_SIGNATURE_PARAMETER_DESC p = {};
+			ps->GetInputParameterDesc(i, &p);
+			if (p.SystemValueType != D3D_NAME_UNDEFINED && p.SystemValueType != D3D_NAME_POSITION)
+				continue;
+			bool found = false;
+			for (UINT j = 0; j < od.OutputParameters && !found; ++j)
+			{
+				D3D11_SIGNATURE_PARAMETER_DESC o = {};
+				out->GetOutputParameterDesc(j, &o);
+				if (!_stricmp(o.SemanticName, p.SemanticName) && o.SemanticIndex == p.SemanticIndex)
+				{
+					found = true;
+					if (o.Register != p.Register || (p.Mask & ~o.Mask))
+						Msg("!   PS input %s%u: register %u mask 0x%x, written as register %u mask 0x%x", p.SemanticName,
+						    p.SemanticIndex, p.Register, UINT(p.Mask), o.Register, UINT(o.Mask));
+				}
+			}
+			if (!found)
+				Msg("!   PS input %s%u (register %u) is not written by the previous stage", p.SemanticName, p.SemanticIndex, p.Register);
+		}
+	}
+	if (out)
+		out->Release();
+	if (ps)
+		ps->Release();
+}
+
 ID3D12PipelineState* CreateGraphicsPipeline(Device* device, const GraphicsPipelineKey& key, const RootSignature* root,
                                             Shader* const shaders[5], const InputLayout* layout,
                                             const D3D11_BLEND_DESC& blend, const D3D11_RASTERIZER_DESC& raster,
@@ -350,11 +438,12 @@ ID3D12PipelineState* CreateGraphicsPipeline(Device* device, const GraphicsPipeli
 	const HRESULT hr = device->m_device->CreateGraphicsPipelineState(&d, IID_PPV_ARGS(&pso));
 	if (FAILED(hr))
 	{
-		Msg("! D3D12: CreateGraphicsPipelineState failed 0x%08x (VS %u, PS %u, RTs %u, DSV %d, topology %u)", hr,
-		    shaders[0] ? shaders[0]->m_crc : 0, shaders[4] ? shaders[4]->m_crc : 0, UINT(key.rt_count), int(key.dsv),
-		    UINT(key.topology_type));
+		Msg("! D3D12: CreateGraphicsPipelineState failed 0x%08x (VS %s, PS %s)", hr, shaders[0] ? shaders[0]->m_name.c_str() : "-",
+		    shaders[4] ? shaders[4]->m_name.c_str() : "-");
 		if (hr == DXGI_ERROR_DEVICE_REMOVED)
 			device->ReportRemoval("pipeline creation");
+		else
+			DiagnosePipeline(key, shaders, layout, blend, raster, depth);
 		return nullptr;
 	}
 	return pso;
@@ -369,7 +458,7 @@ ID3D12PipelineState* CreateComputePipeline(Device* device, const RootSignature* 
 	const HRESULT hr = device->m_device->CreateComputePipelineState(&d, IID_PPV_ARGS(&pso));
 	if (FAILED(hr))
 	{
-		Msg("! D3D12: CreateComputePipelineState failed 0x%08x (CS %u)", hr, shader->m_crc);
+		Msg("! D3D12: CreateComputePipelineState failed 0x%08x (CS %s, crc %u)", hr, shader->m_name.c_str(), shader->m_crc);
 		return nullptr;
 	}
 	return pso;

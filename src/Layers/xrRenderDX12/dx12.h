@@ -178,6 +178,12 @@ public:
 	void GetDesc(D3D11_BUFFER_DESC* desc) const { *desc = m_desc; }
 	D3D12_GPU_VIRTUAL_ADDRESS GpuAddress() const { return m_va; }
 	D3D11_BUFFER_DESC m_desc = {};
+	// Small DYNAMIC buffers (constant buffers among them) keep their contents in CPU memory: D3D11 keeps a dynamic
+	// buffer's data until the next map, while upload memory comes back after a few frames. Maps write here, the data
+	// goes to the upload ring at Unmap and again in any later frame that uses the buffer unchanged
+	std::vector<u8> m_shadow;
+	bool m_shadowed = false;
+	bool m_warned_stale = false;
 };
 
 class __declspec(uuid("6f1d2b3a-0c41-4f7a-9a51-1d0b6e3a7c03")) Texture1D : public Resource
@@ -287,6 +293,7 @@ public:
 	ShaderBindings m_bindings;
 	Stage m_stage = StageVS;
 	u32 m_crc = 0; // of the bytecode, for the pipeline key written to disk
+	xr_string m_name; // the engine's shader file, for logs
 };
 
 class __declspec(uuid("6f1d2b3a-0c41-4f7a-9a51-1d0b6e3a7c21")) VertexShader : public Shader {};

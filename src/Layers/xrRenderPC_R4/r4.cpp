@@ -1168,6 +1168,10 @@ static HRESULT create_shader(
 )
 {
 	result->sh = ShaderTypeTraits<T>::CreateHWShader(buffer, buffer_size);
+#ifdef USE_DX12
+	if (result->sh)
+		result->sh->m_name = file_name;
+#endif
 
 	ID3DShaderReflection* pReflection = 0;
 
@@ -1202,6 +1206,10 @@ static HRESULT create_shader(
 		SPS* sps_result = (SPS*)result;
 #ifdef USE_DX11
 		_result = HW.pDevice->CreatePixelShader(buffer, buffer_size, 0, &sps_result->ps);
+#ifdef USE_DX12
+		if (SUCCEEDED(_result) && sps_result->ps)
+			sps_result->ps->m_name = file_name;
+#endif
 #else // #ifdef USE_DX11
 		_result			= HW.pDevice->CreatePixelShader(buffer, buffer_size, &sps_result->ps);
 #endif // #ifdef USE_DX11
@@ -1240,6 +1248,10 @@ static HRESULT create_shader(
 		SVS* svs_result = (SVS*)result;
 #ifdef USE_DX11
 		_result = HW.pDevice->CreateVertexShader(buffer, buffer_size, 0, &svs_result->vs);
+#ifdef USE_DX12
+		if (SUCCEEDED(_result) && svs_result->vs)
+			svs_result->vs->m_name = file_name;
+#endif
 #else // #ifdef USE_DX11
 		_result			= HW.pDevice->CreateVertexShader(buffer, buffer_size, &svs_result->vs);
 #endif // #ifdef USE_DX11
@@ -1290,6 +1302,10 @@ static HRESULT create_shader(
 		SGS* sgs_result = (SGS*)result;
 #ifdef USE_DX11
 		_result = HW.pDevice->CreateGeometryShader(buffer, buffer_size, 0, &sgs_result->gs);
+#ifdef USE_DX12
+		if (SUCCEEDED(_result) && sgs_result->gs)
+			sgs_result->gs->m_name = file_name;
+#endif
 #else // #ifdef USE_DX11
 		_result			= HW.pDevice->CreateGeometryShader(buffer, buffer_size, &sgs_result->gs);
 #endif // #ifdef USE_DX11
