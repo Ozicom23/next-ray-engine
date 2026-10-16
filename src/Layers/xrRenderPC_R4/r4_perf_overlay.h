@@ -67,6 +67,11 @@ private:
 	float m_show_frame_ms = 0.f;
 	float m_show_low_fps = 0.f;
 	bool m_in_menu = false;
+	// Frame generation: the swap chain's presents (rendered and generated frames) over the refresh interval
+	float m_show_screen_fps = 0.f;
+	float m_presents_ms = 0.f;
+	u32 m_presents = 0;
+	bool m_presents_valid = false;
 
 	// Engine timers shown in detailed mode: update, scheduler, objects, physics, AI, animation, render, calc, HOM
 	static const u32 kTimers = 9;

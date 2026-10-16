@@ -106,6 +106,11 @@ namespace frame_pacing
 	static u64 s_rec_start_qpc = 0;
 	static float s_rec_seconds = 0.f;
 	static u64 s_prev_present1 = 0;
+	// The swap chain's own present count over the recording: with frame generation it also counts the generated frames
+	static UINT s_rec_presents0 = 0;
+	static bool s_rec_presents_ok = false;
+	static u32 s_rec_presents = 0;
+	static float s_rec_presents_ms = 0.f;
 	static double s_prev_gpu_end = 0.0;
 	static u64 s_prev_retired = 0;
 
@@ -498,6 +503,9 @@ namespace frame_pacing
 		if (c.n)
 			Msg("* [Frame pacing] %u frames in %.1f s: %.1f fps (average %.2f ms, median %.2f, 1%% low %.1f fps = %.2f ms, longest %.1f ms), frame to frame change %.2f ms, deviation %.2f ms, %u frames over twice the median",
 				n, seconds, 1000.f / c.mean, c.mean, c.median, 1000.f / c.low1, c.low1, c.longest, c.change, c.deviation, c.over2);
+		if (s_rec_presents_ok && s_rec_presents_ms > 0.f)
+			Msg("*   swap chain: %u presents in %.1f s, %.1f fps on the screen (frame generation included)", s_rec_presents,
+				s_rec_presents_ms / 1000.f, float(s_rec_presents) * 1000.f / s_rec_presents_ms);
 		const stats g = compute(gpu_iv);
 		if (g.n)
 			Msg("*   GPU side (%u intervals): average %.2f ms, median %.2f, 1%% low %.2f ms, longest %.1f ms, frame to frame change %.2f ms, deviation %.2f ms, %u over twice the median",
@@ -549,6 +557,9 @@ namespace frame_pacing
 		s_rec_last = u64(-1);
 		s_rec_start_qpc = CPU::QPC();
 		s_rec_seconds = seconds;
+		s_rec_presents_ok = HW.m_pSwapChain && SUCCEEDED(HW.m_pSwapChain->GetLastPresentCount(&s_rec_presents0));
+		if (!s_rec_presents_ok)
+			Msg("! [Frame pacing] the swap chain's present count is not available");
 		s_recording = true;
 		s_rec_open = true;
 		Msg("* [Frame pacing] recording %.0f s...", seconds);
@@ -638,6 +649,14 @@ namespace frame_pacing
 		{
 			s_rec_last = s_id;
 			s_rec_open = false;
+			UINT presents = 0;
+			if (s_rec_presents_ok && HW.m_pSwapChain && SUCCEEDED(HW.m_pSwapChain->GetLastPresentCount(&presents)))
+			{
+				s_rec_presents = presents - s_rec_presents0;
+				s_rec_presents_ms = float(qpc_ms(f.present1) - qpc_ms(s_rec_start_qpc));
+			}
+			else
+				s_rec_presents_ok = false;
 		}
 
 		// The next frame's slot: the frame it held retires (all of its data arrived long ago)

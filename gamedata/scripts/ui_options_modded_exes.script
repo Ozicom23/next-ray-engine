@@ -253,6 +253,21 @@ function on_xml_read()
 						precondition = for_r4,
 					},
 					{
+						id           = "dlss_preset",
+						type         = "list",
+						val          = 0,
+						cmd          = "r4_dlss_preset",
+						content      = {
+							{"default", "dlss_preset_default"},
+							{"j", "dlss_preset_j"},
+							{"k", "dlss_preset_k"},
+							{"l", "dlss_preset_l"},
+							{"m", "dlss_preset_m"},
+						},
+						vid          = true,
+						precondition = for_r4,
+					},
+					{
 						id           = "fsr_sharpness",
 						type         = "track",
 						val          = 2,
@@ -293,6 +308,24 @@ function on_xml_read()
 						precondition = for_r4,
 					},
 				}
+				-- DLSS preset only where DLSS can run; frame generation only in the DX12 exe (the command exists there)
+				if avail and not string.find(avail, "dlss", 1, true) then
+					for i, row in ipairs(rows) do
+						if row.id == "dlss_preset" then table.remove(rows, i) break end
+					end
+				end
+				if get_console():get_string("r4_framegen") then
+					table.insert(rows, 4, {
+						id           = "framegen",
+						type         = "check",
+						val          = 1,
+						def          = false,
+						cmd          = "r4_framegen",
+						bool_to_num  = true,
+						vid          = true,
+						precondition = for_r4,
+					})
+				end
 				for i, row in ipairs(rows) do
 					table.insert(advanced.gr, insert_idx + i - 1, row)
 				end
