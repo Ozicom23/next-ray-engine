@@ -705,6 +705,8 @@ namespace fs_index
 	static std::vector<std::string> s_queue; // last in, first out: deeper folders first, as Recurse walks them
 	static std::vector<std::thread> s_workers;
 	static bool s_active = false, s_stop = false;
+	static u32 s_threads = 0; // 0: by the number of cores
+	static u32 s_workers_started = 0;
 
 	static void queue_folder_locked(const std::string& path)
 	{
@@ -794,10 +796,15 @@ namespace fs_index
 		{
 			s_active = true;
 			s_stop = false;
-			u32 n = std::thread::hardware_concurrency();
-			n = n < 2 ? 2 : (n > 6 ? 6 : n);
+			u32 n = s_threads;
+			if (!n)
+			{
+				n = std::thread::hardware_concurrency();
+				n = n < 2 ? 2 : (n > 6 ? 6 : n);
+			}
 			for (u32 i = 0; i < n; i++)
 				s_workers.emplace_back(worker);
+			s_workers_started = n;
 		}
 		queue_folder_locked(root);
 		s_cv.notify_all();
@@ -1105,6 +1112,18 @@ void CLocatorAPI::_initialize(u32 flags, LPCSTR target_folder, LPCSTR fs_name)
 			xr_strcat(serial, "fs_index_serial");
 			if (GetFileAttributes(serial) != INVALID_FILE_ATTRIBUTES)
 				index_threads = false;
+			// fs_index_threads next to fsgame.ltx: the number of worker threads (measuring)
+			string_path threads_file;
+			xr_strcpy(threads_file, sizeof(threads_file), serial);
+			threads_file[xr_strlen(threads_file) - xr_strlen("fs_index_serial")] = 0;
+			xr_strcat(threads_file, "fs_index_threads");
+			if (FILE* f = fopen(threads_file, "r"))
+			{
+				int count = 0;
+				if (fscanf(f, "%d", &count) == 1 && count >= 1 && count <= 64)
+					fs_index::s_threads = u32(count);
+				fclose(f);
+			}
 			Msg("* FS: file index %s (%s)", index_threads ? "listed on worker threads" : "listed on this thread only", serial);
 		}
 		const u64 t_index = CPU::QPC();
@@ -1197,8 +1216,8 @@ void CLocatorAPI::_initialize(u32 flags, LPCSTR target_folder, LPCSTR fs_name)
 		fs_index::stop();
 		R_ASSERT(path_exist("$app_data_root$"));
 		Msg("* FS: %u folders inside an already listed folder not listed again", skipped_lists);
-		Msg("* FS: index in %.1f s, %u folders listed ahead by worker threads, %u taken, waited for them %.1f s",
-			double(CPU::QPC() - t_index) / double(CPU::qpc_freq), g_fs_index_listed, g_fs_index_taken,
+		Msg("* FS: index in %.1f s, %u folders listed ahead by %u worker threads, %u taken, waited for them %.1f s",
+			double(CPU::QPC() - t_index) / double(CPU::qpc_freq), g_fs_index_listed, u32(fs_index::s_workers_started), g_fs_index_taken,
 			double(g_fs_index_wait) / double(CPU::qpc_freq));
 	};
 
