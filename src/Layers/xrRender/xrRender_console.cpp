@@ -334,6 +334,18 @@ xr_token upscaler_quality_token[] = {
 	{ "native", 4 },
 	{ 0, 0 }
 };
+// r4-only, DLSS model for every quality mode (NGX render preset), applied when the feature is created (vid_restart):
+// default = NVIDIA's choice per mode (K for DLAA/quality/balanced, M performance, L ultra performance); j/k transformer
+// (K the best image, J a little less ghosting with more flicker), l/m the lighter ones for performance modes
+u32   ps_r4_dlss_preset           = 0;
+xr_token dlss_preset_token[] = {
+	{ "default", 0 },
+	{ "j", 10 },
+	{ "k", 11 },
+	{ "l", 12 },
+	{ "m", 13 },
+	{ 0, 0 }
+};
 float ps_r4_fsr_sharpness         = 0.3f;   // r4-only, FSR RCAS sharpening, 0 = off
 // r4-only, FSR 3.1 stability tuning: velocity factor, shading change scale, accumulation added per frame,
 // min disocclusion accumulation (AMD defaults 1, 1, 0.333, -0.333)
@@ -1578,6 +1590,7 @@ void xrRender_initconsole()
 	CMD3(CCC_Token,   "r4_upscaler",              &ps_r4_upscaler,                   upscaler_token);
 	CMD3(CCC_Token,   "r4_upscaler_quality",      &ps_r4_upscaler_quality,           upscaler_quality_token);
 	CMD4(CCC_Float,   "r4_upscaler_scale",        &ps_r4_upscaler_scale,             0.f, 0.95f); // 0 = the quality mode's; vid_restart
+	CMD3(CCC_Token,   "r4_dlss_preset",           &ps_r4_dlss_preset,                dlss_preset_token); // vid_restart
 	CMD4(CCC_Float,   "r4_fsr_sharpness",         &ps_r4_fsr_sharpness,              0.f, 1.f);
 	CMD4(CCC_Vector4, "r4_fsr_tuning",            &ps_r4_fsr_tuning, Fvector4().set(0, 0, 0, -1), Fvector4().set(1, 8, 1, 1));
 	CMD4(CCC_Integer, "r4_fsr_debug_view",        &ps_r4_fsr_debug_view,             0, 1);

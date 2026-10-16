@@ -211,6 +211,21 @@ bool CDLSS::CreateFeature(u32 render_w, u32 render_h, u32 out_w, u32 out_h, u32 
 	// Input is the tonemapped LDR scene; motion vectors come from SSS at render resolution, without jitter
 	create.InFeatureCreateFlags = NVSDK_NGX_DLSS_Feature_Flags_MVLowRes;
 
+	// The model (r4_dlss_preset): 0 leaves NVIDIA's default per quality mode
+	{
+		extern u32 ps_r4_dlss_preset;
+		NVSDK_NGX_Parameter* p = (NVSDK_NGX_Parameter*)m_params;
+		const unsigned int preset = ps_r4_dlss_preset;
+		NVSDK_NGX_Parameter_SetUI(p, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_DLAA, preset);
+		NVSDK_NGX_Parameter_SetUI(p, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_UltraQuality, preset);
+		NVSDK_NGX_Parameter_SetUI(p, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Quality, preset);
+		NVSDK_NGX_Parameter_SetUI(p, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Balanced, preset);
+		NVSDK_NGX_Parameter_SetUI(p, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Performance, preset);
+		NVSDK_NGX_Parameter_SetUI(p, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_UltraPerformance, preset);
+		if (preset)
+			Msg("* DLSS: render preset %c", char('A' + preset - 1));
+	}
+
 	NVSDK_NGX_Handle* handle = nullptr;
 #ifdef USE_DX12
 	// Recorded on the frame's command list (node masks 1: single GPU), submitted right away; the context's recording

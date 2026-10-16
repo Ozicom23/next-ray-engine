@@ -1,6 +1,8 @@
 # FidelityFX FSR 3.1 upscaler (vendored)
 
-Subset of AMD FidelityFX SDK **v1.1.4** (https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK), MIT license (see `LICENSE.txt`):
+Subset of AMD FidelityFX SDK **v1.1.4** (https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK), MIT license (see `LICENSE.txt`),
+at FSR **3.1.5**: `include/FidelityFX/gpu/fsr1/ffx_fsr1.h` from FSR SDK v2.3.0 (the RCAS fix for negative output, the only
+upscaler change of 3.1.5; the other shader differences of v2.3.0 are register macro renames):
 
 - `include/FidelityFX/host`: host API headers used by the FSR 3.1 upscaler
 - `include/FidelityFX/gpu`: shader headers (core, fsr1, fsr3upscaler, spd)
