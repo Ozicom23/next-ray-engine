@@ -6,15 +6,18 @@
 
 param(
     [Parameter(Mandatory = $true)][string]$Compiler,
-    [string]$OutDir = "$PSScriptRoot\generated_dx12"
+    [string]$OutDir = ""
 )
 
 $ErrorActionPreference = "Stop"
+# The script's folder (empty in a param default under Windows PowerShell)
+$here = Split-Path -Parent $MyInvocation.MyCommand.Path
+if (-not $OutDir) { $OutDir = Join-Path $here "generated_dx12" }
 
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $OutDir = (Resolve-Path $OutDir).Path
 $Compiler = (Resolve-Path $Compiler).Path
-$gpu = (Resolve-Path "$PSScriptRoot\include\FidelityFX\gpu").Path
+$gpu = (Resolve-Path "$here\include\FidelityFX\gpu").Path
 
 $apiArgs = @("-E", "CS", "-Wno-for-redefinition", "-Wno-ambig-lit-shift", "-DFFX_HLSL=1")
 $effects = @(
@@ -50,7 +53,7 @@ $failed = 0
 $count = 0
 foreach ($effect in $effects) {
     $includes = @("-I", $gpu, "-I", (Join-Path $gpu $effect.Dir))
-    foreach ($shader in Get-ChildItem "$PSScriptRoot\src\backends\dx12\shaders\$($effect.Dir)\*.hlsl") {
+    foreach ($shader in Get-ChildItem "$here\src\backends\dx12\shaders\$($effect.Dir)\*.hlsl") {
         foreach ($v in $variants) {
             $scArgs = $effect.Base + $apiArgs + $effect.Permutations + @("-name=$($shader.BaseName)$($v.Suffix)") + $v.Args + $includes + @("-output=$OutDir", $shader.FullName)
             & $Compiler @scArgs | Out-Host

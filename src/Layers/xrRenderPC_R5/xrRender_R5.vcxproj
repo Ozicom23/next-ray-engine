@@ -830,57 +830,57 @@
     <ClCompile Include="..\..\3rd party\FidelityFX-FSR3\src\components\frameinterpolation\ffx_frameinterpolation.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>$(SolutionDir)3rd party\FidelityFX-FSR3\include;$(SolutionDir)3rd party\FidelityFX-FSR3\src\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\components;$(SolutionDir)3rd party\FidelityFX-FSR3\src\backends\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\libs;$(SolutionDir)3rd party\FidelityFX-FSR3\generated_dx12;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;FFX_FI;FFX_OF;_CRT_SECURE_NO_WARNINGS;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;FFX_FI;FFX_OF;NOMINMAX;_CRT_SECURE_NO_WARNINGS;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="..\..\3rd party\FidelityFX-FSR3\src\components\opticalflow\ffx_opticalflow.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>$(SolutionDir)3rd party\FidelityFX-FSR3\include;$(SolutionDir)3rd party\FidelityFX-FSR3\src\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\components;$(SolutionDir)3rd party\FidelityFX-FSR3\src\backends\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\libs;$(SolutionDir)3rd party\FidelityFX-FSR3\generated_dx12;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;FFX_FI;FFX_OF;_CRT_SECURE_NO_WARNINGS;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;FFX_FI;FFX_OF;NOMINMAX;_CRT_SECURE_NO_WARNINGS;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="..\..\3rd party\FidelityFX-FSR3\src\backends\dx12\ffx_dx12.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>$(SolutionDir)3rd party\FidelityFX-FSR3\include;$(SolutionDir)3rd party\FidelityFX-FSR3\src\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\components;$(SolutionDir)3rd party\FidelityFX-FSR3\src\backends\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\libs;$(SolutionDir)3rd party\FidelityFX-FSR3\generated_dx12;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;FFX_FI;FFX_OF;_CRT_SECURE_NO_WARNINGS;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;FFX_FI;FFX_OF;NOMINMAX;_CRT_SECURE_NO_WARNINGS;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="..\..\3rd party\FidelityFX-FSR3\src\backends\dx12\FrameInterpolationSwapchain\FrameInterpolationSwapchainDX12.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>$(SolutionDir)3rd party\FidelityFX-FSR3\include;$(SolutionDir)3rd party\FidelityFX-FSR3\src\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\components;$(SolutionDir)3rd party\FidelityFX-FSR3\src\backends\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\libs;$(SolutionDir)3rd party\FidelityFX-FSR3\generated_dx12;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;FFX_FI;FFX_OF;_CRT_SECURE_NO_WARNINGS;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;FFX_FI;FFX_OF;NOMINMAX;_CRT_SECURE_NO_WARNINGS;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="..\..\3rd party\FidelityFX-FSR3\src\backends\dx12\FrameInterpolationSwapchain\FrameInterpolationSwapchainDX12_DebugPacing.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>$(SolutionDir)3rd party\FidelityFX-FSR3\include;$(SolutionDir)3rd party\FidelityFX-FSR3\src\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\components;$(SolutionDir)3rd party\FidelityFX-FSR3\src\backends\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\libs;$(SolutionDir)3rd party\FidelityFX-FSR3\generated_dx12;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;FFX_FI;FFX_OF;_CRT_SECURE_NO_WARNINGS;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;FFX_FI;FFX_OF;NOMINMAX;_CRT_SECURE_NO_WARNINGS;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="..\..\3rd party\FidelityFX-FSR3\src\backends\dx12\FrameInterpolationSwapchain\FrameInterpolationSwapchainDX12_Helpers.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>$(SolutionDir)3rd party\FidelityFX-FSR3\include;$(SolutionDir)3rd party\FidelityFX-FSR3\src\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\components;$(SolutionDir)3rd party\FidelityFX-FSR3\src\backends\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\libs;$(SolutionDir)3rd party\FidelityFX-FSR3\generated_dx12;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;FFX_FI;FFX_OF;_CRT_SECURE_NO_WARNINGS;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;FFX_FI;FFX_OF;NOMINMAX;_CRT_SECURE_NO_WARNINGS;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="..\..\3rd party\FidelityFX-FSR3\src\backends\dx12\FrameInterpolationSwapchain\FrameInterpolationSwapchainDX12_UiComposition.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>$(SolutionDir)3rd party\FidelityFX-FSR3\include;$(SolutionDir)3rd party\FidelityFX-FSR3\src\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\components;$(SolutionDir)3rd party\FidelityFX-FSR3\src\backends\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\libs;$(SolutionDir)3rd party\FidelityFX-FSR3\generated_dx12;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;FFX_FI;FFX_OF;_CRT_SECURE_NO_WARNINGS;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;FFX_FI;FFX_OF;NOMINMAX;_CRT_SECURE_NO_WARNINGS;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="..\..\3rd party\FidelityFX-FSR3\src\backends\shared\ffx_shader_blobs.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>$(SolutionDir)3rd party\FidelityFX-FSR3\include;$(SolutionDir)3rd party\FidelityFX-FSR3\src\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\components;$(SolutionDir)3rd party\FidelityFX-FSR3\src\backends\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\libs;$(SolutionDir)3rd party\FidelityFX-FSR3\generated_dx12;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;FFX_FI;FFX_OF;_CRT_SECURE_NO_WARNINGS;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;FFX_FI;FFX_OF;NOMINMAX;_CRT_SECURE_NO_WARNINGS;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="..\..\3rd party\FidelityFX-FSR3\src\backends\shared\blob_accessors\ffx_frameinterpolation_shaderblobs.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>$(SolutionDir)3rd party\FidelityFX-FSR3\include;$(SolutionDir)3rd party\FidelityFX-FSR3\src\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\components;$(SolutionDir)3rd party\FidelityFX-FSR3\src\backends\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\libs;$(SolutionDir)3rd party\FidelityFX-FSR3\generated_dx12;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;FFX_FI;FFX_OF;_CRT_SECURE_NO_WARNINGS;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;FFX_FI;FFX_OF;NOMINMAX;_CRT_SECURE_NO_WARNINGS;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="..\..\3rd party\FidelityFX-FSR3\src\backends\shared\blob_accessors\ffx_opticalflow_shaderblobs.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>$(SolutionDir)3rd party\FidelityFX-FSR3\include;$(SolutionDir)3rd party\FidelityFX-FSR3\src\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\components;$(SolutionDir)3rd party\FidelityFX-FSR3\src\backends\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\libs;$(SolutionDir)3rd party\FidelityFX-FSR3\generated_dx12;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;FFX_FI;FFX_OF;_CRT_SECURE_NO_WARNINGS;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;FFX_FI;FFX_OF;NOMINMAX;_CRT_SECURE_NO_WARNINGS;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="..\..\3rd party\FidelityFX-FSR3\src\shared\ffx_breadcrumbs_list.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>$(SolutionDir)3rd party\FidelityFX-FSR3\include;$(SolutionDir)3rd party\FidelityFX-FSR3\src\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\components;$(SolutionDir)3rd party\FidelityFX-FSR3\src\backends\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\libs;$(SolutionDir)3rd party\FidelityFX-FSR3\generated_dx12;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;FFX_FI;FFX_OF;_CRT_SECURE_NO_WARNINGS;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;FFX_FI;FFX_OF;NOMINMAX;_CRT_SECURE_NO_WARNINGS;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="..\xrRenderPC_R4\r4_framegen.cpp">
       <AdditionalIncludeDirectories>$(SolutionDir)3rd party\FidelityFX-FSR3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
