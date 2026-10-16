@@ -3,6 +3,8 @@
 
 #include "dx12.h"
 #include <unordered_map>
+#include <unordered_set>
+#include <thread>
 #include <D3D12MemoryAllocator/D3D12MemAlloc.h>
 
 namespace dx12
@@ -132,9 +134,9 @@ struct RootSignature
 struct GraphicsPipelineKey
 {
 	u64 root;
-	u64 shader[5]; // VS HS DS GS PS ids
-	u64 layout;
-	u64 blend, raster, depth;
+	u64 shader[5]; // VS HS DS GS PS content hashes
+	u64 layout; // content hash
+	u64 blend, raster, depth; // content hashes
 	UINT sample_mask;
 	DXGI_FORMAT rtv[kMaxRT];
 	DXGI_FORMAT dsv;
@@ -245,6 +247,17 @@ struct Device::Impl
 	PFN_D3D12_SERIALIZE_ROOT_SIGNATURE serialize_root_signature = nullptr;
 
 	RootSignature* GetRootSignature(const RootLayoutKey& key);
+
+	// Pipeline cache on disk (dx12Pipeline.cpp)
+	std::mutex disk_lock;
+	FILE* disk_file = nullptr;
+	std::unordered_set<u64> disk_shaders, disk_layouts;
+	std::unordered_set<GraphicsPipelineKey, KeyHash> disk_pipelines;
+	std::thread disk_warmup;
+	std::atomic<bool> disk_stop{ false };
+	void RecordPipeline(const GraphicsPipelineKey& key, Shader* const shaders[5], const InputLayout* layout,
+	                    const D3D11_BLEND_DESC& blend, const D3D11_RASTERIZER_DESC& raster, const D3D11_DEPTH_STENCIL_DESC& depth);
+	void StopPipelineCache();
 };
 
 // Format and description helpers (dx12Format.cpp)

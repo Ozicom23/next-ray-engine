@@ -567,6 +567,12 @@ void CHW::CreateDevice(HWND hwnd, bool move_window)
     CreateSwapChain();
     pAnnotation = pContext;
     pContext->SetThreaded(ps_r__dx12_threaded != 0);
+    {
+        // Pipelines of earlier runs created again in the background; the new ones added
+        string_path cache;
+        FS.update_path(cache, "$app_data_root$", "shaders_cache\\dx12_pipelines.bin");
+        pDevice->StartPipelineCache(cache);
+    }
     R = S_OK;
 #elif defined(USE_DX11)
     D3D_FEATURE_LEVEL pFeatureLevels[] = {

@@ -657,14 +657,14 @@ struct Context::Impl : public Context::NativeRecorder
 		Shader* shaders[5] = { stages[StageVS].shader, stages[StageHS].shader, stages[StageDS].shader,
 			stages[StageGS].shader, stages[StagePS].shader };
 		for (UINT i = 0; i < 5; ++i)
-			k.shader[i] = shaders[i] ? shaders[i]->Id() : 0;
-		k.layout = layout ? layout->Id() : 0;
+			k.shader[i] = shaders[i] ? shaders[i]->m_content : 0;
+		k.layout = layout ? layout->m_content : 0;
 		BlendState* bs = blend ? blend : default_blend;
 		RasterizerState* rs = raster ? raster : default_raster;
 		DepthStencilState* ds = depth ? depth : default_depth;
-		k.blend = bs->Id();
-		k.raster = rs->Id();
-		k.depth = ds->Id();
+		k.blend = bs->m_content;
+		k.raster = rs->m_content;
+		k.depth = ds->m_content;
 		k.sample_mask = sample_mask;
 		UINT count = 0;
 		for (UINT i = 0; i < kMaxRT; ++i)
@@ -703,15 +703,19 @@ struct Context::Impl : public Context::NativeRecorder
 				return it->second;
 		}
 		ID3D12PipelineState* pso = CreateGraphicsPipeline(device, k, gfx_root, shaders, layout, bs->m_desc, rs->m_desc, ds->m_desc);
-		std::lock_guard<std::mutex> lock(dev->pipeline_lock);
-		auto ins = dev->graphics_pipelines.emplace(k, pso);
-		if (!ins.second)
 		{
-			if (pso)
-				pso->Release();
-			return ins.first->second;
+			std::lock_guard<std::mutex> lock(dev->pipeline_lock);
+			auto ins = dev->graphics_pipelines.emplace(k, pso);
+			if (!ins.second)
+			{
+				if (pso)
+					pso->Release();
+				return ins.first->second;
+			}
+			++dev->pipelines_created;
 		}
-		++dev->pipelines_created;
+		if (pso)
+			dev->RecordPipeline(k, shaders, layout, bs->m_desc, rs->m_desc, ds->m_desc);
 		return pso;
 	}
 
@@ -1007,7 +1011,7 @@ struct Context::Impl : public Context::NativeRecorder
 				return false;
 			if (!cs_pso)
 			{
-				const u64 pkey = cs_root->id * 0x9E3779B97F4A7C15ull ^ b.shader->Id();
+				const u64 pkey = cs_root->id * 0x9E3779B97F4A7C15ull ^ b.shader->m_content;
 				{
 					std::lock_guard<std::mutex> lock(dev->pipeline_lock);
 					auto it = dev->compute_pipelines.find(pkey);

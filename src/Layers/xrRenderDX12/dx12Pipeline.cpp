@@ -948,4 +948,392 @@ ID3D12PipelineState* CreateComputePipeline(Device* device, const RootSignature* 
 	}
 	return pso;
 }
+
+//===================================================================================================================
+// Pipeline cache on disk. Each graphics pipeline created is added to the file as its shaders (DXBC, each once), its
+// input layout (once) and its key with the state descriptions; the keys are content hashes, as at run time. At the
+// next start a background thread creates every pipeline of the file before the renderer asks for it, so a pipeline's
+// first use no longer waits for its creation (the DXBC translation and the driver's compile) from the second run on.
+
+namespace
+{
+const u32 kDiskMagic = MAKEFOURCC('X', 'P', 'S', 'O');
+const u32 kDiskVersion = 1;
+const long kDiskMaxSize = 128 << 20; // past it the file starts over (shaders of earlier mod versions pile up)
+enum : u8
+{
+	RecShader = 1,
+	RecLayout = 2,
+	RecPipeline = 3,
+};
+
+struct DiskPipeline
+{
+	GraphicsPipelineKey key; // root 0
+	D3D11_BLEND_DESC blend;
+	D3D11_RASTERIZER_DESC raster;
+	D3D11_DEPTH_STENCIL_DESC depth;
+};
+
+struct DiskShader
+{
+	u8 stage;
+	const u8* code;
+	u32 size;
+};
+
+struct DiskLayout
+{
+	std::vector<xr_string> names;
+	std::vector<D3D11_INPUT_ELEMENT_DESC> elements; // semantic names set where used (the strings move)
+};
+
+struct DiskWarmup
+{
+	std::vector<u8> data;
+	std::unordered_map<u64, DiskShader> shaders;
+	std::unordered_map<u64, DiskLayout> layouts;
+	std::vector<DiskPipeline> pipelines;
+};
+
+struct Reader
+{
+	const u8* p;
+	const u8* end;
+	bool Get(void* out, size_t n)
+	{
+		if (size_t(end - p) < n)
+			return false;
+		memcpy(out, p, n);
+		p += n;
+		return true;
+	}
+	template <class T>
+	bool Get(T& v) { return Get(&v, sizeof(T)); }
+};
+
+Shader* MakeShader(Device* device, u8 stage, const u8* code, u32 size)
+{
+	switch (stage)
+	{
+	case StageVS: { VertexShader* s = nullptr; device->CreateVertexShader(code, size, nullptr, &s); return s; }
+	case StageHS: { HullShader* s = nullptr; device->CreateHullShader(code, size, nullptr, &s); return s; }
+	case StageDS: { DomainShader* s = nullptr; device->CreateDomainShader(code, size, nullptr, &s); return s; }
+	case StageGS: { GeometryShader* s = nullptr; device->CreateGeometryShader(code, size, nullptr, &s); return s; }
+	case StagePS: { PixelShader* s = nullptr; device->CreatePixelShader(code, size, nullptr, &s); return s; }
+	default: return nullptr;
+	}
+}
+} // namespace
+
+void Device::Impl::RecordPipeline(const GraphicsPipelineKey& key, Shader* const shaders[5], const InputLayout* layout,
+                                  const D3D11_BLEND_DESC& blend, const D3D11_RASTERIZER_DESC& raster,
+                                  const D3D11_DEPTH_STENCIL_DESC& depth)
+{
+	std::lock_guard<std::mutex> lock(disk_lock);
+	if (!disk_file)
+		return;
+	DiskPipeline d;
+	memset(&d, 0, sizeof(d));
+	d.key = key;
+	d.key.root = 0;
+	if (!disk_pipelines.insert(d.key).second)
+		return;
+	d.blend = blend;
+	d.raster = raster;
+	d.depth = depth;
+	std::vector<u8> out;
+	auto put = [&](const void* data, size_t n) {
+		const u8* b = static_cast<const u8*>(data);
+		out.insert(out.end(), b, b + n);
+	};
+	for (UINT i = 0; i < 5; ++i)
+	{
+		const Shader* sh = shaders[i];
+		if (!sh || !disk_shaders.insert(sh->m_content).second)
+			continue;
+		const u8 type = RecShader, stage = u8(sh->m_stage);
+		const u32 size = u32(sh->m_code.size());
+		put(&type, 1);
+		put(&sh->m_content, 8);
+		put(&stage, 1);
+		put(&size, 4);
+		put(sh->m_code.data(), size);
+	}
+	if (layout && disk_layouts.insert(layout->m_content).second)
+	{
+		const u8 type = RecLayout;
+		const u32 count = u32(layout->m_elements.size());
+		put(&type, 1);
+		put(&layout->m_content, 8);
+		put(&count, 4);
+		for (const D3D12_INPUT_ELEMENT_DESC& e : layout->m_elements)
+		{
+			const u16 len = u16(strlen(e.SemanticName));
+			put(&len, 2);
+			put(e.SemanticName, len);
+			const UINT fields[6] = { e.SemanticIndex, UINT(e.Format), e.InputSlot, e.AlignedByteOffset, UINT(e.InputSlotClass),
+			                         e.InstanceDataStepRate };
+			put(fields, sizeof(fields));
+		}
+	}
+	const u8 type = RecPipeline;
+	put(&type, 1);
+	put(&d, sizeof(d));
+	fwrite(out.data(), 1, out.size(), disk_file);
+	fflush(disk_file);
+}
+
+void Device::Impl::StopPipelineCache()
+{
+	disk_stop = true;
+	if (disk_warmup.joinable())
+		disk_warmup.join();
+	std::lock_guard<std::mutex> lock(disk_lock);
+	if (disk_file)
+	{
+		fclose(disk_file);
+		disk_file = nullptr;
+	}
+}
+
+void Device::StartPipelineCache(const char* path)
+{
+	Impl& d = *m_impl;
+	if (d.disk_file || d.disk_warmup.joinable())
+		return;
+
+	// What earlier runs wrote, up to the last complete record
+	DiskWarmup* job = new DiskWarmup();
+	if (FILE* f = fopen(path, "rb"))
+	{
+		fseek(f, 0, SEEK_END);
+		const long size = ftell(f);
+		fseek(f, 0, SEEK_SET);
+		if (size > 8 && size <= kDiskMaxSize)
+		{
+			job->data.resize(size_t(size));
+			if (fread(job->data.data(), 1, job->data.size(), f) != job->data.size())
+				job->data.clear();
+		}
+		fclose(f);
+	}
+	size_t valid = 0;
+	if (job->data.size() >= 8)
+	{
+		Reader r = { job->data.data(), job->data.data() + job->data.size() };
+		u32 magic = 0, version = 0;
+		r.Get(magic);
+		r.Get(version);
+		if (magic == kDiskMagic && version == kDiskVersion)
+		{
+			valid = 8;
+			for (;;)
+			{
+				u8 type = 0;
+				if (!r.Get(type))
+					break;
+				if (type == RecShader)
+				{
+					u64 hash;
+					DiskShader sh;
+					if (!r.Get(hash) || !r.Get(sh.stage) || !r.Get(sh.size) || size_t(r.end - r.p) < sh.size)
+						break;
+					sh.code = r.p;
+					r.p += sh.size;
+					job->shaders[hash] = sh;
+				}
+				else if (type == RecLayout)
+				{
+					u64 hash;
+					u32 count;
+					if (!r.Get(hash) || !r.Get(count) || count > 64)
+						break;
+					DiskLayout l;
+					bool ok = true;
+					for (u32 i = 0; i < count && ok; ++i)
+					{
+						u16 len;
+						UINT fields[6];
+						ok = r.Get(len) && size_t(r.end - r.p) >= len;
+						if (!ok)
+							break;
+						l.names.emplace_back(reinterpret_cast<const char*>(r.p), len);
+						r.p += len;
+						ok = r.Get(fields, sizeof(fields));
+						D3D11_INPUT_ELEMENT_DESC e = {};
+						e.SemanticIndex = fields[0];
+						e.Format = DXGI_FORMAT(fields[1]);
+						e.InputSlot = fields[2];
+						e.AlignedByteOffset = fields[3];
+						e.InputSlotClass = D3D11_INPUT_CLASSIFICATION(fields[4]);
+						e.InstanceDataStepRate = fields[5];
+						l.elements.push_back(e);
+					}
+					if (!ok)
+						break;
+					job->layouts[hash] = std::move(l);
+				}
+				else if (type == RecPipeline)
+				{
+					DiskPipeline p;
+					if (!r.Get(p))
+						break;
+					job->pipelines.push_back(p);
+				}
+				else
+					break;
+				valid = size_t(r.p - job->data.data());
+			}
+		}
+	}
+
+	{
+		std::lock_guard<std::mutex> lock(d.disk_lock);
+		for (const auto& kv : job->shaders)
+			d.disk_shaders.insert(kv.first);
+		for (const auto& kv : job->layouts)
+			d.disk_layouts.insert(kv.first);
+		for (const DiskPipeline& p : job->pipelines)
+			d.disk_pipelines.insert(p.key);
+		VerifyPath(path);
+		if (valid && valid == job->data.size())
+			d.disk_file = fopen(path, "ab");
+		else
+		{
+			// New, of another version, or cut short by a crash: written again from the records that are whole
+			d.disk_file = fopen(path, "wb");
+			if (d.disk_file)
+			{
+				if (valid)
+					fwrite(job->data.data(), 1, valid, d.disk_file);
+				else
+				{
+					const u32 header[2] = { kDiskMagic, kDiskVersion };
+					fwrite(header, 1, sizeof(header), d.disk_file);
+				}
+				fflush(d.disk_file);
+			}
+		}
+		if (!d.disk_file)
+			Msg("! D3D12: can't open the pipeline cache %s", path);
+	}
+	Msg("* D3D12: pipeline cache %s: %u pipelines, %u shaders", path, UINT(job->pipelines.size()), UINT(job->shaders.size()));
+	if (job->pipelines.empty())
+	{
+		delete job;
+		return;
+	}
+
+	// The pipelines of earlier runs, created again in the background (below normal priority: loading goes first)
+	d.disk_warmup = std::thread([this, job]() {
+		SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+		Impl& d = *m_impl;
+		const u64 start = GetTickCount64();
+		std::unordered_map<u64, Shader*> shaders;
+		std::unordered_map<u64, InputLayout*> layouts;
+		auto shader = [&](u64 hash) -> Shader* {
+			auto it = shaders.find(hash);
+			if (it != shaders.end())
+				return it->second;
+			Shader* sh = nullptr;
+			auto disk = job->shaders.find(hash);
+			if (disk != job->shaders.end())
+			{
+				sh = MakeShader(this, disk->second.stage, disk->second.code, disk->second.size);
+				if (sh && sh->m_content != hash)
+				{
+					sh->Release();
+					sh = nullptr;
+				}
+			}
+			shaders[hash] = sh;
+			return sh;
+		};
+		auto layout = [&](u64 hash) -> InputLayout* {
+			auto it = layouts.find(hash);
+			if (it != layouts.end())
+				return it->second;
+			InputLayout* l = nullptr;
+			auto disk = job->layouts.find(hash);
+			if (disk != job->layouts.end())
+			{
+				std::vector<D3D11_INPUT_ELEMENT_DESC> elements = disk->second.elements;
+				for (size_t i = 0; i < elements.size(); ++i)
+					elements[i].SemanticName = disk->second.names[i].c_str();
+				CreateInputLayout(elements.data(), UINT(elements.size()), nullptr, 0, &l);
+			}
+			if (l && l->m_content != hash)
+			{
+				l->Release();
+				l = nullptr;
+			}
+			layouts[hash] = l;
+			return l;
+		};
+		UINT created = 0, present = 0, incomplete = 0;
+		for (const DiskPipeline& p : job->pipelines)
+		{
+			if (d.disk_stop)
+				break;
+			Shader* sh[5] = {};
+			bool ok = true;
+			for (UINT i = 0; i < 5; ++i)
+				if (p.key.shader[i] && !(sh[i] = shader(p.key.shader[i])))
+					ok = false;
+			InputLayout* il = nullptr;
+			if (p.key.layout && !(il = layout(p.key.layout)))
+				ok = false;
+			if (!ok)
+			{
+				++incomplete;
+				continue;
+			}
+			BlendState* bs = nullptr;
+			RasterizerState* rs = nullptr;
+			DepthStencilState* ds = nullptr;
+			CreateBlendState(&p.blend, &bs);
+			CreateRasterizerState(&p.raster, &rs);
+			CreateDepthStencilState(&p.depth, &ds);
+			RootLayoutKey rk;
+			memset(&rk, 0, sizeof(rk));
+			for (UINT s = StageVS; s <= StagePS; ++s)
+				rk.stage[s] = ShaderBindingKey(sh[s]);
+			RootSignature* root = d.GetRootSignature(rk);
+			GraphicsPipelineKey k = p.key;
+			k.root = root ? root->id : 0;
+			k.blend = bs->m_content;
+			k.raster = rs->m_content;
+			k.depth = ds->m_content;
+			bool have;
+			{
+				std::lock_guard<std::mutex> lock(d.pipeline_lock);
+				have = d.graphics_pipelines.count(k) != 0;
+			}
+			if (root && !have)
+			{
+				ID3D12PipelineState* pso = CreateGraphicsPipeline(this, k, root, sh, il, bs->m_desc, rs->m_desc, ds->m_desc);
+				std::lock_guard<std::mutex> lock(d.pipeline_lock);
+				if (d.graphics_pipelines.emplace(k, pso).second)
+					++created;
+				else if (pso)
+					pso->Release();
+			}
+			else
+				++present;
+			bs->Release();
+			rs->Release();
+			ds->Release();
+		}
+		for (auto& kv : shaders)
+			if (kv.second)
+				kv.second->Release();
+		for (auto& kv : layouts)
+			if (kv.second)
+				kv.second->Release();
+		Msg("* D3D12: %u pipelines created ahead from the cache in %.1f s (%u there already, %u incomplete)", created,
+		    float(GetTickCount64() - start) / 1000.f, present, incomplete);
+		delete job;
+	});
+}
 } // namespace dx12

@@ -79,6 +79,9 @@ public:
 
 	u64 Id() const { return m_id; }
 	static u64 NewId();
+	// Content hash of shaders, input layouts and state objects: pipeline keys made of these hold across runs (the
+	// pipeline cache on disk)
+	u64 m_content = 0;
 
 protected:
 	volatile LONG m_refs = 1;
@@ -420,6 +423,10 @@ public:
 	Texture2D* BackBufferAlias();
 	Texture2D* CurrentBackBuffer(); // where commands are recorded (the context's worker when threaded)
 	D3D12_CPU_DESCRIPTOR_HANDLE CurrentBackBufferRTV();
+
+	// Pipeline cache on disk: the pipelines created in earlier runs are created again on a background thread, the new
+	// ones are added to the file
+	void StartPipelineCache(const char* path);
 
 	// Native access (upscalers, ImGui, frame pacing)
 	ID3D12Device* Native() const { return m_device; }

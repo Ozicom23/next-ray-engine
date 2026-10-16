@@ -911,6 +911,7 @@ Device* Device::Create(IDXGIAdapter1* adapter, bool debug_layer)
 
 Device::~Device()
 {
+	m_impl->StopPipelineCache();
 	WaitIdle();
 	delete m_context;
 	m_context = nullptr;
@@ -1854,8 +1855,16 @@ HRESULT Device::CreateInputLayout(const D3D11_INPUT_ELEMENT_DESC* elements, UINT
 		e.InputSlotClass = D3D12_INPUT_CLASSIFICATION(elements[i].InputSlotClass);
 		e.InstanceDataStepRate = elements[i].InstanceDataStepRate;
 	}
+	u64 h = 0x4C41594F5554ull; // the layout's content
 	for (UINT i = 0; i < count; ++i)
+	{
 		l->m_elements[i].SemanticName = l->m_names[i].c_str();
+		const D3D12_INPUT_ELEMENT_DESC& e = l->m_elements[i];
+		h = HashBytes(e.SemanticName, strlen(e.SemanticName) + 1, h);
+		const UINT fields[6] = { e.SemanticIndex, UINT(e.Format), e.InputSlot, e.AlignedByteOffset, UINT(e.InputSlotClass), e.InstanceDataStepRate };
+		h = HashBytes(fields, sizeof(fields), h);
+	}
+	l->m_content = h;
 	*out = l;
 	return S_OK;
 }
@@ -1870,6 +1879,7 @@ static HRESULT CreateShaderObject(const void* code, SIZE_T size, Stage stage, T*
 	s->m_code.assign(static_cast<const u8*>(code), static_cast<const u8*>(code) + size);
 	s->m_stage = stage;
 	s->m_crc = crc32(code, u32(size));
+	s->m_content = HashBytes(code, size, 14695981039346656037ull + u64(stage));
 	if (!ReflectShader(code, size, stage, s->m_bindings))
 		Msg("! D3D12: shader reflection failed (stage %d, %u bytes)", int(stage), u32(size));
 	*out = s;
@@ -1903,6 +1913,7 @@ T* Device::Impl::FindState(const D& desc, u64 kind)
 	}
 	T* t = new T();
 	t->m_desc = desc;
+	t->m_content = h;
 	bucket.push_back(t);
 	t->AddRef(); // one reference stays with the device
 	return t;
