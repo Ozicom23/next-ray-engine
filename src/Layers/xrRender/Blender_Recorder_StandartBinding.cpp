@@ -1195,6 +1195,44 @@ static class ssfx_jitter : public R_constant_setup
 	}
 }    ssfx_jitter;
 
+// nextray_upscale_jitter: the upscaler's jitter only, zero without an upscaler (and on 3D scope frames). xy: clip space
+// offset as in ssfx_jitter, zw: the same in render pixels (+x right, +y down). For the patch mod's shaders that draw
+// without SSS's jitter (3D scope lenses, reticles, particles): with it they match the frame the upscaler resolves,
+// without an upscaler they stay as they were
+static class nextray_upscale_jitter : public R_constant_setup
+{
+	virtual void setup(R_constant* C)
+	{
+#if defined(USE_DX11)
+		if (RImplementation.upscale_jitter_on)
+		{
+			const Fvector2& j = RImplementation.upscale_jitter_ndc;
+			RCache.set_c(C, j.x, j.y, 0.5f * j.x * float(Device.dwRenderWidth), -0.5f * j.y * float(Device.dwRenderHeight));
+			return;
+		}
+#endif
+		RCache.set_c(C, 0.f, 0.f, 0.f, 0.f);
+	}
+}    nextray_upscale_jitter;
+
+// nextray_upscale_jitter_prev: xy the jitter of the frame before in render pixels (0 when it wasn't upscaled), for
+// shaders that read the previous frame's scene; zero without an upscaler
+static class nextray_upscale_jitter_prev : public R_constant_setup
+{
+	virtual void setup(R_constant* C)
+	{
+#if defined(USE_DX11)
+		if (RImplementation.upscale_jitter_on)
+		{
+			const Fvector2& j = RImplementation.upscale_jitter_prev_px;
+			RCache.set_c(C, j.x, j.y, 0.f, 0.f);
+			return;
+		}
+#endif
+		RCache.set_c(C, 0.f, 0.f, 0.f, 0.f);
+	}
+}    nextray_upscale_jitter_prev;
+
 static class ssfx_fTimeDelta : public R_constant_setup
 {
 	virtual void setup(R_constant* C)
@@ -1473,6 +1511,8 @@ void CBlender_Compile::SetMapping()
 	r_Constant_per_frame("ssfx_timedelta", &ssfx_fTimeDelta);
 	r_Constant_per_frame("ssfx_motionblur", &ssfx_motionblur);
 	r_Constant_per_frame("ssfx_jitter", &ssfx_jitter);
+	r_Constant_per_frame("nextray_upscale_jitter", &nextray_upscale_jitter);
+	r_Constant_per_frame("nextray_upscale_jitter_prev", &nextray_upscale_jitter_prev);
 	r_Constant_per_frame("ssfx_pom", &ssfx_pom);
 
 	r_Constant_per_frame("ssfx_terrain_pom", &ssfx_terrain_pom);

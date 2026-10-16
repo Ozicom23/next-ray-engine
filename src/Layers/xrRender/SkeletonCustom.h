@@ -144,6 +144,7 @@ protected:
 	u32 UCalc_Time;
 	s32 UCalc_Visibox;
 	bool UCalc_ThisFrame;
+	bool UCalc_CallbackHeld = false; // CalculateBones_HoldCallback: the update callback still to run
 
 	Flags64 visimask;
 	Flags64 hidden_bones;
@@ -281,6 +282,8 @@ public:
 	virtual void CalculateBones(BOOL bForceExact = FALSE); // Recalculate skeleton
 	void CalculateBones_Invalidate();
 	virtual void CalculateTracks();
+	virtual void CalculateBones_HoldCallback(BOOL bForceExact);
+	virtual void CalculateBones_RunCallback();
 
 	void Callback(UpdateCallback C, void* Param)
 	{

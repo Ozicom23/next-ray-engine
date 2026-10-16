@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "r4_rendertarget.h"
 #include "r4_upscaler.h"
+extern int ps_r4_upscaler_jitter; // below, with upscale_end_scene
 
 // The upscaler's mask (r4_upscaler_mask): where it should trust the current frame over its history. 3D scope lenses
 // (their reticle shader marks them with stencil 254) show the world through the scope, which moves unlike the lens;
@@ -409,6 +410,9 @@ void CRenderTarget::upscale_begin_scene()
 	{
 		float jx, jy;
 		CUpscaler::GetJitter(m_upscale_jitter_index, m_upscale_jitter_phases, jx, jy);
+		// r4_upscaler_jitter: 1 on, 0 off, 2 off while a 3D scope's second viewport is active
+		if (ps_r4_upscaler_jitter == 0 || (ps_r4_upscaler_jitter == 2 && Device.m_SecondViewport.IsSVPActive()))
+			jx = jy = 0.f;
 		m_upscale_jitter.set(jx, jy);
 		// Pixel offset to clip space, pixel Y goes down
 		RImplementation.upscale_jitter_on = true;
@@ -420,8 +424,25 @@ void CRenderTarget::upscale_begin_scene()
 	RImplementation.rmNormal();
 }
 
+int ps_r4_upscaler_jitter = 1;
+// stat_upscale_frames <n>: the next n frames' second viewport and upscaler state to the log
+int g_upscale_frames_log = 0;
+
 void CRenderTarget::upscale_end_scene()
 {
+	if (g_upscale_frames_log > 0)
+	{
+		--g_upscale_frames_log;
+		Msg("* [upscale frame] %u: svp active %d frame %d delay %u, in scene %d, upscaled %d, jitter (%.3f, %.3f), prev (%.3f, %.3f)",
+			Device.dwFrame, Device.m_SecondViewport.IsSVPActive() ? 1 : 0, Device.m_SecondViewport.IsSVPFrame() ? 1 : 0,
+			u32(Device.m_SecondViewport.GetSVPFrameDelay()), m_upscale_in_scene ? 1 : 0, m_upscale_done ? 1 : 0,
+			m_upscale_jitter.x, m_upscale_jitter.y, RImplementation.upscale_jitter_prev_px.x, RImplementation.upscale_jitter_prev_px.y);
+	}
+	// This frame's scene (copied to rt_Generic_temp in phase_combine) carries this jitter; the next frame reads it there
+	if (m_upscale_done)
+		RImplementation.upscale_jitter_prev_px.set(m_upscale_jitter);
+	else
+		RImplementation.upscale_jitter_prev_px.set(0.f, 0.f);
 	RImplementation.upscale_jitter_on = false;
 	RImplementation.upscale_scene_active = false;
 	if (!m_upscale_in_scene)
@@ -449,6 +470,12 @@ void CRenderTarget::phase_upscale()
 		// History is useless after a pause (menus, loading) or a camera cut
 		if (Device.dwFrame - m_upscale_last_frame > 4 || Device.vCameraPosition.distance_to(m_upscale_last_cam) > 10.f)
 			m_upscale_reset = true;
+		// The precache frames after a load or vid_restart turn the camera around in place: nothing of them belongs in
+		// the history of the view that follows (under dbg_freeze, with no time passing, it stayed in the image)
+		static bool s_after_precache = false;
+		if (Device.dwPrecacheFrame || s_after_precache)
+			m_upscale_reset = true;
+		s_after_precache = Device.dwPrecacheFrame != 0;
 
 		// Camera from the main projection: near/far from the depth terms, vertical FOV from the Y scale
 		const Fmatrix& P = Device.mProject;
