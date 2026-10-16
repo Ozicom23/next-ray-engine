@@ -525,8 +525,8 @@ bool RemapOperand(std::vector<u32>& p, u32& i, u32 end, const std::vector<Regist
 	return true;
 }
 
-// The vertex shader's outputs grown to cover the pixel shader's inputs; false when nothing is missing or the
-// mismatch isn't one this fixes (an input on another register than the output of its name). why: the fixes, for the log
+// The vertex shader's outputs moved to the pixel shader's input registers and grown to cover its inputs; false when
+// nothing differs or the mismatch isn't one this fixes. why: the fixes, for the log
 static bool LinkVertexOutputs(const std::vector<u8>& vs, const std::vector<u8>& ps, std::vector<u8>& patched, xr_string& why)
 {
 	std::vector<DxbcChunk> vs_chunks, ps_chunks;
@@ -541,13 +541,21 @@ static bool LinkVertexOutputs(const std::vector<u8>& vs, const std::vector<u8>& 
 	if (!osgn || !isgn || !shex || !ReadSignature(*osgn, outputs) || !ReadSignature(*isgn, inputs))
 		return false;
 
-	// Registers of outputs the pixel shader doesn't read, where it reads other inputs (models_selflight.vs writes
-	// only SV_Position, on the register accum_emissive.ps reads TEXCOORD0 from), move to free registers
-	auto read_by_ps = [&](const SigElement& o) {
+	// Output registers move onto the registers the pixel shader reads them from (deffer_model_flat.vs writes
+	// SV_Position to o6, models_scope_zwrite.ps reads it from v0); registers in the way of an input, holding outputs the
+	// pixel shader doesn't read (models_selflight.vs writes only SV_Position, on the register accum_emissive.ps reads
+	// TEXCOORD0 from), move to free registers
+	auto ps_input = [&](const SigElement& o) -> const SigElement* {
 		for (const SigElement& in : inputs)
 			if (in.index == o.index && !_stricmp(o.name.c_str(), in.name.c_str()))
-				return true;
-		return false;
+				return &in;
+		return nullptr;
+	};
+	auto moved = [](const std::vector<RegisterMove>& moves, u32 reg) {
+		for (const RegisterMove& m : moves)
+			if (m.from == reg)
+				return &m;
+		return (const RegisterMove*)nullptr;
 	};
 	std::vector<RegisterMove> moves;
 	u32 free_reg = 0;
@@ -557,17 +565,36 @@ static bool LinkVertexOutputs(const std::vector<u8>& vs, const std::vector<u8>& 
 		free_reg = _max(free_reg, in.reg + 1);
 	for (const SigElement& o : outputs)
 	{
-		bool conflict = false, read = false, moved = false;
-		for (const RegisterMove& m : moves)
-			moved |= m.from == o.reg;
-		if (moved)
+		const SigElement* in = ps_input(o);
+		if (!in || in->reg == o.reg)
 			continue;
+		if (const RegisterMove* m = moved(moves, o.reg))
+		{
+			if (m->to != in->reg)
+				return false; // elements of one register read from different ones
+			continue;
+		}
+		for (const RegisterMove& m : moves)
+			if (m.to == in->reg)
+				return false;
+		for (const SigElement& other : outputs)
+			if (other.reg == o.reg && ps_input(other) && ps_input(other)->reg != in->reg)
+				return false; // elements of one register read from different ones
+		moves.push_back({ o.reg, in->reg });
+	}
+	for (const SigElement& o : outputs)
+	{
+		if (moved(moves, o.reg))
+			continue;
+		bool in_way = false, read = false;
+		for (const RegisterMove& m : moves)
+			in_way |= m.to == o.reg;
 		for (const SigElement& in : inputs)
-			conflict |= in.reg == o.reg && !read_by_ps(o);
-		if (!conflict)
+			in_way |= in.reg == o.reg && !ps_input(o);
+		if (!in_way)
 			continue;
 		for (const SigElement& other : outputs)
-			read |= other.reg == o.reg && read_by_ps(other);
+			read |= other.reg == o.reg && ps_input(other);
 		if (read || free_reg >= 32)
 			return false;
 		moves.push_back({ o.reg, free_reg++ });
@@ -606,7 +633,7 @@ static bool LinkVertexOutputs(const std::vector<u8>& vs, const std::vector<u8>& 
 		why.append(make_string(" %s%u.%s%s%s%s", in.name.c_str(), in.index, (missing & 1) ? "x" : "", (missing & 2) ? "y" : "",
 		                       (missing & 4) ? "z" : "", (missing & 8) ? "w" : "").c_str());
 	}
-	if (fixes.empty())
+	if (fixes.empty() && moves.empty())
 		return false;
 	std::stable_sort(outputs.begin(), outputs.end(), [](const SigElement& a, const SigElement& b) {
 		return a.reg != b.reg ? a.reg < b.reg : (a.mask & -a.mask) < (b.mask & -b.mask);
@@ -826,7 +853,7 @@ ID3D12PipelineState* CreateGraphicsPipeline(Device* device, const GraphicsPipeli
 			static xr_set<u64> logged;
 			std::lock_guard<std::mutex> lock(log_lock);
 			if (logged.insert(key.shader[0] * 31 + key.shader[4]).second)
-				Msg("* D3D12: %s linked to %s with outputs set to 0:%s", shaders[0]->m_name.c_str(), shaders[4]->m_name.c_str(), why.c_str());
+				Msg("* D3D12: %s linked to %s (missing outputs set to 0):%s", shaders[0]->m_name.c_str(), shaders[4]->m_name.c_str(), why.c_str());
 		}
 	}
 	if (shaders[1])

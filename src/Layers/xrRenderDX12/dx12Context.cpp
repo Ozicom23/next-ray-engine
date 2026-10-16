@@ -982,9 +982,10 @@ struct Context::Impl : public Context::NativeRecorder
 				if (!u || !u->m_res)
 					continue;
 				Resource* r = u->m_res;
-				const bool was_uav = r->m_states.empty() && r->m_state == D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 				RequireView(u, r, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-				if (was_uav && r->m_written_uav)
+				// Still marked written: no transition out of UAV since (one clears the mark), also with per-subresource
+				// states (mip chains), where the whole-resource state check missed it
+				if (r->m_written_uav)
 				{
 					// D3D11 orders dispatches writing the same UAV
 					D3D12_RESOURCE_BARRIER ub = {};

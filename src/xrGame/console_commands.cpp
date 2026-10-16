@@ -2812,6 +2812,9 @@ void CCC_RegisterCommands()
 		CMD3(CCC_Mask, "log_missing_ini", &FS.m_Flags, FS.flPrintLTX);
 		CMD4(CCC_Float, "g_end_modif", &g_end_modif, 0.f, 10.f);
 	}
+	// Test sessions driven through the remote console run scripts too (give an item, aim: scope checks)
+	else if (strstr(Core.Params, "-remote_console"))
+		CMD1(CCC_ScriptCommand, "run_string");
 #endif // MASTER_GOLD
 	//#endif // MASTER_GOLD
 	/* AVO: end */
