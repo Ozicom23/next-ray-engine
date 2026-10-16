@@ -461,6 +461,11 @@ void CRender::render_sun_cascade(u32 cascade_ind)
                     RCache.set_xform_project(sun_cache::big_xform(cascade_ind));
                     cascade.GMCascade.r_dsgraph_render_static(0);
                 }
+                // The map outside the cascade's corner (r4_sun_smap_scale) holds an earlier cascade's depth: cleared,
+                // so the far pass's pixels beyond the cascade read "lit" as with a full clear (the window copy writes
+                // its whole corner with depth test always, so the corner stays the same)
+                if (smap_used < smap_size)
+                    HW.pContext->ClearDepthStencilView(Target->rt_smap_depth->pZRT, D3D_CLEAR_DEPTH, 1.f, 0);
                 sun_cache::draw_window(cascade_ind, Target->rt_smap_depth->pZRT, smap_used);
                 Target->phase_smap_direct(fuckingsun, SE_SUN_FAR, false);
                 set_smap_viewport();

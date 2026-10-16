@@ -55,6 +55,7 @@ BOOL g_bLoaded = FALSE;
 ref_light precache_light = 0;
 
 BOOL mt_calc_bones = TRUE;
+ENGINE_API int g_dbg_freeze = 0; // dbg_freeze (FrameMove)
 BOOL mt_calc_bones_parallel = TRUE; // the bones of the models in view on all cores (EngineThreading.cpp)
 BOOL psLua_ParallelGC = TRUE;
 BOOL psLua_ParallelGC_debug = FALSE;
@@ -697,6 +698,14 @@ void CRenderDevice::FrameMove()
 		fTimeGlobal += 0.033f;
 		dwTimeDelta = 33;
 		dwTimeGlobal += 33;
+	}
+	else if (g_dbg_freeze)
+	{
+		// dbg_freeze: time stands still (game logic, wind, particles, shader timers, the upscaler's jitter), frames
+		// keep rendering: the same view renders the same image, for comparing render changes by screenshots
+		fTimeDelta = 0.f;
+		dwTimeDelta = 0;
+		Timer.Start();
 	}
 	else
 	{

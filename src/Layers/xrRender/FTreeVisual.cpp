@@ -25,6 +25,8 @@ shared_str c_prev_wind;
 shared_str c_c_PrevBendersPos;
 shared_str c_c_BendersPos;
 shared_str c_c_BendersSetup;
+shared_str c_nextray_benders;
+int ps_r4_tree_bender_cull = 1; // benders out of a tree's reach moved behind the ones in reach (identical result)
 
 FTreeVisual::FTreeVisual(void)
 {
@@ -104,6 +106,7 @@ void FTreeVisual::Load(const char* N, IReader* data, u32 dwFlags)
 
 	c_c_PrevBendersPos = "benders_prevpos";
 	c_c_BendersPos = "benders_pos";
+	c_nextray_benders = "nextray_benders";
 	c_c_BendersSetup = "benders_setup";
 }
 
@@ -211,15 +214,57 @@ void FTreeVisual::Render(float LOD)
 		}
 		VERIFY(c_grass);
 
+		// Benders that can't reach this tree (farther in XZ than their radius from its bounding sphere, plus a margin
+		// for the displacement of the benders before them) contribute exactly 0 in the leaf shaders' loops. The ones
+		// that can come first, in their order, the rest are far benders of strength 0: the same result in any leaf
+		// shader, and the neXt-Ray patch mod's leaf shaders stop after nextray_benders.x (.y for the previous frame)
+		// Level trees keep their bounding sphere in world space (as the static graph uses it); a sphere far from the
+		// tree's origin is taken as model space and placed with the tree's matrix, which the leaf shaders use
+		const float tree_scale = _max(_max(xform.i.magnitude(), xform.j.magnitude()), xform.k.magnitude());
+		Fvector tree_c = vis.sphere.P;
+		float tree_r = vis.sphere.R;
+		if (tree_c.distance_to(xform.c) > vis.sphere.R * _max(tree_scale, 1.f) * 2.f + 5.f)
+		{
+			xform.transform_tiny(tree_c, vis.sphere.P);
+			tree_r = vis.sphere.R * tree_scale;
+		}
+		tree_r += 3.f;
+		const bool cull = ps_r4_tree_bender_cull != 0;
+		auto reaches = [&](const Fvector4& p)
+		{
+			const float r = p.w > 0.f ? p.w : ps_ssfx_int_grass_params_1.x;
+			const float dx = p.x - tree_c.x, dz = p.z - tree_c.z;
+			const float reach = r + 0.001f + tree_r;
+			return dx * dx + dz * dz <= reach * reach;
+		};
+		static const Fvector4 far_pos = { 1.e5f, -1.e5f, 1.e5f, 0.001f };
+		static const Fvector4 far_dir = { 0.f, -99.f, 0.f, 0.f };
+		int count_cur = BendersQty, count_prev = BendersQty;
+
 		if (c_grass)
 		{
-			c_grass[0].set(player_pos);
-			c_grass[16].set(0.0f, -99.0f, 0.0f, 1.0f);
-
+			Fvector4 pos[16], dir[16];
+			pos[0].set(player_pos);
+			dir[0].set(0.0f, -99.0f, 0.0f, 1.0f);
 			for (int Bend = 1; Bend < BendersQty; Bend++)
 			{
-				c_grass[Bend].set(GData.pos[Bend].x, GData.pos[Bend].y, GData.pos[Bend].z, GData.radius_curr[Bend]);
-				c_grass[Bend + 16].set(GData.dir[Bend].x, GData.dir[Bend].y, GData.dir[Bend].z, GData.str[Bend]);
+				pos[Bend].set(GData.pos[Bend].x, GData.pos[Bend].y, GData.pos[Bend].z, GData.radius_curr[Bend]);
+				dir[Bend].set(GData.dir[Bend].x, GData.dir[Bend].y, GData.dir[Bend].z, GData.str[Bend]);
+			}
+			int k = 0;
+			for (int Bend = 0; Bend < BendersQty; Bend++)
+			{
+				if (cull && !reaches(pos[Bend]))
+					continue;
+				c_grass[k].set(pos[Bend]);
+				c_grass[k + 16].set(dir[Bend]);
+				k++;
+			}
+			count_cur = k;
+			for (; k < BendersQty; k++)
+			{
+				c_grass[k].set(far_pos);
+				c_grass[k + 16].set(far_dir);
 			}
 		}
 
@@ -234,12 +279,23 @@ void FTreeVisual::Render(float LOD)
 
 		if (c_prevgrass)
 		{
+			int k = 0;
 			for (int Bend = 0; Bend < BendersQty; Bend++)
 			{
-				c_prevgrass[Bend].set(GData.prev_pos[Bend]);
-				c_prevgrass[Bend + 16].set(GData.prev_dir[Bend]);
+				if (cull && !reaches(GData.prev_pos[Bend]))
+					continue;
+				c_prevgrass[k].set(GData.prev_pos[Bend]);
+				c_prevgrass[k + 16].set(GData.prev_dir[Bend]);
+				k++;
+			}
+			count_prev = k;
+			for (; k < BendersQty; k++)
+			{
+				c_prevgrass[k].set(far_pos);
+				c_prevgrass[k + 16].set(far_dir);
 			}
 		}
+		RCache.set_c(c_nextray_benders, float(count_cur), float(count_prev), 0.f, 0.f);
 	}
 #endif
 }

@@ -496,7 +496,8 @@ void CRenderTarget::phase_upscale()
 		if (m_upscale_done)
 		{
 			m_upscale_reset = false;
-			m_upscale_jitter_index++;
+			if (!g_dbg_freeze)
+				m_upscale_jitter_index++;
 			m_upscale_last_frame = Device.dwFrame;
 			m_upscale_last_cam.set(Device.vCameraPosition);
 		}

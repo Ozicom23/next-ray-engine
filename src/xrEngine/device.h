@@ -544,6 +544,7 @@ extern ENGINE_API bool g_stats_gather_timers;
 
 typedef xr_delegate<bool()> LOADING_EVENT;
 extern ENGINE_API xr_list<LOADING_EVENT> g_loading_events;
+extern ENGINE_API int g_dbg_freeze; // time stands still while rendering goes on (screenshot comparisons)
 
 class ENGINE_API CLoadScreenRenderer : public pureRender
 {

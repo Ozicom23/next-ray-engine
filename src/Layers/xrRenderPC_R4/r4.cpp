@@ -1426,6 +1426,31 @@ public:
 static inline bool match_shader_id(LPCSTR const debug_shader_id, LPCSTR const full_shader_id,
                                    FS_FileSet const& file_set, string_path& result);
 
+// The compiled shader cache (appdata\shaders_cache) was keyed by the shader's name and the settings only: a shader
+// mod that changed, was added or was turned off kept loading the old compiled code until the cache was deleted by hand.
+// Its file names now also carry a fingerprint of every shader source file (name, size, time), taken once per session:
+// any change to the shaders compiles them anew, once
+static LPCSTR shader_cache_suffix()
+{
+	static string16 suffix = "";
+	if (!suffix[0])
+	{
+		u32 crc = 0;
+		FS_FileSet files;
+		FS.file_list(files, "$game_shaders$", FS_ListFiles, "*");
+		for (const FS_File& f : files)
+		{
+			crc = crc32(f.name.c_str(), u32(f.name.size()), crc);
+			const s64 size = f.size, time = s64(f.time_write);
+			crc = crc32(&size, sizeof(size), crc);
+			crc = crc32(&time, sizeof(time), crc);
+		}
+		xr_sprintf(suffix, "_%08x", crc);
+		Msg("* Shader sources: %u files, cache fingerprint %s", u32(files.size()), suffix + 1);
+	}
+	return suffix;
+}
+
 HRESULT CRender::shader_compile(
 	LPCSTR name,
 	DWORD const* pSrcData,
@@ -1980,16 +2005,24 @@ HRESULT CRender::shader_compile(
 	len += xr_strlen(c_ssfx_ao);
 
 	xr_sprintf(c_ssfx_pom_refine, "%d", u8(std::min(std::max(ps_ssfx_pom_refine, 0), 1)));
-	defines[def_it].Name = "SSFX_POM_REFINE";
-	defines[def_it].Definition = c_ssfx_pom_refine;
-	def_it++;
+	// The shaders test #ifdef: defined only when on, so 0 turns the refine off as the setting says (it ran always)
+	if (c_ssfx_pom_refine[0] == '1')
+	{
+		defines[def_it].Name = "SSFX_POM_REFINE";
+		defines[def_it].Definition = c_ssfx_pom_refine;
+		def_it++;
+	}
 	xr_strcat(sh_name, c_ssfx_pom_refine);
 	len += xr_strlen(c_ssfx_pom_refine);
 
 	xr_sprintf(c_ssfx_terrain_pom_refine, "%d", u8(std::min(std::max(ps_ssfx_terrain_pom_refine, 0), 1)));
-	defines[def_it].Name = "SSFX_TERRA_POM_REFINE";
-	defines[def_it].Definition = c_ssfx_terrain_pom_refine;
-	def_it++;
+	// The shaders test #ifdef: defined only when on, so 0 turns the refine off as the setting says (it ran always)
+	if (c_ssfx_terrain_pom_refine[0] == '1')
+	{
+		defines[def_it].Name = "SSFX_TERRA_POM_REFINE";
+		defines[def_it].Definition = c_ssfx_terrain_pom_refine;
+		def_it++;
+	}
 	xr_strcat(sh_name, c_ssfx_terrain_pom_refine);
 	len += xr_strlen(c_ssfx_terrain_pom_refine);
 
@@ -2104,7 +2137,12 @@ HRESULT CRender::shader_compile(
 	}
 
 	sh_name[len] = 0;
-	shader_warmup::note_variant(sh_name);
+	{
+		string_path cached;
+		xr_strcpy(cached, sh_name);
+		xr_strcat(cached, shader_cache_suffix());
+		shader_warmup::note_variant(cached);
+	}
 
 	// finish
 	defines[def_it].Name = 0;
@@ -2175,6 +2213,7 @@ HRESULT CRender::shader_compile(
 		xr_strcat(file, extension);
 		xr_strcat(file, "\\");
 		xr_strcat(file, sh_name);
+		xr_strcat(file, shader_cache_suffix());
 		FS.update_path(file_name, "$app_data_root$", file);
 	}
 	else

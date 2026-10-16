@@ -591,6 +591,9 @@ void CRenderTarget::accum_direct_cascade(u32 sub_phase, Fmatrix& xform, Fmatrix&
 		RCache.set_c("Ldynamic_dir", L_dir.x, L_dir.y, L_dir.z, 0);
 		RCache.set_c("Ldynamic_color", L_clr.x, L_clr.y, L_clr.z, L_spec);
 		RCache.set_c("m_shadow", m_shadow);
+		// The part of the shadow map the cascade uses (r4_sun_smap_scale): the neXt-Ray patch mod's accum_sun_far fades
+		// the far cascade's edges and treats the rest as outside with it; shaders without the constant ignore it
+		RCache.set_c("nextray_smap_scale", m_sun_smap_scale, 1.f / m_sun_smap_scale, 0.f, 0.f);
 		RCache.set_c("m_sunmask", m_clouds_shadow);
 
 		if (sub_phase == SE_SUN_FAR)

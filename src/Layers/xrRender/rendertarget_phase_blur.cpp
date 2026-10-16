@@ -1,9 +1,13 @@
 #include "stdafx.h"
 
 
+// Lights the camera is inside first (sss_priority 0), then by distance. The old "distance < && priority <" is not a
+// strict weak ordering (undefined behaviour for std::sort) and in practice ignored the priority
 IC bool SortLights(light* i, light* j)
 {
-	return (i->distance < j->distance&& i->sss_priority < j->sss_priority);
+	if (i->sss_priority != j->sss_priority)
+		return i->sss_priority < j->sss_priority;
+	return i->distance < j->distance;
 }
 
 void CRenderTarget::phase_blur()
@@ -603,7 +607,9 @@ void CRenderTarget::phase_ssfx_sss()
 
 
 	// BLUR
-	u_setrt(rt_ssfx_temp2, nullptr, nullptr, nullptr);
+	// Straight into rt_ssfx_sss (was rt_ssfx_temp2 and a copy): this pass reads rt_ssfx_temp only, and rt_ssfx_temp2
+	// is cleared before its next use (phase_combine)
+	u_setrt(rt_ssfx_sss, nullptr, nullptr, nullptr);
 
 	RCache.set_CullMode(CULL_NONE);
 	RCache.set_Stencil(FALSE);
@@ -625,7 +631,7 @@ void CRenderTarget::phase_ssfx_sss()
 	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
 
 
-	HW.pContext->CopyResource(rt_ssfx_sss->pTexture->surface_get(), rt_ssfx_temp2->pTexture->surface_get());
+	// (no copy: the pass above wrote rt_ssfx_sss)
 
 };
 
@@ -847,10 +853,45 @@ void CRenderTarget::phase_ssfx_sss_ext(light_Package& LP)
 		}
 	}
 
-	RCache.set_Geometry(g_combine);
-	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+	// Slots without a light: marked faded out (a = 1, the shader's result is 1 for them, which no light reads).
+	// A pass whose four slots are all empty is skipped: its channels are read by no light this frame, its target
+	// holds 1 (cleared once, so the combine's bilinear seam between the halves reads "no shadow"). With one to four
+	// lights all of them sit in slots 4-7 (free slots are handed out from the top), so the first pass is skipped.
+	// Without any light the combine is skipped too: no light reads it
+	static ID3DTexture2D* s_pass_cleared[2] = { nullptr, nullptr }; // the target last cleared (recreated on a reset)
+	bool pass_used[2] = { false, false };
+	for (int slot = 0; slot < 8; slot++)
+	{
+		if (LightSlot[slot])
+			pass_used[slot / 4] = true;
+		else if (Lights_Array)
+			Lights_Array[slot].set(0, 0, 0, 1);
+	}
+	auto skip_pass = [](ref_rt& target, ID3DTexture2D*& cleared)
+	{
+		if (cleared != target->pSurface)
+		{
+			const FLOAT one[4] = { 1.f, 1.f, 1.f, 1.f };
+			HW.pContext->ClearRenderTargetView(target->pRT, one);
+			cleared = target->pSurface;
+		}
+	};
 
-	HW.pContext->CopyResource(rt_ssfx_sss_ext->pTexture->surface_get(), rt_ssfx_sss_tmp->pTexture->surface_get());
+	if (pass_used[0])
+	{
+		RCache.set_Geometry(g_combine);
+		RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+		HW.pContext->CopyResource(rt_ssfx_sss_ext->pTexture->surface_get(), rt_ssfx_sss_tmp->pTexture->surface_get());
+		s_pass_cleared[0] = nullptr;
+	}
+	else
+		skip_pass(rt_ssfx_sss_ext, s_pass_cleared[0]);
+
+	if (!pass_used[0] && !pass_used[1])
+	{
+		skip_pass(rt_ssfx_sss_ext2, s_pass_cleared[1]);
+		return;
+	}
 
 	// SSS Ext 2 -------------------------------------------------------
 
@@ -875,10 +916,15 @@ void CRenderTarget::phase_ssfx_sss_ext(light_Package& LP)
 	RCache.set_c("id_offset", 1);
 	RCache.get_ConstantDirect(strLights, 4 * sizeof(Fvector4) * 2, 0, 0, &LightData);
 
-	RCache.set_Geometry(g_combine);
-	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
-
-	HW.pContext->CopyResource(rt_ssfx_sss_ext2->pTexture->surface_get(), rt_ssfx_sss_tmp->pTexture->surface_get());
+	if (pass_used[1])
+	{
+		RCache.set_Geometry(g_combine);
+		RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+		HW.pContext->CopyResource(rt_ssfx_sss_ext2->pTexture->surface_get(), rt_ssfx_sss_tmp->pTexture->surface_get());
+		s_pass_cleared[1] = nullptr;
+	}
+	else
+		skip_pass(rt_ssfx_sss_ext2, s_pass_cleared[1]);
 
 	// Combine ---------------------------------------------------------
 
