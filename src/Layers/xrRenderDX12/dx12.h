@@ -21,6 +21,7 @@
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <atomic>
+#include <functional>
 #include <mutex>
 #include <vector>
 
@@ -56,8 +57,9 @@ enum Stage
 };
 
 //-------------------------------------------------------------------------------------------------------------------
-// Reference-counted base (COM-like lifetime without COM). Release at zero deletes the object; GPU objects it owns go
-// to the device's deferred-release list until the GPU is past the frame that could still use them.
+// Reference-counted base (COM-like lifetime without COM). Release at zero deletes the object (with threaded recording
+// once the worker is past the commands queued so far); GPU objects it owns go to the device's deferred-release list
+// until the GPU is past the frame that could still use them.
 class Object
 {
 public:
@@ -155,7 +157,8 @@ public:
 	ID3D12Resource* m_readback = nullptr;
 	D3D12MA::Allocation* m_readback_allocation = nullptr;
 	std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> m_footprints;
-	u64 m_readback_fence = 0;
+	u64 m_readback_fence = 0; // set where the copy is recorded
+	u64 m_readback_chunk = 0; // command chunk of the last copy into it (threaded recording)
 	u8* m_readback_ptr = nullptr;
 
 	// DYNAMIC buffers: the current slice of the upload ring (renamed by Map(WRITE_DISCARD))
@@ -168,6 +171,7 @@ public:
 	ID3D12Resource* m_map_buffer = nullptr;
 
 	bool m_back_buffer = false; // a swap chain buffer (owned by the swap chain, never deferred-released)
+	bool m_back_buffer_alias = false; // stands for the current swap chain buffer where the commands are recorded
 	bool m_written_uav = false; // written through a UAV since the last barrier
 };
 
@@ -356,7 +360,8 @@ public:
 	UINT GetDataSize() const;
 	D3D11_QUERY_DESC m_desc = {};
 	UINT m_index = UINT(-1); // in the query heap of its type
-	u64 m_fence = 0; // fence value of the submission that ends it
+	u64 m_fence = 0; // fence value of the submission that ends it (set where the End is recorded)
+	u64 m_end_chunk = 0; // command chunk of the End (threaded recording)
 	bool m_ended = false;
 };
 
@@ -411,8 +416,9 @@ public:
 	HRESULT AttachSwapChain(IDXGISwapChain1* swap_chain);
 	void ReleaseBackBuffers();
 	HRESULT CreateBackBufferRTV(RenderTargetView** out);
-	HRESULT GetBackBuffer(Texture2D** out);
-	Texture2D* CurrentBackBuffer();
+	HRESULT GetBackBuffer(Texture2D** out); // the alias below: copies from it read the buffer current at recording
+	Texture2D* BackBufferAlias();
+	Texture2D* CurrentBackBuffer(); // where commands are recorded (the context's worker when threaded)
 	D3D12_CPU_DESCRIPTOR_HANDLE CurrentBackBufferRTV();
 
 	// Native access (upscalers, ImGui, frame pacing)
@@ -546,25 +552,37 @@ public:
 	// stat_dx12: commands per frame over some seconds in the log, the barriers by PIX event
 	void StartStats(float seconds);
 
-	// Native access: the command list being recorded, with all pending barriers issued. After native recording the
-	// context's bindings are set again at the next draw (InvalidateNative); Transition moves a resource to a state
-	// for native use and keeps the tracking right
-	ID3D12GraphicsCommandList* NativeList();
-	void Transition(Resource* res, D3D12_RESOURCE_STATES state);
-	void InvalidateNative();
+	// Threaded recording (r__dx12_threaded): the calls are queued as commands and a worker thread records the
+	// D3D12 command list from them, as DXVK records Vulkan on its own thread; off, every call records at once.
+	// Synchronize returns once everything called so far is recorded and submitted
+	void SetThreaded(bool on);
+	bool Threaded() const;
+	void Synchronize();
+
+	// Native recording (DLSS, ImGui): the function runs where the commands are recorded, in order with them, so it
+	// gets the command list from the recorder and works only with what it owns or captured. Transition moves a
+	// resource to a state with the tracking kept right; List issues the pending barriers. The context sets its own
+	// bindings again afterwards
+	class NativeRecorder
+	{
+	public:
+		virtual void Transition(Resource* res, D3D12_RESOURCE_STATES state) = 0;
+		virtual ID3D12GraphicsCommandList* List() = 0;
+		virtual Texture2D* BackBuffer(D3D12_CPU_DESCRIPTOR_HANDLE* rtv) = 0; // the swap chain buffer being drawn
+	};
+	void ExecuteNative(std::function<void(NativeRecorder&)> fn);
 	ID3D12DescriptorHeap* ShaderVisibleHeap() const;
 	// Signals a fence on the queue right after the next submission of the frame's commands (frame pacing: the GPU
 	// reached the end of the frame)
 	void SignalAfterSubmit(ID3D12Fence* fence, u64 value);
-	// Fence value of the last submission, and of the next one (what End(query) / copies recorded now complete with)
-	u64 LastSubmittedFence() const;
-	u64 PendingFence() const;
 	// A range of the shader-visible heap reserved for long-lived descriptors (ImGui's font)
 	bool AllocStaticDescriptor(D3D12_CPU_DESCRIPTOR_HANDLE* cpu, D3D12_GPU_DESCRIPTOR_HANDLE* gpu);
 	void FreeStaticDescriptor(D3D12_CPU_DESCRIPTOR_HANDLE cpu);
 
-	struct Impl;
+	struct Impl; // the recording side
+	struct Front; // the calling side: bindings as set, upload memory, the command queue
 	Impl* m_impl = nullptr;
+	Front* m_front = nullptr;
 
 private:
 	void SetShader(Stage stage, Shader* shader);

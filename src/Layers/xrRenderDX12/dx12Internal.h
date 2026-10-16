@@ -60,7 +60,7 @@ private:
 
 //-------------------------------------------------------------------------------------------------------------------
 // Upload memory: 4 MB pages of an UPLOAD heap, persistently mapped. A frame takes slices linearly; its pages come back
-// when the GPU has passed the frame. Main thread only (the context)
+// when the GPU has passed the frame. The context's calling side only; Retire and Reclaim take frame numbers
 struct UploadPage
 {
 	ID3D12Resource* buffer = nullptr;
@@ -68,7 +68,7 @@ struct UploadPage
 	u8* cpu = nullptr;
 	D3D12_GPU_VIRTUAL_ADDRESS va = 0;
 	u64 size = 0;
-	u64 fence = 0;
+	u64 frame = 0; // the frame that used it last
 };
 
 struct UploadSlice
@@ -85,7 +85,7 @@ public:
 	void Init(D3D12MA::Allocator* allocator) { m_allocator = allocator; }
 	void Destroy();
 	bool Alloc(u64 size, u64 alignment, UploadSlice& slice);
-	void Retire(u64 fence); // the pages used so far belong to the submission signalling fence
+	void Retire(u64 frame); // the pages used so far belong to that frame
 	void Reclaim(u64 completed);
 	u64 BytesThisFrame() const { return m_frame_bytes; }
 
@@ -171,6 +171,7 @@ struct Device::Impl
 	u64 Completed();
 	void WaitFence(u64 value);
 	u64 Submit(ID3D12CommandList* const* lists, UINT count); // returns the signalled value
+	void WaitQueueIdle(); // pending initial uploads submitted, the GPU idle (no context work submitted here)
 
 	DescriptorPool rtv_pool, dsv_pool, srv_pool, sampler_pool;
 
@@ -213,6 +214,7 @@ struct Device::Impl
 	std::vector<UINT> back_buffer_rtv_slots;
 	std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> back_buffer_rtv;
 	DXGI_FORMAT back_buffer_format = DXGI_FORMAT_UNKNOWN;
+	Texture2D* back_buffer_alias = nullptr; // GetBackBuffer's texture: resolved to the current buffer at recording
 
 	// Null descriptors for unbound slots
 	D3D12_CPU_DESCRIPTOR_HANDLE null_srv[11] = {}; // per D3D12_SRV_DIMENSION (0: 2D)
@@ -263,6 +265,10 @@ ID3D12PipelineState* CreateGraphicsPipeline(Device* device, const GraphicsPipeli
 ID3D12PipelineState* CreateComputePipeline(Device* device, const RootSignature* root, const Shader* shader);
 
 Device* TheDevice();
+
+// Set while the context records on a worker thread: takes the objects whose last reference went (deleted once the
+// worker is past the commands queued until then)
+extern std::atomic<void (*)(Object*)> g_defer_delete;
 } // namespace dx12
 
 namespace std

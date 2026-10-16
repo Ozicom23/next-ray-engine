@@ -8,10 +8,19 @@
 //  3. copies the views of each stage into the shader-visible heap (a table per stage, only when they changed), sets
 //     constant buffers as root CBVs (their address changes whenever a dynamic buffer is mapped)
 //  4. sets input assembler, targets, viewports, scissors, stencil reference and blend factor when they changed
+//
+// The calls are commands (Context::Front, at the end): with r__dx12_threaded a worker thread records them, as DXVK
+// records Vulkan on its own thread, and the calling thread only queues them. Context::Impl is the recording side:
+// it runs on the worker, or at once when not threaded. The bindings it keeps are plain pointers: the calling side
+// holds the references, and an object whose last reference goes is deleted once the worker is past the commands
+// queued until then.
 #include "stdafx.h"
 #pragma hdrstop
 
 #include "dx12Internal.h"
+#include <condition_variable>
+#include <deque>
+#include <thread>
 
 namespace dx12
 {
@@ -36,7 +45,7 @@ struct ContextStats
 		srv_table_sets, sampler_tables, cbv_sets, rt_sets, vb_sets, ib_sets, vp_sets, sc_sets, clears, copies, submits;
 };
 
-struct Context::Impl
+struct Context::Impl : public Context::NativeRecorder
 {
 	Context* self = nullptr;
 	Device* device = nullptr;
@@ -48,11 +57,14 @@ struct Context::Impl
 	u64 frame_fence[kFrames] = {};
 	UINT frame_index = 0;
 	u64 frame_number = 1;
-	u64 upload_epoch = 1; // changes when upload memory is recycled: dynamic buffers mapped before get renamed
 	bool recorded = false;
 	std::vector<std::wstring> events; // open PIX events, opened again after a submission in the middle of a frame
 
-	UploadRing upload;
+	// Frames recorded: the fence of each frame's last submission, read by the calling side to recycle upload memory
+	static const UINT kFrameRing = 64;
+	u64 frame_fences[kFrameRing] = {};
+	std::atomic<u64> recorded_frame{ 0 };
+	std::atomic<HRESULT> present_result{ S_OK };
 
 	// Shader-visible heaps: views (a static range, then one segment per frame in flight) and samplers (tables
 	// cached by content)
@@ -398,8 +410,8 @@ struct Context::Impl
 		{
 			// Never seen in practice: the GPU finishes everything, then the segment starts over
 			DX12_WARN_ONCE("! D3D12: the frame's descriptor range is full (%u), waiting for the GPU", segment_size);
-			self->Flush();
-			device->WaitIdle();
+			FlushBackend();
+			dev->WaitQueueIdle();
 			for (UINT& n : segment_next)
 				n = 0;
 			srv_tables.clear();
@@ -427,8 +439,8 @@ struct Context::Impl
 			if (sampler_next + count > kSamplerHeapSize)
 			{
 				DX12_WARN_ONCE("! D3D12: sampler heap full, starting it over");
-				self->Flush();
-				device->WaitIdle();
+				FlushBackend();
+				dev->WaitQueueIdle();
 				sampler_tables.clear();
 				sampler_next = 0;
 				for (StageBinding& s : stages)
@@ -450,39 +462,11 @@ struct Context::Impl
 		return D3D12_GPU_DESCRIPTOR_HANDLE{ sampler_gpu0.ptr + u64(index) * sampler_inc };
 	}
 
-	// A shadowed dynamic buffer's data into this frame's upload memory
-	void UploadShadow(Buffer* b)
-	{
-		UploadSlice slice;
-		const u64 size = (u64(b->m_desc.ByteWidth) + 255) & ~255ull;
-		if (!upload.Alloc(size, 256, slice))
-			return;
-		memcpy(slice.cpu, b->m_shadow.data(), b->m_shadow.size());
-		b->m_va = slice.va;
-		b->m_ptr = slice.cpu;
-		b->m_ptr_frame = upload_epoch;
-		b->m_map_buffer = slice.buffer;
-		b->m_map_footprint.Offset = slice.offset;
-	}
-
+	// A dynamic buffer's address is its current upload slice: the calling side renames it (Map, Unmap, and again
+	// for a shadowed buffer used unchanged in a later frame) with a command ahead of the draws that use it
 	D3D12_GPU_VIRTUAL_ADDRESS BufferAddress(Buffer* b)
 	{
-		if (!b)
-			return zero_buffer->m_va;
-		if (b->m_usage == D3D11_USAGE_DYNAMIC)
-		{
-			if (b->m_shadowed)
-			{
-				if (b->m_ptr_frame != upload_epoch)
-					UploadShadow(b); // unchanged since an earlier frame, its upload memory may be reused
-			}
-			else if (b->m_ptr && b->m_ptr_frame != upload_epoch && !b->m_warned_stale)
-			{
-				b->m_warned_stale = true;
-				Msg("! D3D12: a large dynamic buffer (%u bytes) is used in a later frame than it was written", b->m_desc.ByteWidth);
-			}
-		}
-		if (!b->m_va)
+		if (!b || !b->m_va)
 			return zero_buffer->m_va;
 		return b->m_va;
 	}
@@ -1108,20 +1092,20 @@ struct Context::Impl
 		return value;
 	}
 
-	void NextFrame(u64 fence)
+	// The calling side's frame (its upload memory comes back once the GPU passed this fence)
+	void NextFrame(u64 fence, u64 caller_frame)
 	{
+		frame_fences[caller_frame % kFrameRing] = fence;
+		recorded_frame.store(caller_frame, std::memory_order_release);
 		frame_fence[frame_index] = fence;
-		upload.Retire(fence);
 		frame_index = (frame_index + 1) % kFrames;
 		dev->WaitFence(frame_fence[frame_index]);
 		allocator[frame_index]->Reset();
 		list->Reset(allocator[frame_index], nullptr);
 		const u64 completed = dev->Completed();
-		upload.Reclaim(completed);
 		segment_next[frame_index] = 0;
 		dev->ProcessDeferred(completed, false);
 		++frame_number;
-		++upload_epoch;
 		InvalidateApplied();
 		for (const std::wstring& e : events)
 			list->BeginEvent(0, e.c_str(), UINT((e.size() + 1) * sizeof(wchar_t)));
@@ -1172,9 +1156,66 @@ struct Context::Impl
 	}
 
 	bool CommandsPending(u64 fence) const { return fence >= dev->pending_fence.load(); }
+
+	// What the calling side's Flush queues: the recorded commands to the GPU (or the initial uploads alone)
+	void FlushBackend()
+	{
+		if (!recorded && barriers.empty())
+		{
+			std::lock_guard<std::mutex> lock(dev->init_lock);
+			dev->SubmitInitLocked();
+			return;
+		}
+		Submit(true);
+	}
+
+	// GetBackBuffer's alias stands for the swap chain buffer current at recording
+	Resource* Res(Resource* r) { return r && r->m_back_buffer_alias ? device->CurrentBackBuffer() : r; }
+
+	// NativeRecorder
+	void Transition(Resource* res, D3D12_RESOURCE_STATES state) override { RequireWhole(Res(res), state); }
+	ID3D12GraphicsCommandList* List() override
+	{
+		FlushBarriers();
+		Record();
+		return list;
+	}
+	Texture2D* BackBuffer(D3D12_CPU_DESCRIPTOR_HANDLE* rtv) override
+	{
+		if (rtv)
+			*rtv = device->CurrentBackBufferRTV();
+		return device->CurrentBackBuffer();
+	}
 };
 
 //===================================================================================================================
+// Commands: a call's recording work as a closure, stored in a chunk the worker runs in order (or run at once)
+
+struct Cmd
+{
+	Cmd* next = nullptr;
+	virtual void Run(Context::Impl& c) = 0;
+	virtual ~Cmd() {}
+};
+
+template <class F>
+struct CmdOf final : Cmd
+{
+	F fn;
+	template <class G>
+	explicit CmdOf(G&& g) : fn(std::forward<G>(g)) {}
+	void Run(Context::Impl& c) override { fn(c); }
+};
+
+struct Chunk
+{
+	static const size_t kSize = 32 << 10;
+	alignas(16) u8 data[kSize];
+	size_t used = 0;
+	Cmd* first = nullptr;
+	Cmd* last = nullptr;
+	u64 id = 0;
+};
 
 template <class T>
 static void Rebind(T*& slot, T* value)
@@ -1187,6 +1228,452 @@ static void Rebind(T*& slot, T* value)
 		slot->Release();
 	slot = value;
 }
+
+// The footprint of one subresource of a GPU texture, at offset 0
+static D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint(ID3D12Device* d3d, Resource* r, UINT sub, UINT* rows, UINT64* row_bytes, UINT64* total)
+{
+	D3D12_RESOURCE_DESC rd = {};
+	switch (r->m_dimension)
+	{
+	case D3D11_RESOURCE_DIMENSION_TEXTURE1D: rd.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE1D; break;
+	case D3D11_RESOURCE_DIMENSION_TEXTURE3D: rd.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE3D; break;
+	default: rd.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D; break;
+	}
+	rd.Width = r->m_width;
+	rd.Height = r->m_height;
+	rd.DepthOrArraySize = UINT16(r->m_depth_or_array);
+	rd.MipLevels = UINT16(r->m_mips);
+	rd.Format = r->m_format;
+	rd.SampleDesc.Count = 1;
+	D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp = {};
+	d3d->GetCopyableFootprints(&rd, sub, 1, 0, &fp, rows, row_bytes, total);
+	return fp;
+}
+
+static void NoteCopy(Context::Impl& c, Resource* dst, Resource* src)
+{
+	if (c.stats_on)
+		++c.stats.copies;
+	if (c.trace_frames)
+	{
+		std::string out = make_string("[dx12 trace] %u copy %s <- %s", c.trace_index++, Context::Impl::ResName(dst).c_str(),
+		                              Context::Impl::ResName(src).c_str());
+		c.TraceLine(out);
+	}
+}
+
+struct StageState
+{
+	Shader* shader = nullptr;
+	Buffer* cb[kMaxCB] = {};
+	ShaderResourceView* srv[kMaxSRV] = {};
+	SamplerState* sampler[kMaxSamplers] = {};
+	UnorderedAccessView* uav[kMaxUAV] = {};
+};
+
+//===================================================================================================================
+// The calling side: the bindings as set (the getters answer from them, unchanged sets queue nothing, references are
+// held as D3D11 holds them), upload memory (Map answers at once), readiness of readbacks and queries, and the queue
+
+struct Context::Front
+{
+	Context::Impl* impl = nullptr;
+	Device* device = nullptr;
+	Device::Impl* dev = nullptr;
+	ID3D12Device* d3d = nullptr;
+
+	StageState stages[StageCount];
+	InputLayout* layout = nullptr;
+	D3D11_PRIMITIVE_TOPOLOGY topology = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
+	Buffer* vb[kMaxVB] = {};
+	UINT vb_stride[kMaxVB] = {}, vb_offset[kMaxVB] = {};
+	Buffer* ib = nullptr;
+	DXGI_FORMAT ib_format = DXGI_FORMAT_R16_UINT;
+	UINT ib_offset = 0;
+	RasterizerState* raster = nullptr;
+	BlendState* blend = nullptr;
+	FLOAT blend_factor[4] = {};
+	UINT sample_mask = 0xFFFFFFFF;
+	DepthStencilState* depth = nullptr;
+	UINT stencil_ref = 0;
+	D3D11_VIEWPORT viewports[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE] = {};
+	UINT viewport_count = 0;
+	D3D11_RECT scissors[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE] = {};
+	UINT scissor_count = 0;
+	bool scissors_set = false;
+	RenderTargetView* rtv[kMaxRT] = {};
+	DepthStencilView* dsv = nullptr;
+	INT event_depth = 0;
+
+	// Upload memory in frames of this side; a frame's pages come back once the GPU passed the fence the recording
+	// side gave that frame
+	UploadRing upload;
+	u64 frame = 1;
+	u64 upload_epoch = 1; // changes when upload memory is recycled: dynamic buffers mapped before get renamed
+	u64 reclaimed_frame = 0;
+	u64 fresh_epoch = 0; // the bound dynamic buffers were checked for this epoch
+
+	// The queue: chunks of commands to the worker; ids count up, done_id is the last chunk the worker finished
+	bool threaded = false;
+	std::thread worker;
+	DWORD caller_thread = 0;
+	Chunk* open = nullptr;
+	std::atomic<u64> open_id{ 1 };
+	u64 dispatched_id = 0;
+	u64 present_chunk = 0; // the chunk with the last Present
+	u64 flush_chunk = 0; // the chunk with the last flush asked for by a readback or query
+	std::mutex queue_lock;
+	std::condition_variable queue_cv;
+	std::deque<Chunk*> queue;
+	bool stop = false;
+	std::mutex free_lock;
+	std::vector<Chunk*> free_chunks;
+	std::mutex done_lock;
+	std::condition_variable done_cv;
+	std::atomic<u64> done_id{ 0 };
+	// Objects whose last reference went, with the chunk open at that time
+	std::mutex delete_lock;
+	std::vector<std::pair<u64, Object*>> deletes;
+	std::vector<u8> scratch; // payloads when not threaded
+	static Front* s_active;
+
+	//---------------------------------------------------------------------------------------------------------------
+	// Queue
+
+	Chunk* NewChunk()
+	{
+		{
+			std::lock_guard<std::mutex> lock(free_lock);
+			if (!free_chunks.empty())
+			{
+				Chunk* c = free_chunks.back();
+				free_chunks.pop_back();
+				return c;
+			}
+		}
+		return new Chunk();
+	}
+
+	void* Reserve(size_t size, size_t align, size_t keep_free)
+	{
+		size_t at = (open->used + align - 1) & ~(align - 1);
+		if (at + size + keep_free > Chunk::kSize)
+		{
+			Dispatch();
+			at = 0;
+		}
+		open->used = at + size;
+		return open->data + at;
+	}
+
+	void Dispatch()
+	{
+		if (!threaded || !open->first)
+			return;
+		Chunk* ch = open;
+		dispatched_id = ch->id;
+		open = NewChunk();
+		open->id = dispatched_id + 1;
+		open_id.store(open->id);
+		{
+			std::lock_guard<std::mutex> lock(queue_lock);
+			queue.push_back(ch);
+		}
+		queue_cv.notify_one();
+	}
+
+	template <class F>
+	void Emit(F&& fn)
+	{
+		if (!threaded)
+		{
+			fn(*impl);
+			return;
+		}
+		if (GetCurrentThreadId() != caller_thread)
+			DX12_WARN_ONCE("! D3D12: a context call from another thread while recording is threaded");
+		typedef CmdOf<typename std::decay<F>::type> C;
+		C* cmd = new (Reserve(sizeof(C), alignof(C), 0)) C(std::forward<F>(fn));
+		if (open->last)
+			open->last->next = cmd;
+		else
+			open->first = cmd;
+		open->last = cmd;
+	}
+
+	// Room for a command's array data, valid until the command ran (the command must be emitted right after)
+	template <class T>
+	T* Payload(UINT count)
+	{
+		const size_t bytes = sizeof(T) * count;
+		if (!threaded)
+		{
+			if (scratch.size() < bytes)
+				scratch.resize(bytes);
+			return reinterpret_cast<T*>(scratch.data());
+		}
+		return static_cast<T*>(Reserve(bytes, 16, 1024));
+	}
+
+	u64 Tag() const { return threaded ? open_id.load() : 0; } // the chunk the next command goes into
+	bool Done(u64 id) const { return done_id.load(std::memory_order_acquire) >= id; }
+
+	void WaitDone(u64 id)
+	{
+		if (Done(id))
+			return;
+		std::unique_lock<std::mutex> lock(done_lock);
+		done_cv.wait(lock, [&] { return Done(id); });
+	}
+
+	void WorkerMain()
+	{
+		for (;;)
+		{
+			Chunk* ch;
+			{
+				std::unique_lock<std::mutex> lock(queue_lock);
+				queue_cv.wait(lock, [this] { return stop || !queue.empty(); });
+				if (queue.empty())
+					return;
+				ch = queue.front();
+				queue.pop_front();
+			}
+			for (Cmd* cmd = ch->first; cmd;)
+			{
+				Cmd* next = cmd->next;
+				cmd->Run(*impl);
+				cmd->~Cmd();
+				cmd = next;
+			}
+			const u64 id = ch->id;
+			ch->used = 0;
+			ch->first = ch->last = nullptr;
+			{
+				std::lock_guard<std::mutex> lock(free_lock);
+				free_chunks.push_back(ch);
+			}
+			{
+				std::lock_guard<std::mutex> lock(done_lock);
+				done_id.store(id, std::memory_order_release);
+			}
+			done_cv.notify_all();
+			// A call releases before it queues its command, which may then open the next chunk: two chunks of margin
+			if (id > 2)
+				DeleteDone(id - 2);
+		}
+	}
+
+	static void DeferDelete(Object* o)
+	{
+		Front* f = s_active;
+		if (!f)
+		{
+			delete o;
+			return;
+		}
+		std::lock_guard<std::mutex> lock(f->delete_lock);
+		f->deletes.emplace_back(f->open_id.load(), o);
+	}
+
+	void DeleteDone(u64 id)
+	{
+		std::vector<Object*> ready;
+		{
+			std::lock_guard<std::mutex> lock(delete_lock);
+			for (size_t i = 0; i < deletes.size();)
+			{
+				if (deletes[i].first <= id)
+				{
+					ready.push_back(deletes[i].second);
+					deletes[i] = deletes.back();
+					deletes.pop_back();
+				}
+				else
+					++i;
+			}
+		}
+		for (Object* o : ready)
+			delete o;
+	}
+
+	void Start()
+	{
+		if (threaded)
+			return;
+		open = NewChunk();
+		open->id = dispatched_id + 1;
+		open_id.store(open->id);
+		stop = false;
+		caller_thread = GetCurrentThreadId();
+		threaded = true;
+		s_active = this;
+		g_defer_delete.store(&Front::DeferDelete);
+		worker = std::thread([this] { WorkerMain(); });
+	}
+
+	void StopWorker()
+	{
+		if (!threaded)
+			return;
+		Synchronize();
+		g_defer_delete.store(nullptr);
+		{
+			std::lock_guard<std::mutex> lock(queue_lock);
+			stop = true;
+		}
+		queue_cv.notify_all();
+		worker.join();
+		threaded = false;
+		{
+			std::lock_guard<std::mutex> lock(free_lock);
+			free_chunks.push_back(open);
+		}
+		open = nullptr;
+		present_chunk = flush_chunk = 0;
+		DeleteDone(UINT64_MAX);
+	}
+
+	void Flush()
+	{
+		Emit([](Impl& c) { c.FlushBackend(); });
+		Dispatch();
+	}
+
+	void Synchronize()
+	{
+		Flush();
+		if (threaded)
+			WaitDone(dispatched_id);
+	}
+
+	// A readback or query waits for the GPU: the commands up to it go out, once
+	void RequestFlush()
+	{
+		if (threaded && !Done(flush_chunk))
+			return;
+		Flush();
+		flush_chunk = dispatched_id;
+	}
+
+	//---------------------------------------------------------------------------------------------------------------
+	// Upload memory and dynamic buffers
+
+	// A shadowed dynamic buffer's data into this frame's upload memory, the buffer renamed to it
+	void UploadShadow(Buffer* b)
+	{
+		UploadSlice slice;
+		const u64 size = (u64(b->m_desc.ByteWidth) + 255) & ~255ull;
+		if (!upload.Alloc(size, 256, slice))
+			return;
+		memcpy(slice.cpu, b->m_shadow.data(), b->m_shadow.size());
+		b->m_ptr = slice.cpu;
+		b->m_ptr_frame = upload_epoch;
+		b->m_map_buffer = slice.buffer;
+		b->m_map_footprint.Offset = slice.offset;
+		const D3D12_GPU_VIRTUAL_ADDRESS va = slice.va;
+		Emit([b, va](Impl&) { b->m_va = va; });
+	}
+
+	// A bound dynamic buffer unchanged since an earlier epoch: its upload memory may be reused
+	void Freshen(Buffer* b)
+	{
+		if (!b || b->m_usage != D3D11_USAGE_DYNAMIC)
+			return;
+		if (b->m_shadowed)
+		{
+			if (b->m_ptr_frame != upload_epoch)
+				UploadShadow(b);
+		}
+		else if (b->m_ptr && b->m_ptr_frame != upload_epoch && !b->m_warned_stale)
+		{
+			b->m_warned_stale = true;
+			Msg("! D3D12: a large dynamic buffer (%u bytes) is used in a later frame than it was written", b->m_desc.ByteWidth);
+		}
+	}
+
+	// Before a draw or dispatch
+	void BeforeWork()
+	{
+		if (fresh_epoch == upload_epoch)
+			return;
+		fresh_epoch = upload_epoch;
+		for (StageState& st : stages)
+			for (Buffer* b : st.cb)
+				Freshen(b);
+		for (Buffer* b : vb)
+			Freshen(b);
+		Freshen(ib);
+	}
+
+	// The last frame whose upload memory the GPU is done with
+	u64 CompletedFrame()
+	{
+		const u64 recorded = impl->recorded_frame.load(std::memory_order_acquire);
+		const u64 gpu = dev->Completed();
+		while (reclaimed_frame < recorded)
+		{
+			const u64 next = reclaimed_frame + 1;
+			if (impl->frame_fences[next % Impl::kFrameRing] > gpu)
+				break;
+			reclaimed_frame = next;
+		}
+		return reclaimed_frame;
+	}
+
+	// After the frame's Present (or EndFrame) command
+	void FrameDone()
+	{
+		Dispatch();
+		if (threaded)
+		{
+			// One frame ahead of the recording at most: the previous frame's Present is through
+			if (present_chunk)
+				WaitDone(present_chunk);
+			present_chunk = dispatched_id;
+		}
+		upload.Retire(frame);
+		upload.Reclaim(CompletedFrame());
+		++frame;
+		++upload_epoch;
+	}
+
+	// One subresource of a STAGING (CPU write) texture into upload memory; returns the copy source
+	bool StageSubresource(Resource* src, UINT sub, D3D12_TEXTURE_COPY_LOCATION& loc)
+	{
+		// The first binds after a level load upload a lot at once: past 512 MB in a frame the GPU takes what is
+		// recorded and the upload memory comes back, instead of growing for the whole frame
+		if (upload.BytesThisFrame() > (512ull << 20))
+		{
+			Synchronize();
+			dev->WaitQueueIdle();
+			upload.Retire(frame);
+			upload.Reclaim(frame);
+			++upload_epoch;
+		}
+		UINT rows = 0;
+		UINT64 row_bytes = 0, total = 0;
+		D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp = Footprint(d3d, src, sub, &rows, &row_bytes, &total);
+		UploadSlice slice;
+		if (!upload.Alloc(total, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT, slice))
+			return false;
+		const SubresourceLayout& l = src->m_layouts[sub];
+		for (UINT z = 0; z < fp.Footprint.Depth; ++z)
+			for (UINT r = 0; r < rows; ++r)
+				memcpy(slice.cpu + u64(z) * fp.Footprint.RowPitch * rows + u64(r) * fp.Footprint.RowPitch,
+				       src->m_cpu_data.data() + l.offset + size_t(z) * l.depth_pitch + size_t(r) * l.row_pitch, size_t(row_bytes));
+		fp.Offset = slice.offset;
+		loc = {};
+		loc.pResource = slice.buffer;
+		loc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+		loc.PlacedFootprint = fp;
+		return true;
+	}
+};
+
+Context::Front* Context::Front::s_active = nullptr;
+
+//===================================================================================================================
 
 Context::Context(Device* device)
 {
@@ -1202,7 +1689,6 @@ Context::Context(Device* device)
 		d3d->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&c.allocator[i]));
 	d3d->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, c.allocator[0], nullptr, IID_PPV_ARGS(&c.list));
 	c.list->SetName(L"xr frame");
-	c.upload.Init(device->m_allocator);
 
 	D3D12_DESCRIPTOR_HEAP_DESC hd = {};
 	hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
@@ -1265,10 +1751,19 @@ Context::Context(Device* device)
 		c.null_rtv_slot = c.dev->rtv_pool.Alloc(&c.null_rtv);
 		d3d->CreateRenderTargetView(nullptr, &rd, c.null_rtv);
 	}
+
+	m_front = new Front();
+	Front& f = *m_front;
+	f.impl = m_impl;
+	f.device = device;
+	f.dev = c.dev;
+	f.d3d = d3d;
+	f.upload.Init(device->m_allocator);
 }
 
 Context::~Context()
 {
+	m_front->StopWorker();
 	ClearState();
 	Impl& c = *m_impl;
 	if (c.default_blend)
@@ -1281,7 +1776,7 @@ Context::~Context()
 		c.zero_buffer->Release();
 	c.dev->rtv_pool.Free(c.null_rtv_slot);
 	c.list->Close();
-	c.upload.Destroy();
+	m_front->upload.Destroy();
 	c.list->Release();
 	for (ID3D12CommandAllocator* a : c.allocator)
 		if (a)
@@ -1290,6 +1785,9 @@ Context::~Context()
 		c.view_heap->Release();
 	if (c.sampler_heap)
 		c.sampler_heap->Release();
+	for (Chunk* ch : m_front->free_chunks)
+		delete ch;
+	delete m_front;
 	delete m_impl;
 }
 
@@ -1301,71 +1799,134 @@ HRESULT Context::QueryInterface(REFIID, void** out)
 	return E_NOINTERFACE;
 }
 
+void Context::SetThreaded(bool on)
+{
+	Front& f = *m_front;
+	if (on == f.threaded)
+		return;
+	if (on)
+		f.Start();
+	else
+		f.StopWorker();
+	Msg("* D3D12: commands recorded %s", on ? "on a worker thread" : "on the calling thread");
+}
+
+bool Context::Threaded() const { return m_front->threaded; }
+
+void Context::Synchronize() { m_front->Synchronize(); }
+
 //-------------------------------------------------------------------------------------------------------------------
 // Binding
 
 void Context::SetShader(Stage stage, Shader* shader)
 {
-	Impl& c = *m_impl;
-	StageBinding& b = c.stages[stage];
-	if (b.shader == shader)
+	Front& f = *m_front;
+	Shader*& slot = f.stages[stage].shader;
+	if (slot == shader)
 		return;
-	const u64 old_key = ShaderBindingKey(b.shader);
-	Rebind(b.shader, shader);
-	if (stage == StageCS)
-	{
-		c.cs_pso = nullptr;
-		if (ShaderBindingKey(shader) != old_key)
-			c.cs_changed = true;
-	}
-	else
-	{
-		c.pso_dirty = true;
-		if (ShaderBindingKey(shader) != old_key)
-			c.shaders_changed = true;
-		// The table's size and its null views' dimensions follow the shader (the table cache finds equal tables)
-		b.srv_dirty = true;
-	}
+	Rebind(slot, shader);
+	f.Emit([stage, shader](Impl& c) {
+		StageBinding& b = c.stages[stage];
+		const u64 old_key = ShaderBindingKey(b.shader);
+		b.shader = shader;
+		if (stage == StageCS)
+		{
+			c.cs_pso = nullptr;
+			if (ShaderBindingKey(shader) != old_key)
+				c.cs_changed = true;
+		}
+		else
+		{
+			c.pso_dirty = true;
+			if (ShaderBindingKey(shader) != old_key)
+				c.shaders_changed = true;
+			// The table's size and its null views' dimensions follow the shader (the table cache finds equal tables)
+			b.srv_dirty = true;
+		}
+	});
 }
 
 void Context::SetSRVs(Stage stage, UINT start, UINT count, ShaderResourceView* const* views)
 {
-	StageBinding& b = m_impl->stages[stage];
+	Front& f = *m_front;
+	ShaderResourceView** slots = f.stages[stage].srv;
+	UINT lo = kMaxSRV, hi = 0;
 	for (UINT i = 0; i < count && start + i < kMaxSRV; ++i)
 	{
 		ShaderResourceView* v = views ? views[i] : nullptr;
-		if (b.srv[start + i] != v)
-		{
-			Rebind(b.srv[start + i], v);
-			b.srv_dirty = true;
-		}
+		if (slots[start + i] == v)
+			continue;
+		Rebind(slots[start + i], v);
+		lo = _min(lo, start + i);
+		hi = start + i + 1;
 	}
+	if (lo >= hi)
+		return;
+	ShaderResourceView** p = f.Payload<ShaderResourceView*>(hi - lo);
+	memcpy(p, slots + lo, sizeof(*p) * (hi - lo));
+	f.Emit([stage, lo, hi, p](Impl& c) {
+		StageBinding& b = c.stages[stage];
+		for (UINT i = lo; i < hi; ++i)
+			b.srv[i] = p[i - lo];
+		b.srv_dirty = true;
+	});
 }
 
 void Context::SetSamplers(Stage stage, UINT start, UINT count, SamplerState* const* samplers)
 {
-	StageBinding& b = m_impl->stages[stage];
+	Front& f = *m_front;
+	SamplerState** slots = f.stages[stage].sampler;
+	UINT lo = kMaxSamplers, hi = 0;
 	for (UINT i = 0; i < count && start + i < kMaxSamplers; ++i)
 	{
 		SamplerState* s = samplers ? samplers[i] : nullptr;
-		if (b.sampler[start + i] != s)
-		{
-			Rebind(b.sampler[start + i], s);
-			b.sampler_dirty = true;
-		}
+		if (slots[start + i] == s)
+			continue;
+		Rebind(slots[start + i], s);
+		lo = _min(lo, start + i);
+		hi = start + i + 1;
 	}
+	if (lo >= hi)
+		return;
+	SamplerState** p = f.Payload<SamplerState*>(hi - lo);
+	memcpy(p, slots + lo, sizeof(*p) * (hi - lo));
+	f.Emit([stage, lo, hi, p](Impl& c) {
+		StageBinding& b = c.stages[stage];
+		for (UINT i = lo; i < hi; ++i)
+			b.sampler[i] = p[i - lo];
+		b.sampler_dirty = true;
+	});
 }
 
 void Context::SetCBs(Stage stage, UINT start, UINT count, Buffer* const* buffers)
 {
-	StageBinding& b = m_impl->stages[stage];
+	Front& f = *m_front;
+	Buffer** slots = f.stages[stage].cb;
+	UINT lo = kMaxCB, hi = 0;
 	for (UINT i = 0; i < count && start + i < kMaxCB; ++i)
-		Rebind(b.cb[start + i], buffers ? buffers[i] : nullptr);
+	{
+		Buffer* b = buffers ? buffers[i] : nullptr;
+		if (slots[start + i] == b)
+			continue;
+		Rebind(slots[start + i], b);
+		f.Freshen(b);
+		lo = _min(lo, start + i);
+		hi = start + i + 1;
+	}
+	if (lo >= hi)
+		return;
+	Buffer** p = f.Payload<Buffer*>(hi - lo);
+	memcpy(p, slots + lo, sizeof(*p) * (hi - lo));
+	f.Emit([stage, lo, hi, p](Impl& c) {
+		StageBinding& b = c.stages[stage];
+		for (UINT i = lo; i < hi; ++i)
+			b.cb[i] = p[i - lo];
+	});
 }
 
 void Context::CSGetShader(ComputeShader** shader, void** instances, UINT* count)
 {
-	Shader* s = m_impl->stages[StageCS].shader;
+	Shader* s = m_front->stages[StageCS].shader;
 	if (s)
 		s->AddRef();
 	*shader = static_cast<ComputeShader*>(s);
@@ -1377,7 +1938,7 @@ void Context::CSGetShaderResources(UINT start, UINT count, ShaderResourceView** 
 {
 	for (UINT i = 0; i < count; ++i)
 	{
-		ShaderResourceView* v = start + i < kMaxSRV ? m_impl->stages[StageCS].srv[start + i] : nullptr;
+		ShaderResourceView* v = start + i < kMaxSRV ? m_front->stages[StageCS].srv[start + i] : nullptr;
 		if (v)
 			v->AddRef();
 		views[i] = v;
@@ -1388,7 +1949,7 @@ void Context::PSGetShaderResources(UINT start, UINT count, ShaderResourceView** 
 {
 	for (UINT i = 0; i < count; ++i)
 	{
-		ShaderResourceView* v = start + i < kMaxSRV ? m_impl->stages[StagePS].srv[start + i] : nullptr;
+		ShaderResourceView* v = start + i < kMaxSRV ? m_front->stages[StagePS].srv[start + i] : nullptr;
 		if (v)
 			v->AddRef();
 		views[i] = v;
@@ -1399,7 +1960,7 @@ void Context::CSGetConstantBuffers(UINT start, UINT count, Buffer** buffers)
 {
 	for (UINT i = 0; i < count; ++i)
 	{
-		Buffer* b = start + i < kMaxCB ? m_impl->stages[StageCS].cb[start + i] : nullptr;
+		Buffer* b = start + i < kMaxCB ? m_front->stages[StageCS].cb[start + i] : nullptr;
 		if (b)
 			b->AddRef();
 		buffers[i] = b;
@@ -1408,23 +1969,35 @@ void Context::CSGetConstantBuffers(UINT start, UINT count, Buffer** buffers)
 
 void Context::CSSetUnorderedAccessViews(UINT start, UINT count, UnorderedAccessView* const* views, const UINT*)
 {
-	StageBinding& b = m_impl->stages[StageCS];
+	Front& f = *m_front;
+	UnorderedAccessView** slots = f.stages[StageCS].uav;
+	UINT lo = kMaxUAV, hi = 0;
 	for (UINT i = 0; i < count && start + i < kMaxUAV; ++i)
 	{
 		UnorderedAccessView* v = views ? views[i] : nullptr;
-		if (b.uav[start + i] != v)
-		{
-			Rebind(b.uav[start + i], v);
-			b.uav_dirty = true;
-		}
+		if (slots[start + i] == v)
+			continue;
+		Rebind(slots[start + i], v);
+		lo = _min(lo, start + i);
+		hi = start + i + 1;
 	}
+	if (lo >= hi)
+		return;
+	UnorderedAccessView** p = f.Payload<UnorderedAccessView*>(hi - lo);
+	memcpy(p, slots + lo, sizeof(*p) * (hi - lo));
+	f.Emit([lo, hi, p](Impl& c) {
+		StageBinding& b = c.stages[StageCS];
+		for (UINT i = lo; i < hi; ++i)
+			b.uav[i] = p[i - lo];
+		b.uav_dirty = true;
+	});
 }
 
 void Context::CSGetUnorderedAccessViews(UINT start, UINT count, UnorderedAccessView** views)
 {
 	for (UINT i = 0; i < count; ++i)
 	{
-		UnorderedAccessView* v = start + i < kMaxUAV ? m_impl->stages[StageCS].uav[start + i] : nullptr;
+		UnorderedAccessView* v = start + i < kMaxUAV ? m_front->stages[StageCS].uav[start + i] : nullptr;
 		if (v)
 			v->AddRef();
 		views[i] = v;
@@ -1433,179 +2006,282 @@ void Context::CSGetUnorderedAccessViews(UINT start, UINT count, UnorderedAccessV
 
 void Context::IASetInputLayout(InputLayout* layout)
 {
-	Impl& c = *m_impl;
-	if (c.layout == layout)
+	Front& f = *m_front;
+	if (f.layout == layout)
 		return;
-	Rebind(c.layout, layout);
-	c.pso_dirty = true;
+	Rebind(f.layout, layout);
+	f.Emit([layout](Impl& c) {
+		c.layout = layout;
+		c.pso_dirty = true;
+	});
 }
 
 void Context::IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY topology)
 {
-	Impl& c = *m_impl;
-	if (c.topology == topology)
+	Front& f = *m_front;
+	if (f.topology == topology)
 		return;
-	if (Impl::TopologyType(c.topology) != Impl::TopologyType(topology))
-		c.pso_dirty = true;
-	c.topology = topology;
-	c.topo_dirty = true;
+	f.topology = topology;
+	f.Emit([topology](Impl& c) {
+		if (Impl::TopologyType(c.topology) != Impl::TopologyType(topology))
+			c.pso_dirty = true;
+		c.topology = topology;
+		c.topo_dirty = true;
+	});
 }
 
 void Context::IASetVertexBuffers(UINT start, UINT count, Buffer* const* buffers, const UINT* strides, const UINT* offsets)
 {
-	Impl& c = *m_impl;
+	Front& f = *m_front;
+	bool changed = false;
 	for (UINT i = 0; i < count && start + i < kMaxVB; ++i)
 	{
-		Rebind(c.vb[start + i], buffers ? buffers[i] : nullptr);
-		c.vb_stride[start + i] = strides ? strides[i] : 0;
-		c.vb_offset[start + i] = offsets ? offsets[i] : 0;
+		const UINT s = start + i;
+		Buffer* b = buffers ? buffers[i] : nullptr;
+		const UINT stride = strides ? strides[i] : 0, offset = offsets ? offsets[i] : 0;
+		if (f.vb[s] == b && f.vb_stride[s] == stride && f.vb_offset[s] == offset)
+			continue;
+		if (f.vb[s] != b)
+		{
+			Rebind(f.vb[s], b);
+			f.Freshen(b);
+		}
+		f.vb_stride[s] = stride;
+		f.vb_offset[s] = offset;
+		changed = true;
 	}
-	UINT n = 0;
-	for (UINT i = 0; i < kMaxVB; ++i)
-		if (c.vb[i])
-			n = i + 1;
-	c.vb_count = n;
+	if (!changed)
+		return;
+	struct VertexBuffers
+	{
+		Buffer* vb[kMaxVB];
+		UINT stride[kMaxVB], offset[kMaxVB];
+	} v;
+	memcpy(v.vb, f.vb, sizeof(v.vb));
+	memcpy(v.stride, f.vb_stride, sizeof(v.stride));
+	memcpy(v.offset, f.vb_offset, sizeof(v.offset));
+	f.Emit([v](Impl& c) {
+		memcpy(c.vb, v.vb, sizeof(v.vb));
+		memcpy(c.vb_stride, v.stride, sizeof(v.stride));
+		memcpy(c.vb_offset, v.offset, sizeof(v.offset));
+		UINT n = 0;
+		for (UINT i = 0; i < kMaxVB; ++i)
+			if (c.vb[i])
+				n = i + 1;
+		c.vb_count = n;
+	});
 }
 
 void Context::IASetIndexBuffer(Buffer* buffer, DXGI_FORMAT format, UINT offset)
 {
-	Impl& c = *m_impl;
-	Rebind(c.ib, buffer);
-	c.ib_format = format;
-	c.ib_offset = offset;
+	Front& f = *m_front;
+	if (f.ib == buffer && f.ib_format == format && f.ib_offset == offset)
+		return;
+	if (f.ib != buffer)
+	{
+		Rebind(f.ib, buffer);
+		f.Freshen(buffer);
+	}
+	f.ib_format = format;
+	f.ib_offset = offset;
+	f.Emit([buffer, format, offset](Impl& c) {
+		c.ib = buffer;
+		c.ib_format = format;
+		c.ib_offset = offset;
+	});
 }
 
 void Context::RSSetState(RasterizerState* state)
 {
-	Impl& c = *m_impl;
-	if (c.raster == state)
+	Front& f = *m_front;
+	if (f.raster == state)
 		return;
-	const BOOL scissor_before = c.raster ? c.raster->m_desc.ScissorEnable : FALSE;
-	Rebind(c.raster, state);
-	c.pso_dirty = true;
-	if ((state ? state->m_desc.ScissorEnable : FALSE) != scissor_before)
-		c.sc_dirty = true;
+	Rebind(f.raster, state);
+	f.Emit([state](Impl& c) {
+		const BOOL scissor_before = c.raster ? c.raster->m_desc.ScissorEnable : FALSE;
+		c.raster = state;
+		c.pso_dirty = true;
+		if ((state ? state->m_desc.ScissorEnable : FALSE) != scissor_before)
+			c.sc_dirty = true;
+	});
 }
 
 void Context::RSSetViewports(UINT count, const D3D11_VIEWPORT* viewports)
 {
-	Impl& c = *m_impl;
+	Front& f = *m_front;
 	count = _min(count, UINT(D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE));
-	if (count == c.viewport_count && !memcmp(c.viewports, viewports, sizeof(D3D11_VIEWPORT) * count))
+	if (count == f.viewport_count && !memcmp(f.viewports, viewports, sizeof(D3D11_VIEWPORT) * count))
 		return;
 	if (count)
-		memcpy(c.viewports, viewports, sizeof(D3D11_VIEWPORT) * count);
-	if (count != c.viewport_count)
-		c.sc_dirty = true;
-	c.viewport_count = count;
-	c.vp_dirty = true;
+		memcpy(f.viewports, viewports, sizeof(D3D11_VIEWPORT) * count);
+	f.viewport_count = count;
+	D3D11_VIEWPORT* p = f.Payload<D3D11_VIEWPORT>(_max(count, 1u));
+	memcpy(p, f.viewports, sizeof(D3D11_VIEWPORT) * count);
+	f.Emit([count, p](Impl& c) {
+		if (count)
+			memcpy(c.viewports, p, sizeof(D3D11_VIEWPORT) * count);
+		if (count != c.viewport_count)
+			c.sc_dirty = true;
+		c.viewport_count = count;
+		c.vp_dirty = true;
+	});
 }
 
 void Context::RSGetViewports(UINT* count, D3D11_VIEWPORT* viewports)
 {
-	Impl& c = *m_impl;
+	Front& f = *m_front;
 	if (viewports)
-		memcpy(viewports, c.viewports, sizeof(D3D11_VIEWPORT) * _min(*count, c.viewport_count));
-	*count = c.viewport_count;
+		memcpy(viewports, f.viewports, sizeof(D3D11_VIEWPORT) * _min(*count, f.viewport_count));
+	*count = f.viewport_count;
 }
 
 void Context::RSSetScissorRects(UINT count, const D3D11_RECT* rects)
 {
-	Impl& c = *m_impl;
+	Front& f = *m_front;
 	count = _min(count, UINT(D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE));
+	if (f.scissors_set && count == f.scissor_count && !memcmp(f.scissors, rects, sizeof(D3D11_RECT) * count))
+		return;
 	if (count)
-		memcpy(c.scissors, rects, sizeof(D3D11_RECT) * count);
-	c.scissor_count = count;
-	c.sc_dirty = true;
+		memcpy(f.scissors, rects, sizeof(D3D11_RECT) * count);
+	f.scissor_count = count;
+	f.scissors_set = true;
+	D3D11_RECT* p = f.Payload<D3D11_RECT>(_max(count, 1u));
+	memcpy(p, f.scissors, sizeof(D3D11_RECT) * count);
+	f.Emit([count, p](Impl& c) {
+		if (count)
+			memcpy(c.scissors, p, sizeof(D3D11_RECT) * count);
+		c.scissor_count = count;
+		c.sc_dirty = true;
+	});
 }
 
 void Context::OMSetRenderTargets(UINT count, RenderTargetView* const* rtvs, DepthStencilView* dsv)
 {
-	Impl& c = *m_impl;
-	if (c.draws_since_submit >= Impl::kSubmitPass)
-		c.SubmitEarly();
-	bool formats = false;
+	Front& f = *m_front;
+	bool changed = f.dsv != dsv;
 	for (UINT i = 0; i < kMaxRT; ++i)
 	{
 		RenderTargetView* v = (rtvs && i < count) ? rtvs[i] : nullptr;
-		if (c.rtv[i] == v)
-			continue;
-		if (!c.rtv[i] || !v || c.rtv[i]->m_format != v->m_format || c.rtv[i]->m_res != v->m_res)
-			formats = true;
-		Rebind(c.rtv[i], v);
-		c.rt_dirty = true;
+		if (f.rtv[i] != v)
+		{
+			Rebind(f.rtv[i], v);
+			changed = true;
+		}
 	}
-	if (c.dsv != dsv)
+	if (!changed)
+		return;
+	Rebind(f.dsv, dsv);
+	struct Targets
 	{
-		if (!c.dsv || !dsv || c.dsv->m_format != dsv->m_format || c.dsv->m_read_only != dsv->m_read_only ||
-		    c.dsv->m_res != dsv->m_res)
-			formats = true;
-		Rebind(c.dsv, dsv);
-		c.rt_dirty = true;
-	}
-	if (formats)
-		c.pso_dirty = true;
-	// The views of the stages may have hazards with the new outputs
-	if (c.rt_dirty)
-		for (StageBinding& b : c.stages)
-			if (b.hazard)
-				b.srv_dirty = true;
+		RenderTargetView* rtv[kMaxRT];
+		DepthStencilView* dsv;
+	} t;
+	memcpy(t.rtv, f.rtv, sizeof(t.rtv));
+	t.dsv = dsv;
+	f.Emit([t](Impl& c) {
+		if (c.draws_since_submit >= Impl::kSubmitPass)
+			c.SubmitEarly();
+		bool formats = false;
+		for (UINT i = 0; i < kMaxRT; ++i)
+		{
+			RenderTargetView* v = t.rtv[i];
+			if (c.rtv[i] == v)
+				continue;
+			if (!c.rtv[i] || !v || c.rtv[i]->m_format != v->m_format || c.rtv[i]->m_res != v->m_res)
+				formats = true;
+			c.rtv[i] = v;
+			c.rt_dirty = true;
+		}
+		if (c.dsv != t.dsv)
+		{
+			DepthStencilView* d = t.dsv;
+			if (!c.dsv || !d || c.dsv->m_format != d->m_format || c.dsv->m_read_only != d->m_read_only || c.dsv->m_res != d->m_res)
+				formats = true;
+			c.dsv = d;
+			c.rt_dirty = true;
+		}
+		if (formats)
+			c.pso_dirty = true;
+		// The views of the stages may have hazards with the new outputs
+		if (c.rt_dirty)
+			for (StageBinding& b : c.stages)
+				if (b.hazard)
+					b.srv_dirty = true;
+	});
 }
 
 void Context::OMGetRenderTargets(UINT count, RenderTargetView** rtvs, DepthStencilView** dsv)
 {
-	Impl& c = *m_impl;
+	Front& f = *m_front;
 	if (rtvs)
 		for (UINT i = 0; i < count; ++i)
 		{
-			RenderTargetView* v = i < kMaxRT ? c.rtv[i] : nullptr;
+			RenderTargetView* v = i < kMaxRT ? f.rtv[i] : nullptr;
 			if (v)
 				v->AddRef();
 			rtvs[i] = v;
 		}
 	if (dsv)
 	{
-		if (c.dsv)
-			c.dsv->AddRef();
-		*dsv = c.dsv;
+		if (f.dsv)
+			f.dsv->AddRef();
+		*dsv = f.dsv;
 	}
 }
 
 void Context::OMSetBlendState(BlendState* state, const FLOAT factor[4], UINT sample_mask)
 {
-	Impl& c = *m_impl;
-	if (c.blend != state)
-	{
-		Rebind(c.blend, state);
-		c.pso_dirty = true;
-	}
-	if (c.sample_mask != sample_mask)
-	{
-		c.sample_mask = sample_mask;
-		c.pso_dirty = true;
-	}
+	Front& f = *m_front;
 	const FLOAT ones[4] = { 1.f, 1.f, 1.f, 1.f };
-	const FLOAT* f = factor ? factor : ones;
-	if (memcmp(c.blend_factor, f, sizeof(c.blend_factor)))
+	const FLOAT* fac = factor ? factor : ones;
+	if (f.blend == state && f.sample_mask == sample_mask && !memcmp(f.blend_factor, fac, sizeof(f.blend_factor)))
+		return;
+	Rebind(f.blend, state);
+	f.sample_mask = sample_mask;
+	memcpy(f.blend_factor, fac, sizeof(f.blend_factor));
+	struct Blend
 	{
-		memcpy(c.blend_factor, f, sizeof(c.blend_factor));
-		c.factor_dirty = true;
-	}
+		FLOAT factor[4];
+	} b;
+	memcpy(b.factor, fac, sizeof(b.factor));
+	f.Emit([state, sample_mask, b](Impl& c) {
+		if (c.blend != state)
+		{
+			c.blend = state;
+			c.pso_dirty = true;
+		}
+		if (c.sample_mask != sample_mask)
+		{
+			c.sample_mask = sample_mask;
+			c.pso_dirty = true;
+		}
+		if (memcmp(c.blend_factor, b.factor, sizeof(c.blend_factor)))
+		{
+			memcpy(c.blend_factor, b.factor, sizeof(c.blend_factor));
+			c.factor_dirty = true;
+		}
+	});
 }
 
 void Context::OMSetDepthStencilState(DepthStencilState* state, UINT stencil_ref)
 {
-	Impl& c = *m_impl;
-	if (c.depth != state)
-	{
-		Rebind(c.depth, state);
-		c.pso_dirty = true;
-	}
-	if (c.stencil_ref != stencil_ref)
-	{
-		c.stencil_ref = stencil_ref;
-		c.ref_dirty = true;
-	}
+	Front& f = *m_front;
+	if (f.depth == state && f.stencil_ref == stencil_ref)
+		return;
+	Rebind(f.depth, state);
+	f.stencil_ref = stencil_ref;
+	f.Emit([state, stencil_ref](Impl& c) {
+		if (c.depth != state)
+		{
+			c.depth = state;
+			c.pso_dirty = true;
+		}
+		if (c.stencil_ref != stencil_ref)
+		{
+			c.stencil_ref = stencil_ref;
+			c.ref_dirty = true;
+		}
+	});
 }
 
 //-------------------------------------------------------------------------------------------------------------------
@@ -1613,379 +2289,387 @@ void Context::OMSetDepthStencilState(DepthStencilState* state, UINT stencil_ref)
 
 void Context::Draw(UINT vertex_count, UINT start_vertex)
 {
-	if (m_impl->BeginDraw("draw", vertex_count))
-		m_impl->list->DrawInstanced(vertex_count, 1, start_vertex, 0);
+	Front& f = *m_front;
+	f.BeforeWork();
+	f.Emit([vertex_count, start_vertex](Impl& c) {
+		if (c.BeginDraw("draw", vertex_count))
+			c.list->DrawInstanced(vertex_count, 1, start_vertex, 0);
+	});
 }
 
 void Context::DrawIndexed(UINT index_count, UINT start_index, INT base_vertex)
 {
-	if (m_impl->BeginDraw("draw_indexed", index_count))
-		m_impl->list->DrawIndexedInstanced(index_count, 1, start_index, base_vertex, 0);
+	Front& f = *m_front;
+	f.BeforeWork();
+	f.Emit([index_count, start_index, base_vertex](Impl& c) {
+		if (c.BeginDraw("draw_indexed", index_count))
+			c.list->DrawIndexedInstanced(index_count, 1, start_index, base_vertex, 0);
+	});
 }
 
 void Context::DrawInstanced(UINT vertex_count, UINT instance_count, UINT start_vertex, UINT start_instance)
 {
-	if (m_impl->BeginDraw("draw", vertex_count))
-		m_impl->list->DrawInstanced(vertex_count, instance_count, start_vertex, start_instance);
+	Front& f = *m_front;
+	f.BeforeWork();
+	f.Emit([vertex_count, instance_count, start_vertex, start_instance](Impl& c) {
+		if (c.BeginDraw("draw", vertex_count))
+			c.list->DrawInstanced(vertex_count, instance_count, start_vertex, start_instance);
+	});
 }
 
 void Context::DrawIndexedInstanced(UINT index_count, UINT instance_count, UINT start_index, INT base_vertex, UINT start_instance)
 {
-	if (m_impl->BeginDraw("draw_indexed", index_count))
-		m_impl->list->DrawIndexedInstanced(index_count, instance_count, start_index, base_vertex, start_instance);
+	Front& f = *m_front;
+	f.BeforeWork();
+	f.Emit([index_count, instance_count, start_index, base_vertex, start_instance](Impl& c) {
+		if (c.BeginDraw("draw_indexed", index_count))
+			c.list->DrawIndexedInstanced(index_count, instance_count, start_index, base_vertex, start_instance);
+	});
 }
 
 void Context::Dispatch(UINT x, UINT y, UINT z)
 {
-	Impl& c = *m_impl;
-	const bool ok = c.PrepareDispatch();
-	if (c.trace_frames)
-	{
-		std::string out = make_string("[dx12 trace] %u %s %ux%ux%u", c.trace_index++, ok ? "dispatch" : "SKIPPED dispatch", x, y, z);
-		c.TraceStage(out, StageCS, "CS");
-		c.TraceLine(out);
-	}
-	if (!ok)
-		return;
-	++c.draws_since_submit;
-	if (c.stats_on)
-		++c.stats.dispatches;
-	c.list->Dispatch(x, y, z);
-	StageBinding& b = c.stages[StageCS];
-	for (UINT i = 0; i < kMaxUAV; ++i)
-		if (b.uav[i] && b.uav[i]->m_res)
-			b.uav[i]->m_res->m_written_uav = true;
+	Front& f = *m_front;
+	f.BeforeWork();
+	f.Emit([x, y, z](Impl& c) {
+		const bool ok = c.PrepareDispatch();
+		if (c.trace_frames)
+		{
+			std::string out = make_string("[dx12 trace] %u %s %ux%ux%u", c.trace_index++, ok ? "dispatch" : "SKIPPED dispatch", x, y, z);
+			c.TraceStage(out, StageCS, "CS");
+			c.TraceLine(out);
+		}
+		if (!ok)
+			return;
+		++c.draws_since_submit;
+		if (c.stats_on)
+			++c.stats.dispatches;
+		c.list->Dispatch(x, y, z);
+		StageBinding& b = c.stages[StageCS];
+		for (UINT i = 0; i < kMaxUAV; ++i)
+			if (b.uav[i] && b.uav[i]->m_res)
+				b.uav[i]->m_res->m_written_uav = true;
+	});
 }
 
 void Context::ClearRenderTargetView(RenderTargetView* rtv, const FLOAT color[4])
 {
 	if (!rtv)
 		return;
-	Impl& c = *m_impl;
-	D3D12_CPU_DESCRIPTOR_HANDLE h;
-	Resource* r = c.ResolveRTV(rtv, h);
-	if (!r)
-		return;
-	if (rtv->m_back_buffer)
-		c.RequireWhole(r, D3D12_RESOURCE_STATE_RENDER_TARGET);
-	else
-		c.RequireView(rtv, r, D3D12_RESOURCE_STATE_RENDER_TARGET);
-	c.FlushBarriers();
-	if (c.stats_on)
-		++c.stats.clears;
-	if (c.trace_frames)
+	struct Color
 	{
-		std::string out = make_string("[dx12 trace] %u clear %s (%.3f %.3f %.3f %.3f)", c.trace_index++,
-		                            rtv->m_back_buffer ? "backbuffer" : Impl::ResName(r).c_str(), color[0], color[1], color[2], color[3]);
-		c.TraceLine(out);
-	}
-	c.list->ClearRenderTargetView(h, color, 0, nullptr);
-	c.Record();
+		FLOAT v[4];
+	} col;
+	memcpy(col.v, color, sizeof(col.v));
+	m_front->Emit([rtv, col](Impl& c) {
+		D3D12_CPU_DESCRIPTOR_HANDLE h;
+		Resource* r = c.ResolveRTV(rtv, h);
+		if (!r)
+			return;
+		if (rtv->m_back_buffer)
+			c.RequireWhole(r, D3D12_RESOURCE_STATE_RENDER_TARGET);
+		else
+			c.RequireView(rtv, r, D3D12_RESOURCE_STATE_RENDER_TARGET);
+		c.FlushBarriers();
+		if (c.stats_on)
+			++c.stats.clears;
+		if (c.trace_frames)
+		{
+			std::string out = make_string("[dx12 trace] %u clear %s (%.3f %.3f %.3f %.3f)", c.trace_index++,
+			                              rtv->m_back_buffer ? "backbuffer" : Impl::ResName(r).c_str(), col.v[0], col.v[1], col.v[2], col.v[3]);
+			c.TraceLine(out);
+		}
+		c.list->ClearRenderTargetView(h, col.v, 0, nullptr);
+		c.Record();
+	});
 }
 
 void Context::ClearDepthStencilView(DepthStencilView* dsv, UINT flags, FLOAT depth, UINT8 stencil)
 {
 	if (!dsv || !dsv->m_res)
 		return;
-	Impl& c = *m_impl;
-	c.RequireView(dsv, dsv->m_res, D3D12_RESOURCE_STATE_DEPTH_WRITE);
-	c.FlushBarriers();
-	c.list->ClearDepthStencilView(dsv->m_cpu, D3D12_CLEAR_FLAGS(flags), depth, stencil, 0, nullptr);
-	c.Record();
+	m_front->Emit([dsv, flags, depth, stencil](Impl& c) {
+		c.RequireView(dsv, dsv->m_res, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+		c.FlushBarriers();
+		c.list->ClearDepthStencilView(dsv->m_cpu, D3D12_CLEAR_FLAGS(flags), depth, stencil, 0, nullptr);
+		c.Record();
+	});
 }
 
 void Context::ClearUnorderedAccessViewUint(UnorderedAccessView* uav, const UINT values[4])
 {
 	if (!uav || !uav->m_res)
 		return;
-	Impl& c = *m_impl;
-	c.RequireView(uav, uav->m_res, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	c.FlushBarriers();
-	c.SetHeaps();
-	D3D12_CPU_DESCRIPTOR_HANDLE cpu;
-	D3D12_GPU_DESCRIPTOR_HANDLE gpu;
-	c.AllocViews(1, cpu, gpu);
-	c.d3d->CopyDescriptorsSimple(1, cpu, uav->m_cpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-	c.list->ClearUnorderedAccessViewUint(gpu, uav->m_cpu, uav->m_res->m_resource, values, 0, nullptr);
-	uav->m_res->m_written_uav = true;
-	c.Record();
+	struct Values
+	{
+		UINT v[4];
+	} val;
+	memcpy(val.v, values, sizeof(val.v));
+	m_front->Emit([uav, val](Impl& c) {
+		c.RequireView(uav, uav->m_res, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+		c.FlushBarriers();
+		c.SetHeaps();
+		D3D12_CPU_DESCRIPTOR_HANDLE cpu;
+		D3D12_GPU_DESCRIPTOR_HANDLE gpu;
+		c.AllocViews(1, cpu, gpu);
+		c.d3d->CopyDescriptorsSimple(1, cpu, uav->m_cpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		c.list->ClearUnorderedAccessViewUint(gpu, uav->m_cpu, uav->m_res->m_resource, val.v, 0, nullptr);
+		uav->m_res->m_written_uav = true;
+		c.Record();
+	});
 }
 
 void Context::ClearUnorderedAccessViewFloat(UnorderedAccessView* uav, const FLOAT values[4])
 {
 	if (!uav || !uav->m_res)
 		return;
-	Impl& c = *m_impl;
-	c.RequireView(uav, uav->m_res, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	c.FlushBarriers();
-	c.SetHeaps();
-	D3D12_CPU_DESCRIPTOR_HANDLE cpu;
-	D3D12_GPU_DESCRIPTOR_HANDLE gpu;
-	c.AllocViews(1, cpu, gpu);
-	c.d3d->CopyDescriptorsSimple(1, cpu, uav->m_cpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-	c.list->ClearUnorderedAccessViewFloat(gpu, uav->m_cpu, uav->m_res->m_resource, values, 0, nullptr);
-	uav->m_res->m_written_uav = true;
-	c.Record();
+	struct Values
+	{
+		FLOAT v[4];
+	} val;
+	memcpy(val.v, values, sizeof(val.v));
+	m_front->Emit([uav, val](Impl& c) {
+		c.RequireView(uav, uav->m_res, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+		c.FlushBarriers();
+		c.SetHeaps();
+		D3D12_CPU_DESCRIPTOR_HANDLE cpu;
+		D3D12_GPU_DESCRIPTOR_HANDLE gpu;
+		c.AllocViews(1, cpu, gpu);
+		c.d3d->CopyDescriptorsSimple(1, cpu, uav->m_cpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		c.list->ClearUnorderedAccessViewFloat(gpu, uav->m_cpu, uav->m_res->m_resource, val.v, 0, nullptr);
+		uav->m_res->m_written_uav = true;
+		c.Record();
+	});
 }
 
 //-------------------------------------------------------------------------------------------------------------------
-// Copies
-
-// The footprint of one subresource of a GPU texture, at offset 0
-static D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint(ID3D12Device* d3d, Resource* r, UINT sub, UINT* rows, UINT64* row_bytes, UINT64* total)
-{
-	D3D12_RESOURCE_DESC rd = {};
-	switch (r->m_dimension)
-	{
-	case D3D11_RESOURCE_DIMENSION_TEXTURE1D: rd.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE1D; break;
-	case D3D11_RESOURCE_DIMENSION_TEXTURE3D: rd.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE3D; break;
-	default: rd.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D; break;
-	}
-	rd.Width = r->m_width;
-	rd.Height = r->m_height;
-	rd.DepthOrArraySize = UINT16(r->m_depth_or_array);
-	rd.MipLevels = UINT16(r->m_mips);
-	rd.Format = r->m_format;
-	rd.SampleDesc.Count = 1;
-	D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp = {};
-	d3d->GetCopyableFootprints(&rd, sub, 1, 0, &fp, rows, row_bytes, total);
-	return fp;
-}
-
-// Puts one subresource of a STAGING (CPU write) texture into upload memory; returns the copy source
-static bool StageSubresource(Context::Impl& c, Resource* src, UINT sub, D3D12_TEXTURE_COPY_LOCATION& loc)
-{
-	// The first binds after a level load upload a lot at once: past 512 MB in a frame the GPU takes what is
-	// recorded and the upload memory comes back, instead of growing for the whole frame
-	if (c.upload.BytesThisFrame() > (512ull << 20))
-	{
-		c.self->Flush();
-		c.device->WaitIdle();
-		c.upload.Retire(c.last_submitted);
-		c.upload.Reclaim(c.dev->Completed());
-		++c.upload_epoch;
-	}
-	UINT rows = 0;
-	UINT64 row_bytes = 0, total = 0;
-	D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp = Footprint(c.d3d, src, sub, &rows, &row_bytes, &total);
-	UploadSlice slice;
-	if (!c.upload.Alloc(total, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT, slice))
-		return false;
-	const SubresourceLayout& l = src->m_layouts[sub];
-	for (UINT z = 0; z < fp.Footprint.Depth; ++z)
-		for (UINT r = 0; r < rows; ++r)
-			memcpy(slice.cpu + u64(z) * fp.Footprint.RowPitch * rows + u64(r) * fp.Footprint.RowPitch,
-			       src->m_cpu_data.data() + l.offset + size_t(z) * l.depth_pitch + size_t(r) * l.row_pitch, size_t(row_bytes));
-	fp.Offset = slice.offset;
-	loc.pResource = slice.buffer;
-	loc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-	loc.PlacedFootprint = fp;
-	return true;
-}
+// Copies. Data from CPU memory (staging textures, shadowed buffers, UpdateSubresource) goes into upload memory at the
+// call, as D3D11 takes it at the call
 
 void Context::CopyResource(Resource* dst, Resource* src)
 {
 	if (!dst || !src)
 		return;
-	Impl& c = *m_impl;
-	if (c.stats_on)
-		++c.stats.copies;
-	if (c.trace_frames)
-	{
-		std::string out = make_string("[dx12 trace] %u copy %s <- %s", c.trace_index++, Impl::ResName(dst).c_str(), Impl::ResName(src).c_str());
-		c.TraceLine(out);
-	}
+	Front& f = *m_front;
 	if (dst->IsBuffer())
 	{
-		// Buffers: from a GPU buffer, a dynamic buffer's ring slice or staging memory
+		// Buffers: from a GPU buffer, a dynamic buffer's shadow or staging memory
 		const UINT size = _min(dst->m_width, src->m_width);
 		if (dst->m_readback)
 		{
-			if (src->m_resource && src->m_usage != D3D11_USAGE_DYNAMIC)
-			{
-				c.RequireWhole(src, D3D12_RESOURCE_STATE_COPY_SOURCE);
-				c.FlushBarriers();
-				c.list->CopyBufferRegion(dst->m_readback, 0, src->m_resource, 0, size);
-				dst->m_readback_fence = c.dev->pending_fence.load();
-				c.Record();
-			}
+			dst->m_readback_chunk = f.Tag();
+			f.Emit([dst, src, size](Impl& c) {
+				NoteCopy(c, dst, src);
+				if (src->m_resource && src->m_usage != D3D11_USAGE_DYNAMIC)
+				{
+					c.RequireWhole(src, D3D12_RESOURCE_STATE_COPY_SOURCE);
+					c.FlushBarriers();
+					c.list->CopyBufferRegion(dst->m_readback, 0, src->m_resource, 0, size);
+					dst->m_readback_fence = c.dev->pending_fence.load();
+					c.Record();
+				}
+			});
 			return;
 		}
-		if (!dst->m_resource || dst->m_usage == D3D11_USAGE_DYNAMIC)
-		{
-			DX12_WARN_ONCE("! D3D12: CopyResource into a dynamic or staging buffer is not supported");
-			return;
-		}
-		ID3D12Resource* from = nullptr;
-		u64 offset = 0;
+		const void* cpu = nullptr;
 		if (src->IsBuffer() && static_cast<Buffer*>(src)->m_shadowed)
-		{
-			UploadSlice slice;
-			if (!c.upload.Alloc(size, 256, slice))
-				return;
-			memcpy(slice.cpu, static_cast<Buffer*>(src)->m_shadow.data(), size);
-			from = slice.buffer;
-			offset = slice.offset;
-		}
+			cpu = static_cast<Buffer*>(src)->m_shadow.data();
 		else if (!src->m_cpu_data.empty())
+			cpu = src->m_cpu_data.data();
+		UploadSlice slice = {};
+		if (cpu)
 		{
-			UploadSlice slice;
-			if (!c.upload.Alloc(size, 256, slice))
+			if (!f.upload.Alloc(size, 256, slice))
 				return;
-			memcpy(slice.cpu, src->m_cpu_data.data(), size);
-			from = slice.buffer;
-			offset = slice.offset;
+			memcpy(slice.cpu, cpu, size);
 		}
-		else if (src->m_resource)
-		{
-			c.RequireWhole(src, D3D12_RESOURCE_STATE_COPY_SOURCE);
-			from = src->m_resource;
-		}
-		if (!from)
-			return;
-		c.RequireWhole(dst, D3D12_RESOURCE_STATE_COPY_DEST);
-		c.FlushBarriers();
-		c.list->CopyBufferRegion(dst->m_resource, 0, from, offset, size);
-		c.Record();
+		f.Emit([dst, src, size, slice](Impl& c) {
+			NoteCopy(c, dst, src);
+			if (!dst->m_resource || dst->m_usage == D3D11_USAGE_DYNAMIC)
+			{
+				DX12_WARN_ONCE("! D3D12: CopyResource into a dynamic or staging buffer is not supported");
+				return;
+			}
+			ID3D12Resource* from = slice.buffer;
+			u64 offset = slice.offset;
+			if (!from)
+			{
+				if (!src->m_resource)
+					return;
+				c.RequireWhole(src, D3D12_RESOURCE_STATE_COPY_SOURCE);
+				from = src->m_resource;
+				offset = 0;
+			}
+			c.RequireWhole(dst, D3D12_RESOURCE_STATE_COPY_DEST);
+			c.FlushBarriers();
+			c.list->CopyBufferRegion(dst->m_resource, 0, from, offset, size);
+			c.Record();
+		});
 		return;
 	}
 
 	if (dst->m_readback)
 	{
 		// GPU texture into a STAGING (CPU read) texture: every subresource into its footprint
-		if (!src->m_resource)
-			return;
-		c.RequireWhole(src, D3D12_RESOURCE_STATE_COPY_SOURCE);
-		c.FlushBarriers();
-		const UINT count = _min(UINT(dst->m_footprints.size()), src->m_subresources);
-		for (UINT s = 0; s < count; ++s)
-		{
-			D3D12_TEXTURE_COPY_LOCATION d = {};
-			d.pResource = dst->m_readback;
-			d.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-			d.PlacedFootprint = dst->m_footprints[s];
-			D3D12_TEXTURE_COPY_LOCATION from = {};
-			from.pResource = src->m_resource;
-			from.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-			from.SubresourceIndex = s;
-			c.list->CopyTextureRegion(&d, 0, 0, 0, &from, nullptr);
-		}
-		dst->m_readback_fence = c.dev->pending_fence.load();
-		c.Record();
+		dst->m_readback_chunk = f.Tag();
+		f.Emit([dst, src](Impl& c) {
+			NoteCopy(c, dst, src);
+			Resource* from_res = c.Res(src);
+			if (!from_res || !from_res->m_resource)
+				return;
+			c.RequireWhole(from_res, D3D12_RESOURCE_STATE_COPY_SOURCE);
+			c.FlushBarriers();
+			const UINT count = _min(UINT(dst->m_footprints.size()), from_res->m_subresources);
+			for (UINT s = 0; s < count; ++s)
+			{
+				D3D12_TEXTURE_COPY_LOCATION d = {};
+				d.pResource = dst->m_readback;
+				d.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+				d.PlacedFootprint = dst->m_footprints[s];
+				D3D12_TEXTURE_COPY_LOCATION from = {};
+				from.pResource = from_res->m_resource;
+				from.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+				from.SubresourceIndex = s;
+				c.list->CopyTextureRegion(&d, 0, 0, 0, &from, nullptr);
+			}
+			dst->m_readback_fence = c.dev->pending_fence.load();
+			c.Record();
+		});
 		return;
 	}
-	if (!dst->m_resource)
-		return;
 
 	if (!src->m_cpu_data.empty())
 	{
-		// STAGING (CPU write) texture into a GPU texture: through upload memory, subresource by subresource
-		c.RequireWhole(dst, D3D12_RESOURCE_STATE_COPY_DEST);
-		c.FlushBarriers();
+		// STAGING (CPU write) texture into a GPU texture: through upload memory, subresource by subresource (each
+		// copy queued before the next is staged: a recycling of upload memory in between finds it submitted)
 		const UINT count = _min(UINT(src->m_layouts.size()), dst->m_subresources);
 		for (UINT s = 0; s < count; ++s)
 		{
 			D3D12_TEXTURE_COPY_LOCATION from = {};
-			if (!StageSubresource(c, src, s, from))
+			if (!f.StageSubresource(src, s, from))
 				return;
-			D3D12_TEXTURE_COPY_LOCATION d = {};
-			d.pResource = dst->m_resource;
-			d.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-			d.SubresourceIndex = s;
-			c.list->CopyTextureRegion(&d, 0, 0, 0, &from, nullptr);
+			f.Emit([dst, src, s, from](Impl& c) {
+				if (s == 0)
+					NoteCopy(c, dst, src);
+				if (!dst->m_resource)
+					return;
+				c.RequireWhole(dst, D3D12_RESOURCE_STATE_COPY_DEST);
+				c.FlushBarriers();
+				D3D12_TEXTURE_COPY_LOCATION d = {};
+				d.pResource = dst->m_resource;
+				d.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+				d.SubresourceIndex = s;
+				c.list->CopyTextureRegion(&d, 0, 0, 0, &from, nullptr);
+				c.Record();
+			});
 		}
-		c.Record();
 		return;
 	}
-	if (!src->m_resource)
-		return;
-	c.RequireWhole(src, D3D12_RESOURCE_STATE_COPY_SOURCE);
-	c.RequireWhole(dst, D3D12_RESOURCE_STATE_COPY_DEST);
-	c.FlushBarriers();
-	c.list->CopyResource(dst->m_resource, src->m_resource);
-	c.Record();
+
+	f.Emit([dst, src](Impl& c) {
+		NoteCopy(c, dst, src);
+		Resource* to = c.Res(dst);
+		Resource* from = c.Res(src);
+		if (!to || !from || !to->m_resource || !from->m_resource)
+			return;
+		c.RequireWhole(from, D3D12_RESOURCE_STATE_COPY_SOURCE);
+		c.RequireWhole(to, D3D12_RESOURCE_STATE_COPY_DEST);
+		c.FlushBarriers();
+		c.list->CopyResource(to->m_resource, from->m_resource);
+		c.Record();
+	});
 }
 
 void Context::CopySubresourceRegion(Resource* dst, UINT dst_sub, UINT x, UINT y, UINT z, Resource* src, UINT src_sub, const D3D11_BOX* box)
 {
 	if (!dst || !src)
 		return;
-	Impl& c = *m_impl;
+	Front& f = *m_front;
+	const bool has_box = box != nullptr;
+	const D3D11_BOX bx = box ? *box : D3D11_BOX{};
 	if (dst->IsBuffer())
 	{
-		if (!dst->m_resource || !src->m_resource)
-			return;
-		const UINT from = box ? box->left : 0;
-		const UINT size = box ? box->right - box->left : src->m_width;
-		c.RequireWhole(src, D3D12_RESOURCE_STATE_COPY_SOURCE);
-		c.RequireWhole(dst, D3D12_RESOURCE_STATE_COPY_DEST);
-		c.FlushBarriers();
-		c.list->CopyBufferRegion(dst->m_resource, x, src->m_resource, from, size);
-		c.Record();
+		f.Emit([dst, dst_sub, x, src, has_box, bx](Impl& c) {
+			if (!dst->m_resource || !src->m_resource)
+				return;
+			const UINT from = has_box ? bx.left : 0;
+			const UINT size = has_box ? bx.right - bx.left : src->m_width;
+			c.RequireWhole(src, D3D12_RESOURCE_STATE_COPY_SOURCE);
+			c.RequireWhole(dst, D3D12_RESOURCE_STATE_COPY_DEST);
+			c.FlushBarriers();
+			c.list->CopyBufferRegion(dst->m_resource, x, src->m_resource, from, size);
+			c.Record();
+		});
 		return;
 	}
-	D3D12_TEXTURE_COPY_LOCATION s = {};
-	if (!src->m_cpu_data.empty())
-	{
-		if (!StageSubresource(c, src, src_sub, s))
-			return;
-	}
-	else if (src->m_resource)
-	{
-		c.Require(src, src_sub % src->m_mips, 1, (src_sub / src->m_mips) % src->ArraySize(), 1,
-		          src_sub / src->SubresourcesPerPlane(), 1, false, D3D12_RESOURCE_STATE_COPY_SOURCE);
-		s.pResource = src->m_resource;
-		s.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-		s.SubresourceIndex = src_sub;
-	}
-	else
+	D3D12_TEXTURE_COPY_LOCATION staged = {};
+	const bool cpu = !src->m_cpu_data.empty();
+	if (cpu && !f.StageSubresource(src, src_sub, staged))
 		return;
-
-	D3D12_TEXTURE_COPY_LOCATION d = {};
 	if (dst->m_readback)
-	{
-		d.pResource = dst->m_readback;
-		d.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-		d.PlacedFootprint = dst->m_footprints[dst_sub];
-		dst->m_readback_fence = c.dev->pending_fence.load();
-	}
-	else if (dst->m_resource)
-	{
-		c.Require(dst, dst_sub % dst->m_mips, 1, (dst_sub / dst->m_mips) % dst->ArraySize(), 1,
-		          dst_sub / dst->SubresourcesPerPlane(), 1, false, D3D12_RESOURCE_STATE_COPY_DEST);
-		d.pResource = dst->m_resource;
-		d.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-		d.SubresourceIndex = dst_sub;
-	}
-	else
-		return;
-	c.FlushBarriers();
-	c.list->CopyTextureRegion(&d, x, y, z, &s, reinterpret_cast<const D3D12_BOX*>(box));
-	c.Record();
+		dst->m_readback_chunk = f.Tag();
+	f.Emit([dst, dst_sub, x, y, z, src, src_sub, has_box, bx, staged, cpu](Impl& c) {
+		D3D12_TEXTURE_COPY_LOCATION s = staged;
+		if (!cpu)
+		{
+			Resource* from = c.Res(src);
+			if (!from || !from->m_resource)
+				return;
+			c.Require(from, src_sub % from->m_mips, 1, (src_sub / from->m_mips) % from->ArraySize(), 1,
+			          src_sub / from->SubresourcesPerPlane(), 1, false, D3D12_RESOURCE_STATE_COPY_SOURCE);
+			s.pResource = from->m_resource;
+			s.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+			s.SubresourceIndex = src_sub;
+		}
+		Resource* to = c.Res(dst);
+		D3D12_TEXTURE_COPY_LOCATION d = {};
+		if (to->m_readback)
+		{
+			d.pResource = to->m_readback;
+			d.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+			d.PlacedFootprint = to->m_footprints[dst_sub];
+			to->m_readback_fence = c.dev->pending_fence.load();
+		}
+		else if (to->m_resource)
+		{
+			c.Require(to, dst_sub % to->m_mips, 1, (dst_sub / to->m_mips) % to->ArraySize(), 1,
+			          dst_sub / to->SubresourcesPerPlane(), 1, false, D3D12_RESOURCE_STATE_COPY_DEST);
+			d.pResource = to->m_resource;
+			d.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+			d.SubresourceIndex = dst_sub;
+		}
+		else
+			return;
+		c.FlushBarriers();
+		c.list->CopyTextureRegion(&d, x, y, z, &s, has_box ? reinterpret_cast<const D3D12_BOX*>(&bx) : nullptr);
+		c.Record();
+	});
 }
 
 void Context::UpdateSubresource(Resource* dst, UINT dst_sub, const D3D11_BOX* box, const void* data, UINT row_pitch, UINT depth_pitch)
 {
 	if (!dst || !dst->m_resource || !data)
 		return;
-	Impl& c = *m_impl;
+	Front& f = *m_front;
 	if (dst->IsBuffer())
 	{
 		const UINT from = box ? box->left : 0;
 		const UINT size = box ? box->right - box->left : dst->m_width;
 		UploadSlice slice;
-		if (!c.upload.Alloc(size, 256, slice))
+		if (!f.upload.Alloc(size, 256, slice))
 			return;
 		memcpy(slice.cpu, data, size);
-		c.RequireWhole(dst, D3D12_RESOURCE_STATE_COPY_DEST);
-		c.FlushBarriers();
-		c.list->CopyBufferRegion(dst->m_resource, from, slice.buffer, slice.offset, size);
-		c.Record();
+		f.Emit([dst, from, size, slice](Impl& c) {
+			c.RequireWhole(dst, D3D12_RESOURCE_STATE_COPY_DEST);
+			c.FlushBarriers();
+			c.list->CopyBufferRegion(dst->m_resource, from, slice.buffer, slice.offset, size);
+			c.Record();
+		});
 		return;
 	}
 	UINT rows = 0;
 	UINT64 row_bytes = 0, total = 0;
-	D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp = Footprint(c.d3d, dst, dst_sub, &rows, &row_bytes, &total);
+	D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp = Footprint(f.d3d, dst, dst_sub, &rows, &row_bytes, &total);
 	if (box)
 	{
 		// Only the box: a footprint of its size
@@ -2000,7 +2684,7 @@ void Context::UpdateSubresource(Resource* dst, UINT dst_sub, const D3D11_BOX* bo
 		total = u64(fp.Footprint.RowPitch) * rows * fp.Footprint.Depth;
 	}
 	UploadSlice slice;
-	if (!c.upload.Alloc(total, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT, slice))
+	if (!f.upload.Alloc(total, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT, slice))
 		return;
 	for (UINT zz = 0; zz < fp.Footprint.Depth; ++zz)
 		for (UINT r = 0; r < rows; ++r)
@@ -2011,29 +2695,37 @@ void Context::UpdateSubresource(Resource* dst, UINT dst_sub, const D3D11_BOX* bo
 	s.pResource = slice.buffer;
 	s.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
 	s.PlacedFootprint = fp;
-	D3D12_TEXTURE_COPY_LOCATION d = {};
-	d.pResource = dst->m_resource;
-	d.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-	d.SubresourceIndex = dst_sub;
-	c.Require(dst, dst_sub % dst->m_mips, 1, (dst_sub / dst->m_mips) % dst->ArraySize(), 1, 0, 1, false,
-	          D3D12_RESOURCE_STATE_COPY_DEST);
-	c.FlushBarriers();
-	c.list->CopyTextureRegion(&d, box ? box->left : 0, box ? box->top : 0, box ? box->front : 0, &s, nullptr);
-	c.Record();
+	const UINT dx = box ? box->left : 0, dy = box ? box->top : 0, dz = box ? box->front : 0;
+	f.Emit([dst, dst_sub, s, dx, dy, dz](Impl& c) {
+		D3D12_TEXTURE_COPY_LOCATION d = {};
+		d.pResource = dst->m_resource;
+		d.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+		d.SubresourceIndex = dst_sub;
+		c.Require(dst, dst_sub % dst->m_mips, 1, (dst_sub / dst->m_mips) % dst->ArraySize(), 1, 0, 1, false,
+		          D3D12_RESOURCE_STATE_COPY_DEST);
+		c.FlushBarriers();
+		c.list->CopyTextureRegion(&d, dx, dy, dz, &s, nullptr);
+		c.Record();
+	});
 }
 
 void Context::ResolveSubresource(Resource* dst, UINT dst_sub, Resource* src, UINT src_sub, DXGI_FORMAT format)
 {
-	if (!dst || !src || !dst->m_resource || !src->m_resource)
+	if (!dst || !src)
 		return;
-	Impl& c = *m_impl;
-	c.Require(src, src_sub % src->m_mips, 1, (src_sub / src->m_mips) % src->ArraySize(), 1, 0, 1, false,
-	          D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
-	c.Require(dst, dst_sub % dst->m_mips, 1, (dst_sub / dst->m_mips) % dst->ArraySize(), 1, 0, 1, false,
-	          D3D12_RESOURCE_STATE_RESOLVE_DEST);
-	c.FlushBarriers();
-	c.list->ResolveSubresource(dst->m_resource, dst_sub, src->m_resource, src_sub, format);
-	c.Record();
+	m_front->Emit([dst, dst_sub, src, src_sub, format](Impl& c) {
+		Resource* to = c.Res(dst);
+		Resource* from = c.Res(src);
+		if (!to || !from || !to->m_resource || !from->m_resource)
+			return;
+		c.Require(from, src_sub % from->m_mips, 1, (src_sub / from->m_mips) % from->ArraySize(), 1, 0, 1, false,
+		          D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
+		c.Require(to, dst_sub % to->m_mips, 1, (dst_sub / to->m_mips) % to->ArraySize(), 1, 0, 1, false,
+		          D3D12_RESOURCE_STATE_RESOLVE_DEST);
+		c.FlushBarriers();
+		c.list->ResolveSubresource(to->m_resource, dst_sub, from->m_resource, src_sub, format);
+		c.Record();
+	});
 }
 
 //-------------------------------------------------------------------------------------------------------------------
@@ -2043,7 +2735,7 @@ HRESULT Context::Map(Resource* res, UINT sub, D3D11_MAP type, UINT flags, D3D11_
 {
 	if (!res || !mapped)
 		return E_INVALIDARG;
-	Impl& c = *m_impl;
+	Front& f = *m_front;
 	if (res->m_usage == D3D11_USAGE_DYNAMIC)
 	{
 		if (res->IsBuffer())
@@ -2057,7 +2749,7 @@ HRESULT Context::Map(Resource* res, UINT sub, D3D11_MAP type, UINT flags, D3D11_
 				mapped->RowPitch = mapped->DepthPitch = size;
 				return S_OK;
 			}
-			if (type == D3D11_MAP_WRITE_NO_OVERWRITE && b->m_ptr && b->m_ptr_frame == c.upload_epoch)
+			if (type == D3D11_MAP_WRITE_NO_OVERWRITE && b->m_ptr && b->m_ptr_frame == f.upload_epoch)
 			{
 				mapped->pData = b->m_ptr;
 				mapped->RowPitch = mapped->DepthPitch = size;
@@ -2066,20 +2758,23 @@ HRESULT Context::Map(Resource* res, UINT sub, D3D11_MAP type, UINT flags, D3D11_
 			if (type == D3D11_MAP_WRITE_NO_OVERWRITE)
 				DX12_WARN_ONCE("* D3D12: Map(NO_OVERWRITE) of a buffer whose upload memory was recycled: renamed (earlier contents dropped)");
 			UploadSlice slice;
-			if (!c.upload.Alloc(size, 256, slice))
+			if (!f.upload.Alloc(size, 256, slice))
 				return E_OUTOFMEMORY;
-			// The upload buffer of the initial data is no longer needed
-			if (b->m_resource)
-			{
-				c.dev->DeferRelease(b->m_resource, b->m_allocation);
-				b->m_resource = nullptr;
-				b->m_allocation = nullptr;
-			}
-			b->m_va = slice.va;
+			// The upload buffer of the initial data is no longer needed, once the commands before are recorded
+			ID3D12Resource* initial = b->m_resource;
+			D3D12MA::Allocation* initial_allocation = b->m_allocation;
+			b->m_resource = nullptr;
+			b->m_allocation = nullptr;
 			b->m_ptr = slice.cpu;
-			b->m_ptr_frame = c.upload_epoch;
+			b->m_ptr_frame = f.upload_epoch;
 			b->m_map_buffer = slice.buffer;
 			b->m_map_footprint.Offset = slice.offset;
+			const D3D12_GPU_VIRTUAL_ADDRESS va = slice.va;
+			f.Emit([b, va, initial, initial_allocation](Impl& c) {
+				if (initial)
+					c.dev->DeferRelease(initial, initial_allocation);
+				b->m_va = va;
+			});
 			mapped->pData = slice.cpu;
 			mapped->RowPitch = mapped->DepthPitch = size;
 			return S_OK;
@@ -2087,9 +2782,9 @@ HRESULT Context::Map(Resource* res, UINT sub, D3D11_MAP type, UINT flags, D3D11_
 		// Dynamic texture: written into upload memory, copied at Unmap
 		UINT rows = 0;
 		UINT64 row_bytes = 0, total = 0;
-		D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp = Footprint(c.d3d, res, sub, &rows, &row_bytes, &total);
+		D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp = Footprint(f.d3d, res, sub, &rows, &row_bytes, &total);
 		UploadSlice slice;
-		if (!c.upload.Alloc(total, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT, slice))
+		if (!f.upload.Alloc(total, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT, slice))
 			return E_OUTOFMEMORY;
 		fp.Offset = slice.offset;
 		res->m_map_ptr = slice.cpu;
@@ -2107,14 +2802,30 @@ HRESULT Context::Map(Resource* res, UINT sub, D3D11_MAP type, UINT flags, D3D11_
 		const SubresourceLayout& l = res->m_layouts[sub];
 		if (res->m_readback)
 		{
-			const u64 fence = res->m_readback_fence;
-			if (c.dev->Completed() < fence)
+			const bool no_wait = (flags & D3D11_MAP_FLAG_DO_NOT_WAIT) != 0;
+			// The copy into it is still queued for the recording thread
+			if (f.threaded && !f.Done(res->m_readback_chunk))
 			{
-				if (c.CommandsPending(fence))
-					Flush();
-				if (flags & D3D11_MAP_FLAG_DO_NOT_WAIT)
+				if (no_wait)
+				{
+					f.RequestFlush();
 					return DXGI_ERROR_WAS_STILL_DRAWING;
-				c.dev->WaitFence(fence);
+				}
+				f.Synchronize();
+			}
+			const u64 fence = res->m_readback_fence;
+			if (f.dev->Completed() < fence)
+			{
+				const bool pending = m_impl->CommandsPending(fence);
+				if (no_wait)
+				{
+					if (pending)
+						f.RequestFlush();
+					return DXGI_ERROR_WAS_STILL_DRAWING;
+				}
+				if (pending)
+					f.Synchronize();
+				f.dev->WaitFence(fence);
 			}
 			D3D12_RANGE range = { SIZE_T(l.offset), SIZE_T(l.offset + u64(l.depth_pitch) * l.depth) };
 			void* p = nullptr;
@@ -2137,30 +2848,34 @@ void Context::Unmap(Resource* res, UINT sub)
 {
 	if (!res)
 		return;
-	Impl& c = *m_impl;
+	Front& f = *m_front;
 	if (res->m_usage == D3D11_USAGE_DYNAMIC && res->IsBuffer())
 	{
 		Buffer* b = static_cast<Buffer*>(res);
 		if (b->m_shadowed)
-			c.UploadShadow(b);
+			f.UploadShadow(b);
 		return;
 	}
 	if (res->m_usage == D3D11_USAGE_DYNAMIC && !res->IsBuffer() && res->m_map_ptr)
 	{
-		c.Require(res, sub % res->m_mips, 1, (sub / res->m_mips) % res->ArraySize(), 1, 0, 1, false,
-		          D3D12_RESOURCE_STATE_COPY_DEST);
-		c.FlushBarriers();
-		D3D12_TEXTURE_COPY_LOCATION d = {};
-		d.pResource = res->m_resource;
-		d.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-		d.SubresourceIndex = sub;
-		D3D12_TEXTURE_COPY_LOCATION s = {};
-		s.pResource = res->m_map_buffer;
-		s.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-		s.PlacedFootprint = res->m_map_footprint;
-		c.list->CopyTextureRegion(&d, 0, 0, 0, &s, nullptr);
+		const D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp = res->m_map_footprint;
+		ID3D12Resource* buffer = res->m_map_buffer;
 		res->m_map_ptr = nullptr;
-		c.Record();
+		f.Emit([res, sub, fp, buffer](Impl& c) {
+			c.Require(res, sub % res->m_mips, 1, (sub / res->m_mips) % res->ArraySize(), 1, 0, 1, false,
+			          D3D12_RESOURCE_STATE_COPY_DEST);
+			c.FlushBarriers();
+			D3D12_TEXTURE_COPY_LOCATION d = {};
+			d.pResource = res->m_resource;
+			d.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+			d.SubresourceIndex = sub;
+			D3D12_TEXTURE_COPY_LOCATION s = {};
+			s.pResource = buffer;
+			s.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+			s.PlacedFootprint = fp;
+			c.list->CopyTextureRegion(&d, 0, 0, 0, &s, nullptr);
+			c.Record();
+		});
 		return;
 	}
 	if (res->m_readback && res->m_readback_ptr)
@@ -2178,61 +2893,72 @@ void Context::Begin(Query* q)
 {
 	if (!q)
 		return;
-	Impl& c = *m_impl;
-	if (q->m_desc.Query == D3D11_QUERY_OCCLUSION || q->m_desc.Query == D3D11_QUERY_OCCLUSION_PREDICATE)
-	{
-		c.list->BeginQuery(c.dev->occlusion_heap,
-		                   q->m_desc.Query == D3D11_QUERY_OCCLUSION ? D3D12_QUERY_TYPE_OCCLUSION : D3D12_QUERY_TYPE_BINARY_OCCLUSION,
-		                   q->m_index);
-		c.Record();
-	}
 	q->m_ended = false;
+	if (q->m_desc.Query == D3D11_QUERY_OCCLUSION || q->m_desc.Query == D3D11_QUERY_OCCLUSION_PREDICATE)
+		m_front->Emit([q](Impl& c) {
+			c.list->BeginQuery(c.dev->occlusion_heap,
+			                   q->m_desc.Query == D3D11_QUERY_OCCLUSION ? D3D12_QUERY_TYPE_OCCLUSION : D3D12_QUERY_TYPE_BINARY_OCCLUSION,
+			                   q->m_index);
+			c.Record();
+		});
 }
 
 void Context::End(Query* q)
 {
 	if (!q)
 		return;
-	Impl& c = *m_impl;
-	switch (q->m_desc.Query)
-	{
-	case D3D11_QUERY_OCCLUSION:
-	case D3D11_QUERY_OCCLUSION_PREDICATE:
-	{
-		const D3D12_QUERY_TYPE type = q->m_desc.Query == D3D11_QUERY_OCCLUSION ? D3D12_QUERY_TYPE_OCCLUSION : D3D12_QUERY_TYPE_BINARY_OCCLUSION;
-		c.list->EndQuery(c.dev->occlusion_heap, type, q->m_index);
-		c.list->ResolveQueryData(c.dev->occlusion_heap, type, q->m_index, 1, c.dev->occlusion_readback, u64(q->m_index) * 8);
-		c.Record();
-		break;
-	}
-	case D3D11_QUERY_TIMESTAMP:
-		c.list->EndQuery(c.dev->timestamp_heap, D3D12_QUERY_TYPE_TIMESTAMP, q->m_index);
-		c.list->ResolveQueryData(c.dev->timestamp_heap, D3D12_QUERY_TYPE_TIMESTAMP, q->m_index, 1, c.dev->timestamp_readback,
-		                         u64(q->m_index) * 8);
-		c.Record();
-		break;
-	default:
-		break;
-	}
-	q->m_fence = c.dev->pending_fence.load();
+	Front& f = *m_front;
+	q->m_end_chunk = f.Tag();
 	q->m_ended = true;
+	f.Emit([q](Impl& c) {
+		switch (q->m_desc.Query)
+		{
+		case D3D11_QUERY_OCCLUSION:
+		case D3D11_QUERY_OCCLUSION_PREDICATE:
+		{
+			const D3D12_QUERY_TYPE type = q->m_desc.Query == D3D11_QUERY_OCCLUSION ? D3D12_QUERY_TYPE_OCCLUSION : D3D12_QUERY_TYPE_BINARY_OCCLUSION;
+			c.list->EndQuery(c.dev->occlusion_heap, type, q->m_index);
+			c.list->ResolveQueryData(c.dev->occlusion_heap, type, q->m_index, 1, c.dev->occlusion_readback, u64(q->m_index) * 8);
+			c.Record();
+			break;
+		}
+		case D3D11_QUERY_TIMESTAMP:
+			c.list->EndQuery(c.dev->timestamp_heap, D3D12_QUERY_TYPE_TIMESTAMP, q->m_index);
+			c.list->ResolveQueryData(c.dev->timestamp_heap, D3D12_QUERY_TYPE_TIMESTAMP, q->m_index, 1, c.dev->timestamp_readback,
+			                         u64(q->m_index) * 8);
+			c.Record();
+			break;
+		default:
+			break;
+		}
+		q->m_fence = c.dev->pending_fence.load();
+	});
 }
 
 HRESULT Context::GetData(Query* q, void* data, UINT size, UINT flags)
 {
 	if (!q)
 		return E_INVALIDARG;
-	Impl& c = *m_impl;
+	Front& f = *m_front;
 	if (!q->m_ended)
 		return S_FALSE;
-	if (c.dev->Completed() < q->m_fence)
+	const bool flush = !(flags & D3D11_ASYNC_GETDATA_DONOTFLUSH);
+	// The End is still queued for the recording thread
+	if (f.threaded && !f.Done(q->m_end_chunk))
 	{
-		if (c.CommandsPending(q->m_fence) && !(flags & D3D11_ASYNC_GETDATA_DONOTFLUSH))
-			Flush();
+		if (flush)
+			f.RequestFlush();
+		return S_FALSE;
+	}
+	if (f.dev->Completed() < q->m_fence)
+	{
+		if (flush && m_impl->CommandsPending(q->m_fence))
+			f.RequestFlush();
 		return S_FALSE;
 	}
 	if (!data)
 		return S_OK;
+	Device::Impl* dev = f.dev;
 	auto read = [&](ID3D12Resource* buffer, UINT index) -> u64 {
 		D3D12_RANGE range = { SIZE_T(index) * 8, SIZE_T(index) * 8 + 8 };
 		void* p = nullptr;
@@ -2249,21 +2975,21 @@ HRESULT Context::GetData(Query* q, void* data, UINT size, UINT flags)
 	{
 	case D3D11_QUERY_OCCLUSION:
 		if (size >= sizeof(UINT64))
-			*static_cast<UINT64*>(data) = read(c.dev->occlusion_readback, q->m_index);
+			*static_cast<UINT64*>(data) = read(dev->occlusion_readback, q->m_index);
 		break;
 	case D3D11_QUERY_OCCLUSION_PREDICATE:
 		if (size >= sizeof(BOOL))
-			*static_cast<BOOL*>(data) = read(c.dev->occlusion_readback, q->m_index) ? TRUE : FALSE;
+			*static_cast<BOOL*>(data) = read(dev->occlusion_readback, q->m_index) ? TRUE : FALSE;
 		break;
 	case D3D11_QUERY_TIMESTAMP:
 		if (size >= sizeof(UINT64))
-			*static_cast<UINT64*>(data) = read(c.dev->timestamp_readback, q->m_index);
+			*static_cast<UINT64*>(data) = read(dev->timestamp_readback, q->m_index);
 		break;
 	case D3D11_QUERY_TIMESTAMP_DISJOINT:
 		if (size >= sizeof(D3D11_QUERY_DATA_TIMESTAMP_DISJOINT))
 		{
 			D3D11_QUERY_DATA_TIMESTAMP_DISJOINT* d = static_cast<D3D11_QUERY_DATA_TIMESTAMP_DISJOINT*>(data);
-			d->Frequency = c.dev->timestamp_frequency;
+			d->Frequency = dev->timestamp_frequency;
 			d->Disjoint = FALSE;
 		}
 		break;
@@ -2280,130 +3006,173 @@ HRESULT Context::GetData(Query* q, void* data, UINT size, UINT flags)
 
 void Context::ClearState()
 {
-	Impl& c = *m_impl;
-	for (StageBinding& b : c.stages)
+	Front& f = *m_front;
+	for (StageState& st : f.stages)
 	{
-		Rebind(b.shader, (Shader*)nullptr);
-		for (Buffer*& p : b.cb)
+		Rebind(st.shader, (Shader*)nullptr);
+		for (Buffer*& p : st.cb)
 			Rebind(p, (Buffer*)nullptr);
-		for (ShaderResourceView*& p : b.srv)
+		for (ShaderResourceView*& p : st.srv)
 			Rebind(p, (ShaderResourceView*)nullptr);
-		for (SamplerState*& p : b.sampler)
+		for (SamplerState*& p : st.sampler)
 			Rebind(p, (SamplerState*)nullptr);
-		for (UnorderedAccessView*& p : b.uav)
+		for (UnorderedAccessView*& p : st.uav)
 			Rebind(p, (UnorderedAccessView*)nullptr);
-		b.hazard = 0;
-		b.srv_dirty = b.sampler_dirty = b.uav_dirty = true;
 	}
-	Rebind(c.layout, (InputLayout*)nullptr);
-	for (Buffer*& p : c.vb)
+	Rebind(f.layout, (InputLayout*)nullptr);
+	for (Buffer*& p : f.vb)
 		Rebind(p, (Buffer*)nullptr);
-	c.vb_count = 0;
-	Rebind(c.ib, (Buffer*)nullptr);
-	Rebind(c.raster, (RasterizerState*)nullptr);
-	Rebind(c.blend, (BlendState*)nullptr);
-	Rebind(c.depth, (DepthStencilState*)nullptr);
-	for (RenderTargetView*& p : c.rtv)
+	memset(f.vb_stride, 0, sizeof(f.vb_stride));
+	memset(f.vb_offset, 0, sizeof(f.vb_offset));
+	Rebind(f.ib, (Buffer*)nullptr);
+	f.ib_format = DXGI_FORMAT_R16_UINT;
+	f.ib_offset = 0;
+	Rebind(f.raster, (RasterizerState*)nullptr);
+	Rebind(f.blend, (BlendState*)nullptr);
+	Rebind(f.depth, (DepthStencilState*)nullptr);
+	for (RenderTargetView*& p : f.rtv)
 		Rebind(p, (RenderTargetView*)nullptr);
-	Rebind(c.dsv, (DepthStencilView*)nullptr);
-	c.topology = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
-	c.viewport_count = 0;
-	c.scissor_count = 0;
-	c.stencil_ref = 0;
-	c.sample_mask = 0xFFFFFFFF;
+	Rebind(f.dsv, (DepthStencilView*)nullptr);
+	f.topology = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
+	f.viewport_count = 0;
+	f.scissor_count = 0;
+	f.scissors_set = false;
+	f.stencil_ref = 0;
+	f.sample_mask = 0xFFFFFFFF;
 	const FLOAT ones[4] = { 1.f, 1.f, 1.f, 1.f };
-	memcpy(c.blend_factor, ones, sizeof(ones));
-	c.shaders_changed = c.cs_changed = true;
-	c.pso_dirty = true;
-	c.gfx_pso = nullptr;
-	c.cs_pso = nullptr;
-	c.rt_dirty = c.vp_dirty = c.sc_dirty = c.topo_dirty = c.ref_dirty = c.factor_dirty = true;
+	memcpy(f.blend_factor, ones, sizeof(ones));
+
+	f.Emit([](Impl& c) {
+		for (StageBinding& b : c.stages)
+		{
+			b.shader = nullptr;
+			memset(b.cb, 0, sizeof(b.cb));
+			memset(b.srv, 0, sizeof(b.srv));
+			memset(b.sampler, 0, sizeof(b.sampler));
+			memset(b.uav, 0, sizeof(b.uav));
+			b.hazard = 0;
+			b.srv_dirty = b.sampler_dirty = b.uav_dirty = true;
+		}
+		c.layout = nullptr;
+		memset(c.vb, 0, sizeof(c.vb));
+		memset(c.vb_stride, 0, sizeof(c.vb_stride));
+		memset(c.vb_offset, 0, sizeof(c.vb_offset));
+		c.vb_count = 0;
+		c.ib = nullptr;
+		c.ib_format = DXGI_FORMAT_R16_UINT;
+		c.ib_offset = 0;
+		c.raster = nullptr;
+		c.blend = nullptr;
+		c.depth = nullptr;
+		memset(c.rtv, 0, sizeof(c.rtv));
+		c.dsv = nullptr;
+		c.topology = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
+		c.viewport_count = 0;
+		c.scissor_count = 0;
+		c.stencil_ref = 0;
+		c.sample_mask = 0xFFFFFFFF;
+		const FLOAT one[4] = { 1.f, 1.f, 1.f, 1.f };
+		memcpy(c.blend_factor, one, sizeof(one));
+		c.shaders_changed = c.cs_changed = true;
+		c.pso_dirty = true;
+		c.gfx_pso = nullptr;
+		c.cs_pso = nullptr;
+		c.rt_dirty = c.vp_dirty = c.sc_dirty = c.topo_dirty = c.ref_dirty = c.factor_dirty = true;
+	});
 }
 
-void Context::Flush()
-{
-	Impl& c = *m_impl;
-	if (!c.recorded && c.barriers.empty())
-	{
-		// Nothing of ours, but initial uploads may wait for a submission
-		std::lock_guard<std::mutex> lock(c.dev->init_lock);
-		c.dev->SubmitInitLocked();
-		return;
-	}
-	c.Submit(true);
-}
+void Context::Flush() { m_front->Flush(); }
 
 INT Context::BeginEvent(LPCWSTR name)
 {
-	Impl& c = *m_impl;
-	c.events.emplace_back(name ? name : L"");
-	const std::wstring& e = c.events.back();
-	c.list->BeginEvent(0, e.c_str(), UINT((e.size() + 1) * sizeof(wchar_t)));
-	return INT(c.events.size()) - 1;
+	Front& f = *m_front;
+	std::wstring e = name ? name : L"";
+	f.Emit([e](Impl& c) {
+		c.events.push_back(e);
+		c.list->BeginEvent(0, e.c_str(), UINT((e.size() + 1) * sizeof(wchar_t)));
+	});
+	return f.event_depth++;
 }
 
 INT Context::EndEvent()
 {
-	Impl& c = *m_impl;
-	if (c.events.empty())
+	Front& f = *m_front;
+	if (!f.event_depth)
 		return -1;
-	c.list->EndEvent();
-	c.events.pop_back();
-	return INT(c.events.size());
+	--f.event_depth;
+	f.Emit([](Impl& c) {
+		if (c.events.empty())
+			return;
+		c.list->EndEvent();
+		c.events.pop_back();
+	});
+	return f.event_depth;
 }
 
 void Context::SetMarker(LPCWSTR name)
 {
-	if (name)
-		m_impl->list->SetMarker(0, name, UINT((wcslen(name) + 1) * sizeof(wchar_t)));
+	if (!name)
+		return;
+	std::wstring e = name;
+	m_front->Emit([e](Impl& c) { c.list->SetMarker(0, e.c_str(), UINT((e.size() + 1) * sizeof(wchar_t))); });
 }
 
 HRESULT Context::Present(IDXGISwapChain1* swap_chain, UINT interval, UINT flags)
 {
-	Impl& c = *m_impl;
-	if (Texture2D* bb = c.device->CurrentBackBuffer())
-		c.RequireWhole(bb, D3D12_RESOURCE_STATE_PRESENT);
-	const u64 fence = c.Submit(false);
-	HRESULT hr = swap_chain ? swap_chain->Present(interval, flags) : S_OK;
-	if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET)
-		c.device->ReportRemoval("Present");
-	c.NextFrame(fence);
-	return hr;
+	Front& f = *m_front;
+	const u64 frame = f.frame;
+	f.Emit([swap_chain, interval, flags, frame](Impl& c) {
+		if (Texture2D* bb = c.device->CurrentBackBuffer())
+			c.RequireWhole(bb, D3D12_RESOURCE_STATE_PRESENT);
+		const u64 fence = c.Submit(false);
+		const HRESULT hr = swap_chain ? swap_chain->Present(interval, flags) : S_OK;
+		if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET)
+			c.device->ReportRemoval("Present");
+		c.present_result.store(hr);
+		c.NextFrame(fence, frame);
+	});
+	f.FrameDone();
+	// Threaded: the result of the last Present done
+	return m_impl->present_result.load();
 }
 
 void Context::EndFrame()
 {
-	Impl& c = *m_impl;
-	const u64 fence = c.Submit(false);
-	c.NextFrame(fence);
+	Front& f = *m_front;
+	const u64 frame = f.frame;
+	f.Emit([frame](Impl& c) {
+		const u64 fence = c.Submit(false);
+		c.NextFrame(fence, frame);
+	});
+	f.FrameDone();
 }
 
-void Context::TraceFrames(UINT frames) { m_impl->trace_requested = frames ? frames : 1; }
+void Context::TraceFrames(UINT frames)
+{
+	m_front->Emit([frames](Impl& c) { c.trace_requested = frames ? frames : 1; });
+}
 
 void Context::StartStats(float seconds)
 {
-	Impl& c = *m_impl;
-	c.stats = ContextStats();
-	c.stats_event_barriers.clear();
-	c.stats_end_ms = GetTickCount64() + u64(seconds * 1000.f);
-	c.stats_on = true;
-	Msg("* [stat_dx12] measuring for %.0f s", seconds);
+	m_front->Emit([seconds](Impl& c) {
+		c.stats = ContextStats();
+		c.stats_event_barriers.clear();
+		c.stats_end_ms = GetTickCount64() + u64(seconds * 1000.f);
+		c.stats_on = true;
+		Msg("* [stat_dx12] measuring for %.0f s", seconds);
+	});
 }
 
-ID3D12GraphicsCommandList* Context::NativeList()
+void Context::ExecuteNative(std::function<void(NativeRecorder&)> fn)
 {
-	Impl& c = *m_impl;
-	c.FlushBarriers();
-	c.Record();
-	return c.list;
+	Front& f = *m_front;
+	f.BeforeWork();
+	f.Emit([fn](Impl& c) {
+		fn(c);
+		// The native code set its own pipeline, root signature, heaps and targets
+		c.InvalidateApplied();
+	});
 }
-
-void Context::Transition(Resource* res, D3D12_RESOURCE_STATES state)
-{
-	m_impl->RequireWhole(res, state);
-}
-
-void Context::InvalidateNative() { m_impl->InvalidateApplied(); }
 
 ID3D12DescriptorHeap* Context::ShaderVisibleHeap() const { return m_impl->view_heap; }
 
@@ -2412,14 +3181,12 @@ void Context::SignalAfterSubmit(ID3D12Fence* fence, u64 value)
 	if (!fence)
 		return;
 	fence->AddRef();
-	m_impl->signals.push_back({ fence, value });
+	m_front->Emit([fence, value](Impl& c) { c.signals.push_back({ fence, value }); });
 }
-
-u64 Context::LastSubmittedFence() const { return m_impl->last_submitted; }
-u64 Context::PendingFence() const { return m_impl->dev->pending_fence.load(); }
 
 bool Context::AllocStaticDescriptor(D3D12_CPU_DESCRIPTOR_HANDLE* cpu, D3D12_GPU_DESCRIPTOR_HANDLE* gpu)
 {
+	// The static range is not touched by recording
 	Impl& c = *m_impl;
 	UINT index;
 	if (!c.static_free.empty())

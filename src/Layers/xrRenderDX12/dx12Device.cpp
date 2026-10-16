@@ -32,11 +32,19 @@ Object::~Object()
 	}
 }
 
+std::atomic<void (*)(Object*)> g_defer_delete{ nullptr };
+
 ULONG Object::Release()
 {
 	const LONG refs = InterlockedDecrement(&m_refs);
 	if (refs == 0)
-		delete this;
+	{
+		// Commands queued for the recording thread may still use it
+		if (void (*defer)(Object*) = g_defer_delete.load())
+			defer(this);
+		else
+			delete this;
+	}
 	return ULONG(refs);
 }
 
@@ -225,7 +233,7 @@ void View::GetResource(Resource** out) const
 {
 	Resource* res = m_res;
 	if (!res && TheDevice())
-		res = TheDevice()->CurrentBackBuffer(); // the back buffer's view follows the current buffer
+		res = TheDevice()->BackBufferAlias(); // the back buffer's view follows the current buffer
 	if (res)
 		res->AddRef();
 	*out = res;
@@ -433,11 +441,11 @@ bool UploadRing::Alloc(u64 size, u64 alignment, UploadSlice& slice)
 	return true;
 }
 
-void UploadRing::Retire(u64 fence)
+void UploadRing::Retire(u64 frame)
 {
 	for (UploadPage* p : m_used)
 	{
-		p->fence = fence;
+		p->frame = frame;
 		m_in_flight.push_back(p);
 	}
 	m_used.clear();
@@ -451,7 +459,7 @@ void UploadRing::Reclaim(u64 completed)
 	for (size_t i = 0; i < m_in_flight.size();)
 	{
 		UploadPage* p = m_in_flight[i];
-		if (p->fence <= completed)
+		if (p->frame <= completed)
 		{
 			if (p->size == kPageSize && m_free.size() < 64)
 				m_free.push_back(p);
@@ -908,6 +916,11 @@ Device::~Device()
 	m_context = nullptr;
 	Impl& d = *m_impl;
 	ReleaseBackBuffers();
+	if (d.back_buffer_alias)
+	{
+		d.back_buffer_alias->Release();
+		d.back_buffer_alias = nullptr;
+	}
 
 	{
 		std::lock_guard<std::mutex> lock(d.state_lock);
@@ -996,14 +1009,19 @@ HRESULT Device::GetDeviceRemovedReason() { return m_device->GetDeviceRemovedReas
 void Device::WaitIdle()
 {
 	if (m_context)
-		m_context->Flush();
+		m_context->Synchronize();
+	m_impl->WaitQueueIdle();
+}
+
+void Device::Impl::WaitQueueIdle()
+{
 	{
-		std::lock_guard<std::mutex> lock(m_impl->init_lock);
-		m_impl->SubmitInitLocked();
+		std::lock_guard<std::mutex> lock(init_lock);
+		SubmitInitLocked();
 	}
-	const u64 value = m_impl->Submit(nullptr, 0);
-	m_impl->WaitFence(value);
-	m_impl->ProcessDeferred(m_impl->Completed(), false);
+	const u64 value = Submit(nullptr, 0);
+	WaitFence(value);
+	ProcessDeferred(Completed(), false);
 }
 
 void Device::ReportRemoval(const char* where)
@@ -2063,6 +2081,20 @@ HRESULT Device::AttachSwapChain(IDXGISwapChain1* swap_chain)
 		t->m_state = D3D12_RESOURCE_STATE_PRESENT;
 		res->SetName(L"xr back buffer");
 		d.back_buffers.push_back(t);
+		if (i == 0)
+		{
+			// GetBackBuffer's alias: the description of the buffers, no resource of its own
+			if (!d.back_buffer_alias)
+			{
+				d.back_buffer_alias = new Texture2D();
+				d.back_buffer_alias->m_back_buffer_alias = true;
+				d.back_buffer_alias->m_debug_name = "backbuffer";
+			}
+			Texture2D* a = d.back_buffer_alias;
+			a->m_desc = t->m_desc;
+			FillTextureResource(a, D3D11_RESOURCE_DIMENSION_TEXTURE2D, D3D11_USAGE_DEFAULT, D3D11_BIND_RENDER_TARGET, 0, 0,
+			                    sd.Format, sd.Width, sd.Height, 1, 1, 1, 0);
+		}
 
 		D3D12_CPU_DESCRIPTOR_HANDLE h;
 		d.back_buffer_rtv_slots.push_back(d.rtv_pool.Alloc(&h));
@@ -2077,9 +2109,9 @@ void Device::ReleaseBackBuffers()
 	Impl& d = *m_impl;
 	if (d.back_buffers.empty() && !d.swap_chain)
 		return;
-	WaitIdle();
 	if (m_context)
 		m_context->ClearState();
+	WaitIdle();
 	for (Texture2D* t : d.back_buffers)
 	{
 		ID3D12Resource* res = t->m_resource;
@@ -2129,9 +2161,11 @@ HRESULT Device::CreateBackBufferRTV(RenderTargetView** out)
 	return S_OK;
 }
 
+Texture2D* Device::BackBufferAlias() { return m_impl->back_buffer_alias; }
+
 HRESULT Device::GetBackBuffer(Texture2D** out)
 {
-	Texture2D* t = CurrentBackBuffer();
+	Texture2D* t = (m_impl->swap_chain && !m_impl->back_buffers.empty()) ? m_impl->back_buffer_alias : nullptr;
 	if (!t)
 	{
 		*out = nullptr;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "r4_upscaler.h"
+#include <atomic>
 
 // NVIDIA DLSS Super Resolution through the NGX SDK (D3D11; D3D12 in the DX12 renderer).
 // When the SDK is not available at build time (XR_DLSS_SDK undefined) every call fails gracefully
@@ -31,6 +32,7 @@ private:
 	void* m_params = nullptr; // NVSDK_NGX_Parameter*
 	void* m_handle = nullptr; // NVSDK_NGX_Handle*
 	u32 m_eval_failures = 0;
+	std::atomic<bool> m_eval_failed{ false }; // D3D12: the last evaluation failed where it was recorded
 };
 
 extern CDLSS g_DLSS;

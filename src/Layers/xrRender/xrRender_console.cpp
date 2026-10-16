@@ -661,6 +661,20 @@ public:
 		HW.pContext->TraceFrames(UINT(clampr(frames, 1, 4)));
 	}
 };
+// r__dx12_threaded 0/1: D3D12 commands recorded on a worker thread (1), as DXVK records on its own thread, or on the
+// render thread at each call (0); switches at once
+int ps_r__dx12_threaded = 1;
+class CCC_Dx12Threaded : public CCC_Integer
+{
+public:
+	CCC_Dx12Threaded(LPCSTR N, int* V) : CCC_Integer(N, V, 0, 1) {}
+	virtual void Execute(LPCSTR args)
+	{
+		CCC_Integer::Execute(args);
+		if (HW.pContext)
+			HW.pContext->SetThreaded(*value != 0);
+	}
+};
 // stat_dx12 [seconds]: D3D12 commands per frame (draws, barriers, pipeline and table sets, submissions) and the
 // barriers by pass, averaged over the time, in the log
 class CCC_Dx12Stats : public IConsole_Command
@@ -1386,6 +1400,7 @@ void xrRender_initconsole()
 	CMD1(CCC_Dx12DumpRT, "r__dx12_dump_rt");
 	CMD1(CCC_Dx12Trace, "r__dx12_trace");
 	CMD1(CCC_Dx12Stats, "stat_dx12");
+	CMD2(CCC_Dx12Threaded, "r__dx12_threaded", &ps_r__dx12_threaded);
 #endif
 
 	//	Igor: just to test bug with rain/particles corruption

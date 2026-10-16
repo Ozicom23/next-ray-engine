@@ -213,11 +213,14 @@ bool CDLSS::CreateFeature(u32 render_w, u32 render_h, u32 out_w, u32 out_h, u32 
 
 	NVSDK_NGX_Handle* handle = nullptr;
 #ifdef USE_DX12
-	// Recorded on the frame's command list (node masks 1: single GPU), submitted right away
-	NVSDK_NGX_Result res = NGX_D3D12_CREATE_DLSS_EXT(HW.pContext->NativeList(), 1, 1, &handle,
-	                                                 (NVSDK_NGX_Parameter*)m_params, &create);
-	HW.pContext->InvalidateNative();
-	HW.pContext->Flush();
+	// Recorded on the frame's command list (node masks 1: single GPU), submitted right away; the context's recording
+	// thread runs it, this one waits for it
+	NVSDK_NGX_Result res = NVSDK_NGX_Result_Fail;
+	NVSDK_NGX_Parameter* params = (NVSDK_NGX_Parameter*)m_params;
+	HW.pContext->ExecuteNative([&](dx12::Context::NativeRecorder& r) {
+		res = NGX_D3D12_CREATE_DLSS_EXT(r.List(), 1, 1, &handle, params, &create);
+	});
+	HW.pContext->Synchronize();
 #else
 	NVSDK_NGX_Result res = NGX_D3D11_CREATE_DLSS_EXT(HW.pContext, &handle, (NVSDK_NGX_Parameter*)m_params, &create);
 #endif
@@ -229,6 +232,7 @@ bool CDLSS::CreateFeature(u32 render_w, u32 render_h, u32 out_w, u32 out_h, u32 
 
 	m_handle = handle;
 	m_eval_failures = 0;
+	m_eval_failed = false;
 	Msg("* DLSS: feature created, %ux%u -> %ux%u, quality %u", render_w, render_h, out_w, out_h, quality);
 	return true;
 }
@@ -255,21 +259,8 @@ bool CDLSS::Evaluate(const UpscalerEvalParams& p)
 		return false;
 
 #ifdef USE_DX12
-	// NGX expects the inputs readable by compute and the output as UAV; the context's tracking follows
-	dx12::Context* ctx = HW.pContext;
-	ctx->Transition(p.color, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-	ctx->Transition(p.depth, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-	ctx->Transition(p.motion, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-	if (p.reactive)
-		ctx->Transition(p.reactive, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-	ctx->Transition(p.output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-
+	// The resources are set where the evaluation is recorded
 	NVSDK_NGX_D3D12_DLSS_Eval_Params eval = {};
-	eval.Feature.pInColor = p.color ? p.color->Native() : nullptr;
-	eval.Feature.pInOutput = p.output ? p.output->Native() : nullptr;
-	eval.pInDepth = p.depth ? p.depth->Native() : nullptr;
-	eval.pInMotionVectors = p.motion ? p.motion->Native() : nullptr;
-	eval.pInBiasCurrentColorMask = p.reactive ? p.reactive->Native() : nullptr;
 #else
 	NVSDK_NGX_D3D11_DLSS_Eval_Params eval = {};
 	eval.Feature.pInColor = p.color;
@@ -288,14 +279,42 @@ bool CDLSS::Evaluate(const UpscalerEvalParams& p)
 	eval.InFrameTimeDeltaInMsec = p.frame_time_ms;
 
 #ifdef USE_DX12
-	NVSDK_NGX_Result res = NGX_D3D12_EVALUATE_DLSS_EXT(ctx->NativeList(), (NVSDK_NGX_Handle*)m_handle,
-	                                                   (NVSDK_NGX_Parameter*)m_params, &eval);
-	// NGX set its own pipeline, root signature and descriptor heaps on the list
-	ctx->InvalidateNative();
+	// Recorded in order with the frame's commands (on the context's recording thread when threaded): a failure is
+	// known there, and this call reports the one of the frame before
+	const bool failed_before = m_eval_failed.exchange(false);
+	dx12::Resource* color = p.color;
+	dx12::Resource* output = p.output;
+	dx12::Resource* depth = p.depth;
+	dx12::Resource* motion = p.motion;
+	dx12::Resource* reactive = p.reactive;
+	NVSDK_NGX_Handle* handle = (NVSDK_NGX_Handle*)m_handle;
+	NVSDK_NGX_Parameter* params = (NVSDK_NGX_Parameter*)m_params;
+	HW.pContext->ExecuteNative([this, eval, color, output, depth, motion, reactive, handle, params](dx12::Context::NativeRecorder& r) mutable {
+		// NGX expects the inputs readable by compute and the output as UAV; the context's tracking follows
+		r.Transition(color, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+		r.Transition(depth, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+		r.Transition(motion, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+		if (reactive)
+			r.Transition(reactive, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+		r.Transition(output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+		eval.Feature.pInColor = color ? color->Native() : nullptr;
+		eval.Feature.pInOutput = output ? output->Native() : nullptr;
+		eval.pInDepth = depth ? depth->Native() : nullptr;
+		eval.pInMotionVectors = motion ? motion->Native() : nullptr;
+		eval.pInBiasCurrentColorMask = reactive ? reactive->Native() : nullptr;
+		const NVSDK_NGX_Result res = NGX_D3D12_EVALUATE_DLSS_EXT(r.List(), handle, params, &eval);
+		if (NVSDK_NGX_FAILED(res))
+		{
+			// Don't flood the log if every frame fails
+			if (m_eval_failures++ < 8)
+				Msg("! DLSS: evaluate failed (0x%08x)", u32(res));
+			m_eval_failed = true;
+		}
+	});
+	return !failed_before;
 #else
 	NVSDK_NGX_Result res = NGX_D3D11_EVALUATE_DLSS_EXT(HW.pContext, (NVSDK_NGX_Handle*)m_handle,
 	                                                   (NVSDK_NGX_Parameter*)m_params, &eval);
-#endif
 	if (NVSDK_NGX_FAILED(res))
 	{
 		// Don't flood the log if every frame fails
@@ -304,6 +323,7 @@ bool CDLSS::Evaluate(const UpscalerEvalParams& p)
 		return false;
 	}
 	return true;
+#endif
 }
 
 #else // XR_DLSS_SDK

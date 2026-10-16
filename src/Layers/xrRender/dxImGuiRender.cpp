@@ -118,35 +118,45 @@ void dxImGuiRender::Render(ImDrawData* data)
         return;
 
     // Into the bound render target like the D3D11 backend, when the backend's pipeline fits it; the back buffer
-    // otherwise (the back buffer's view resolves to the current swap chain buffer)
+    // otherwise (resolved to the current swap chain buffer where the commands are recorded)
     dx12::Context* ctx = HW.pContext;
     dx12::RenderTargetView* rtv = nullptr;
     ctx->OMGetRenderTargets(1, &rtv, nullptr);
-    dx12::Resource* target = nullptr;
-    D3D12_CPU_DESCRIPTOR_HANDLE handle = {};
-    if (rtv && !rtv->m_back_buffer && rtv->m_res && rtv->m_format == s_rtv_format)
-    {
-        target = rtv->m_res;
-        handle = rtv->m_cpu;
-    }
-    else
-    {
-        target = HW.pDevice->CurrentBackBuffer();
-        handle = HW.pDevice->CurrentBackBufferRTV();
-    }
-    _RELEASE(rtv);
-    if (!target || !handle.ptr)
-        return;
+    if (rtv && (rtv->m_back_buffer || !rtv->m_res || rtv->m_format != s_rtv_format))
+        _RELEASE(rtv);
 
-    ctx->Transition(target, D3D12_RESOURCE_STATE_RENDER_TARGET);
-    ID3D12GraphicsCommandList* list = ctx->NativeList();
-    list->OMSetRenderTargets(1, &handle, FALSE, nullptr);
-    ID3D12DescriptorHeap* heap = ctx->ShaderVisibleHeap();
-    list->SetDescriptorHeaps(1, &heap);
-    // Sets its viewport, scissors, pipeline and root signature
-    ImGui_ImplDX12_RenderDrawData(data, list);
-    // The context applies its own state again at the next draw
-    ctx->InvalidateNative();
+    // The draw lists are rebuilt next frame while the copy is recorded (on the context's recording thread)
+    ImDrawData* copy = IM_NEW(ImDrawData)();
+    *copy = *data;
+    for (int i = 0; i < copy->CmdLists.Size; ++i)
+        copy->CmdLists[i] = data->CmdLists[i]->CloneOutput();
+
+    ctx->ExecuteNative([rtv, copy](dx12::Context::NativeRecorder& r) {
+        dx12::Resource* target = nullptr;
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = {};
+        if (rtv)
+        {
+            target = rtv->m_res;
+            handle = rtv->m_cpu;
+        }
+        else
+            target = r.BackBuffer(&handle);
+        if (target && handle.ptr)
+        {
+            r.Transition(target, D3D12_RESOURCE_STATE_RENDER_TARGET);
+            ID3D12GraphicsCommandList* list = r.List();
+            list->OMSetRenderTargets(1, &handle, FALSE, nullptr);
+            ID3D12DescriptorHeap* heap = HW.pContext->ShaderVisibleHeap();
+            list->SetDescriptorHeaps(1, &heap);
+            // Sets its viewport, scissors, pipeline and root signature
+            ImGui_ImplDX12_RenderDrawData(copy, list);
+        }
+        for (int i = 0; i < copy->CmdLists.Size; ++i)
+            IM_DELETE(copy->CmdLists[i]);
+        IM_DELETE(copy);
+        if (rtv)
+            rtv->Release();
+    });
 #elif defined(USE_DX11)
     ImGui_ImplDX11_RenderDrawData(data);
 #elif defined(USE_DX10)

@@ -300,6 +300,9 @@ void CHW::DestroyD3D()
 extern u32 g_screenmode;
 #if defined(USE_DX11)
 extern int ps_r4_swap_wait;     // r4_frame_pacing.cpp
+#ifdef USE_DX12
+extern int ps_r__dx12_threaded; // xrRender_console.cpp
+#endif
 extern int ps_r4_frame_latency;
 #endif
 
@@ -563,6 +566,7 @@ void CHW::CreateDevice(HWND hwnd, bool move_window)
     FeatureLevel = D3D_FEATURE_LEVEL_11_0;
     CreateSwapChain();
     pAnnotation = pContext;
+    pContext->SetThreaded(ps_r__dx12_threaded != 0);
     R = S_OK;
 #elif defined(USE_DX11)
     D3D_FEATURE_LEVEL pFeatureLevels[] = {
@@ -818,6 +822,11 @@ float CHW::WaitFrameLatency()
 
 void CHW::DestroyDevice()
 {
+#if defined(USE_DX12)
+    // The swap chain is presented where the context records (its worker thread): nothing queued while it changes
+    if (pContext)
+        pContext->Synchronize();
+#endif
     //	Destroy state managers
     StateManager.Reset();
     RSManager.ClearStateArray();
@@ -897,6 +906,11 @@ void CHW::DestroyDevice()
 //////////////////////////////////////////////////////////////////////
 void CHW::Reset(HWND hwnd)
 {
+#if defined(USE_DX12)
+    // The swap chain is presented where the context records (its worker thread): nothing queued while it changes
+    if (pContext)
+        pContext->Synchronize();
+#endif
 #if defined(USE_DX11)
     DXGI_SWAP_CHAIN_DESC1&           cd    = m_ChainDesc;
     DXGI_SWAP_CHAIN_FULLSCREEN_DESC& cd_fs = m_ChainDescFullscreen;
@@ -1214,6 +1228,11 @@ extern void unregister_reshade();
 
 void CHW::OnAppActivate()
 {
+#if defined(USE_DX12)
+    // The swap chain is presented where the context records (its worker thread): nothing queued while it changes
+    if (pContext)
+        pContext->Synchronize();
+#endif
 #if defined(USE_DX11)
     BOOL is_windowed = m_ChainDescFullscreen.Windowed;
 #elif defined(USE_DX10)
@@ -1256,6 +1275,11 @@ void CHW::OnAppActivate()
 
 void CHW::OnAppDeactivate()
 {
+#if defined(USE_DX12)
+    // The swap chain is presented where the context records (its worker thread): nothing queued while it changes
+    if (pContext)
+        pContext->Synchronize();
+#endif
 #if defined(USE_DX11)
     BOOL is_windowed = m_ChainDescFullscreen.Windowed;
 #elif defined(USE_DX10)
