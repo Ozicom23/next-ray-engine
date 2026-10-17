@@ -16,6 +16,7 @@
 #include "xr_input.h"
 #include "xr_ioconsole.h"
 #include "x_ray.h"
+#include "remote_console.h"
 #include "std_classes.h"
 #include "GameFont.h"
 #include "resource.h"
@@ -1098,6 +1099,7 @@ int APIENTRY WinMain_impl(HINSTANCE hInstance,
 
 	InitSettings();
 	Msg(XRAY_MONOLITH_VERSION);
+	remote_console::start_watchdog();
 
 	{
 		FS_FileSet fset;

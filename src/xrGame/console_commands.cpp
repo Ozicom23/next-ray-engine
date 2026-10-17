@@ -17,6 +17,8 @@
 #include "PHDestroyable.h"
 #include "actor.h"
 #include "Actor_Flags.h"
+#include "Inventory.h"
+#include "xr_level_controller.h"
 #include "customzone.h"
 #include "script_engine.h"
 #include "script_engine_space.h"
@@ -1864,10 +1866,39 @@ public:
 	}
 };
 
+// Test sessions (-remote_console): an actor action as if its key went down (1) or up (0), straight to the inventory
+// past the input and the UI (rc_action wpn_zoom 1). A scripted key press can't hold a key the game polls
+class CCC_ActorAction : public IConsole_Command
+{
+public:
+	CCC_ActorAction(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = false; };
+
+	virtual void Execute(LPCSTR args)
+	{
+		string64 name = "";
+		int on = 1;
+		if (sscanf(args, "%63s %d", name, &on) < 1)
+			return;
+		const EGameActions action = action_name_to_id(name);
+		CActor* actor = Actor();
+		if (action == kNOTBINDED || !actor)
+		{
+			Msg("! rc_action: no action %s or no actor", name);
+			return;
+		}
+		const bool done = actor->inventory().Action(u16(action), on ? CMD_START : CMD_STOP);
+		Msg("* rc_action %s %d: %s", name, on, done ? "done" : "not taken");
+	}
+};
+
 class CCC_ScriptCommand : public IConsole_Command
 {
 public:
-	CCC_ScriptCommand(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = false; };
+	CCC_ScriptCommand(LPCSTR N) : IConsole_Command(N)
+	{
+		bEmptyArgsHandled = false;
+		bLowerCaseArgs = false; // Lua is case sensitive (getH, AddUniqueCall)
+	};
 
 	virtual void Execute(LPCSTR args)
 	{
@@ -2815,6 +2846,8 @@ void CCC_RegisterCommands()
 	// Test sessions driven through the remote console run scripts too (give an item, aim: scope checks)
 	else if (strstr(Core.Params, "-remote_console"))
 		CMD1(CCC_ScriptCommand, "run_string");
+	if (strstr(Core.Params, "-remote_console"))
+		CMD1(CCC_ActorAction, "rc_action");
 #endif // MASTER_GOLD
 	//#endif // MASTER_GOLD
 	/* AVO: end */

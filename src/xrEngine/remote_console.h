@@ -11,4 +11,8 @@ namespace remote_console
 {
 	// Once per main loop iteration, also during loading
 	void update();
+	// At start, after the file system: with -remote_console, a game that stops making progress (no frame and no log
+	// line for two minutes) writes every thread's stack to $logs$\hang_<time>.txt (a test session kills a hung game,
+	// and the log's last lines with it)
+	void start_watchdog();
 }
