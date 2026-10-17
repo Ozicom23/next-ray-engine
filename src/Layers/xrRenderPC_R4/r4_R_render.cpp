@@ -193,9 +193,12 @@ void CRender::Render()
 	//  Redotix99: for 3D Shader Based Scopes 	
 	if (scope_3D_fake_enabled)
 	{
-		ID3D11Resource* zbuffer_res;
+		ID3DResource* zbuffer_res;
 		HW.pBaseZB->GetResource(&zbuffer_res);
 		HW.pContext->CopyResource(RImplementation.Target->rt_tempzb->pSurface, zbuffer_res);
+#ifdef USE_DX12
+		_RELEASE(zbuffer_res);
+#endif
 	}
 
 	if (RImplementation.o.dx10_msaa)
@@ -439,7 +442,12 @@ void CRender::RenderToTarget(RRT target)
 	}
 
 	ID3DTexture2D* pBuffer = nullptr;
+#ifdef USE_DX12
+	if (FAILED(HW.pDevice->GetBackBuffer(&pBuffer)) || !pBuffer)
+		return;
+#else
 	HW.m_pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&pBuffer);
+#endif
 	HW.pContext->CopyResource((*RT)->pSurface, pBuffer);
 	pBuffer->Release();
 }

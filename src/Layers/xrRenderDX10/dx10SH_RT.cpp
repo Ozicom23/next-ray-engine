@@ -136,6 +136,9 @@ void CRT::create(LPCSTR Name, u32 w, u32 h, D3DFORMAT f, u32 SampleCount)
 
 	CHK_DX(HW.pDevice->CreateTexture2D( &desc, NULL, &pSurface ));
 	HW.stats_manager.increment_stats_rtarget(pSurface);
+#ifdef USE_DX12
+	pSurface->m_debug_name = Name; // r__dx12_trace
+#endif
 	// OK
 #ifdef DEBUG
 	Msg			("* created RT(%s), %dx%d, format = %d samples = %d",Name,w,h, dx10FMT, SampleCount );

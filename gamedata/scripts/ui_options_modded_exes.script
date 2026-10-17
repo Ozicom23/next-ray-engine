@@ -157,6 +157,18 @@ function on_xml_read()
 				})
 				need_init_opt_coder = true
 			end
+			-- The DX12 exe runs the same R4 renderer ("renderer_r4", shown as DX11): its entry is labelled DX12 there
+			local renderer = renderer_idx and basic.gr[renderer_idx]
+			local cont_base = renderer and renderer.content and renderer.content[1]
+			if type(cont_base) == "function" and get_console():get_string("r__dx12_threaded") then
+				renderer.content = {function(...)
+					local cont = cont_base(...)
+					for _, c in ipairs(cont or {}) do
+						if c[1] == "renderer_r4" then c[2] = "renderer_r4_dx12" end
+					end
+					return cont
+				end}
+			end
 		end
 
 		-- Persistent weather switch
@@ -253,6 +265,21 @@ function on_xml_read()
 						precondition = for_r4,
 					},
 					{
+						id           = "dlss_preset",
+						type         = "list",
+						val          = 0,
+						cmd          = "r4_dlss_preset",
+						content      = {
+							{"default", "dlss_preset_default"},
+							{"j", "dlss_preset_j"},
+							{"k", "dlss_preset_k"},
+							{"l", "dlss_preset_l"},
+							{"m", "dlss_preset_m"},
+						},
+						vid          = true,
+						precondition = for_r4,
+					},
+					{
 						id           = "fsr_sharpness",
 						type         = "track",
 						val          = 2,
@@ -293,6 +320,27 @@ function on_xml_read()
 						precondition = for_r4,
 					},
 				}
+				-- DLSS preset only where DLSS can run; frame generation only in the DX12 exe (the command exists there).
+				-- Rows of commands the running exe doesn't have (an older exe with this script) are left out
+				for i = #rows, 1, -1 do
+					local row = rows[i]
+					if (row.id == "dlss_preset" and avail and not string.find(avail, "dlss", 1, true))
+						or (row.cmd and not get_console():get_string(row.cmd)) then
+						table.remove(rows, i)
+					end
+				end
+				if get_console():get_string("r4_framegen") then
+					table.insert(rows, 4, {
+						id           = "framegen",
+						type         = "check",
+						val          = 1,
+						def          = false,
+						cmd          = "r4_framegen",
+						bool_to_num  = true,
+						vid          = true,
+						precondition = for_r4,
+					})
+				end
 				for i, row in ipairs(rows) do
 					table.insert(advanced.gr, insert_idx + i - 1, row)
 				end

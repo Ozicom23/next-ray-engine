@@ -33,7 +33,9 @@
 #include "../xrRender/xrRender_console.h"
 #include "r4_upscaler.h"
 
+#ifndef USE_DX12
 #include <D3DX10Tex.h>
+#endif
 
 D3D_VIEWPORT custom_viewport[1] = { 0, 0, 0, 0, 0.f, 1.f };
 
@@ -1329,7 +1331,26 @@ CRenderTarget::CRenderTarget()
 
 				HW.pContext->CopySubresourceRegion(t_noise_surf_mipped, 0, 0, 0, 0, t_noise_surf[0], 0, 0);
 
+#ifdef USE_DX12
+				// No D3DX11: the mips point-filtered on the CPU from the level 0 data, as D3DX10_FILTER_POINT
+				xr_vector<u32> mip_src, mip_dst;
+				mip_src.assign(tempData[0], tempData[0] + TEX_jitter * TEX_jitter);
+				u32 mip_w = TEX_jitter, mip_h = TEX_jitter;
+				for (UINT level = 1; mip_w > 1 || mip_h > 1; level++)
+				{
+					const u32 dw = _max(mip_w / 2, 1u), dh = _max(mip_h / 2, 1u);
+					mip_dst.resize(dw * dh);
+					for (u32 y = 0; y < dh; y++)
+						for (u32 x = 0; x < dw; x++)
+							mip_dst[y * dw + x] = mip_src[_min(y * 2, mip_h - 1) * mip_w + _min(x * 2, mip_w - 1)];
+					HW.pContext->UpdateSubresource(t_noise_surf_mipped, level, nullptr, mip_dst.data(), UINT(dw * sizeof(u32)), 0);
+					mip_src.swap(mip_dst);
+					mip_w = dw;
+					mip_h = dh;
+				}
+#else
 				D3DX11FilterTexture(HW.pContext, t_noise_surf_mipped, 0, D3DX10_FILTER_POINT);
+#endif
 			}
 		}
 	}

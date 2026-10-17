@@ -4,7 +4,8 @@
 
 // AMD FidelityFX Super Resolution 3.1 upscaler on D3D11.
 // AMD ships DX12/Vulkan backends only; r4_fsr3.cpp implements the FidelityFX backend interface on D3D11
-// with shaders precompiled for cs_5_0 (src/3rd party/FidelityFX-FSR3/compile_shaders.ps1).
+// with shaders precompiled for cs_5_0 (src/3rd party/FidelityFX-FSR3/compile_shaders.ps1). The DX12 renderer
+// runs the same backend through its D3D11-style context.
 // Without the compiled shaders (XR_FSR3_SHADERS undefined) every call fails gracefully.
 class CFSR3 : public CUpscaler
 {
@@ -27,7 +28,7 @@ private:
 	bool m_available = false;
 	void* m_context = nullptr; // FfxFsr3UpscalerContext*
 	void* m_backend = nullptr; // backend state, owned by the FidelityFX interface
-	ID3D11Texture2D* m_shared[3] = {}; // dilated depth, dilated motion vectors, reconstructed previous nearest depth
+	ID3DTexture2D* m_shared[3] = {}; // dilated depth, dilated motion vectors, reconstructed previous nearest depth
 	u32 m_eval_failures = 0;
 };
 

@@ -25,7 +25,7 @@ public:
 	ID3DDepthStencilView*	pZRT;
 
 #ifdef USE_DX11
-	ID3D11UnorderedAccessView*	pUAView;
+	ID3DUnorderedAccessView*	pUAView;
 #endif
 
 #endif	//	USE_DX10

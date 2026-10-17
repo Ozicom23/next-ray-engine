@@ -127,7 +127,7 @@ namespace
 	}
 
 	// Fills size, category and description; false for resource types not counted
-	bool describe(ID3D11Resource* res, category cat, Ticket& t)
+	bool describe(ID3DResource* res, category cat, Ticket& t)
 	{
 		D3D11_RESOURCE_DIMENSION dim = D3D11_RESOURCE_DIMENSION_UNKNOWN;
 		res->GetType(&dim);
@@ -140,7 +140,7 @@ namespace
 		case D3D11_RESOURCE_DIMENSION_BUFFER:
 			{
 				D3D11_BUFFER_DESC d;
-				static_cast<ID3D11Buffer*>(res)->GetDesc(&d);
+				static_cast<ID3DBuffer*>(res)->GetDesc(&d);
 				t.bytes = d.ByteWidth;
 				t.cat = cat != automatic ? cat : (t_scope_cat != automatic ? t_scope_cat : buf_other);
 				return true;
@@ -148,7 +148,7 @@ namespace
 		case D3D11_RESOURCE_DIMENSION_TEXTURE1D:
 			{
 				D3D11_TEXTURE1D_DESC d;
-				static_cast<ID3D11Texture1D*>(res)->GetDesc(&d);
+				static_cast<ID3DTexture1D*>(res)->GetDesc(&d);
 				t.bytes = texture_bytes(d.Format, d.Width, 1, 1, d.MipLevels, d.ArraySize, 1);
 				t.cat = texture_category(d.Usage, d.BindFlags, d.Format, d.MipLevels);
 				t.width = d.Width;
@@ -160,7 +160,7 @@ namespace
 		case D3D11_RESOURCE_DIMENSION_TEXTURE2D:
 			{
 				D3D11_TEXTURE2D_DESC d;
-				static_cast<ID3D11Texture2D*>(res)->GetDesc(&d);
+				static_cast<ID3DTexture2D*>(res)->GetDesc(&d);
 				t.bytes = texture_bytes(d.Format, d.Width, d.Height, 1, d.MipLevels, d.ArraySize, d.SampleDesc.Count);
 				t.cat = texture_category(d.Usage, d.BindFlags, d.Format, d.MipLevels);
 				t.width = d.Width;
@@ -172,7 +172,7 @@ namespace
 		case D3D11_RESOURCE_DIMENSION_TEXTURE3D:
 			{
 				D3D11_TEXTURE3D_DESC d;
-				static_cast<ID3D11Texture3D*>(res)->GetDesc(&d);
+				static_cast<ID3DTexture3D*>(res)->GetDesc(&d);
 				t.bytes = texture_bytes(d.Format, d.Width, d.Height, d.Depth, d.MipLevels, 1, 1);
 				t.cat = texture_category(d.Usage, d.BindFlags, d.Format, d.MipLevels);
 				t.width = d.Width;
@@ -272,7 +272,7 @@ u64 totals::gpu() const
 	return sum;
 }
 
-void track(ID3D11Resource* res, const char* name, category cat)
+void track(ID3DResource* res, const char* name, category cat)
 {
 	if (!res)
 		return;

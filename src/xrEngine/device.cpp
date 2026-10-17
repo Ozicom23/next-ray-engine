@@ -363,6 +363,7 @@ float GetMonitorRefresh()
 }
 
 extern int ps_framelimiter;
+extern int ps_frame_time_smoothing; // xr_ioc_cmd.cpp
 extern u32 g_screenmode;
 
 CTimer FreezeTimer;
@@ -766,7 +767,15 @@ void CRenderDevice::FrameMove()
 		// Timer
 		float fPreviousFrameTime = Timer.GetElapsed_sec();
 		Timer.Start(); // previous frame
-		fTimeDelta = 0.1f * fTimeDelta + 0.9f * fPreviousFrameTime;
+		// r__frame_time_smoothing: the step is the mean of the last two frame intervals. The DX12 exe's frame starts can
+		// come in pairs (12 and 21 ms with the recording worker while the GPU shows a frame every 16.4 ms): motion
+		// stepped by them judders on an evenly paced screen. The mean follows the screen; the game's time falls behind
+		// the clock by half a frame at most
+		static float s_prev_frame_time = 0.f;
+		const float step = ps_frame_time_smoothing && s_prev_frame_time > 0.f ? 0.5f * (fPreviousFrameTime + s_prev_frame_time)
+		                                                                        : fPreviousFrameTime;
+		s_prev_frame_time = fPreviousFrameTime;
+		fTimeDelta = 0.1f * fTimeDelta + 0.9f * step;
 		// smooth random system activity - worst case ~7% error
 		//fTimeDelta = 0.7f * fTimeDelta + 0.3f*fPreviousFrameTime; // smooth random system activity
 		if (fTimeDelta > .1f)

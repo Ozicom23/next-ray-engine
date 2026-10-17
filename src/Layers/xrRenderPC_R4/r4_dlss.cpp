@@ -66,8 +66,13 @@ bool CDLSS::Init()
 		info.LoggingInfo.MinimumLoggingLevel = ps_r4_dlss_log > 1 ? NVSDK_NGX_LOGGING_LEVEL_VERBOSE : NVSDK_NGX_LOGGING_LEVEL_ON;
 	}
 
+#ifdef USE_DX12
+	NVSDK_NGX_Result res = NVSDK_NGX_D3D12_Init_with_ProjectID(s_ngx_project_id, NVSDK_NGX_ENGINE_TYPE_CUSTOM, "1.0",
+	                                                            log_dir_w, HW.pDevice->Native(), &info);
+#else
 	NVSDK_NGX_Result res = NVSDK_NGX_D3D11_Init_with_ProjectID(s_ngx_project_id, NVSDK_NGX_ENGINE_TYPE_CUSTOM, "1.0",
 	                                                            log_dir_w, HW.pDevice, &info);
+#endif
 	if (NVSDK_NGX_FAILED(res))
 	{
 		Msg("! DLSS: NGX init failed (0x%08x). NVIDIA GPU/driver required (under Wine/Proton: dxvk-nvapi)", u32(res));
@@ -76,7 +81,11 @@ bool CDLSS::Init()
 	m_ngx_ready = true;
 
 	NVSDK_NGX_Parameter* params = nullptr;
+#ifdef USE_DX12
+	res = NVSDK_NGX_D3D12_GetCapabilityParameters(&params);
+#else
 	res = NVSDK_NGX_D3D11_GetCapabilityParameters(&params);
+#endif
 	if (NVSDK_NGX_FAILED(res) || !params)
 	{
 		Msg("! DLSS: NGX capability query failed (0x%08x)", u32(res));
@@ -115,11 +124,21 @@ void CDLSS::ReleaseNGX()
 	ReleaseFeature();
 	if (m_params)
 	{
+#ifdef USE_DX12
+		NVSDK_NGX_D3D12_DestroyParameters((NVSDK_NGX_Parameter*)m_params);
+#else
 		NVSDK_NGX_D3D11_DestroyParameters((NVSDK_NGX_Parameter*)m_params);
+#endif
 		m_params = nullptr;
 	}
 	if (m_ngx_ready)
+	{
+#ifdef USE_DX12
+		NVSDK_NGX_D3D12_Shutdown1(HW.pDevice->Native());
+#else
 		NVSDK_NGX_D3D11_Shutdown1(HW.pDevice);
+#endif
+	}
 	m_ngx_ready = false;
 	m_available = false;
 }
@@ -192,8 +211,34 @@ bool CDLSS::CreateFeature(u32 render_w, u32 render_h, u32 out_w, u32 out_h, u32 
 	// Input is the tonemapped LDR scene; motion vectors come from SSS at render resolution, without jitter
 	create.InFeatureCreateFlags = NVSDK_NGX_DLSS_Feature_Flags_MVLowRes;
 
+	// The model (r4_dlss_preset): 0 leaves NVIDIA's default per quality mode
+	{
+		extern u32 ps_r4_dlss_preset;
+		NVSDK_NGX_Parameter* p = (NVSDK_NGX_Parameter*)m_params;
+		const unsigned int preset = ps_r4_dlss_preset;
+		NVSDK_NGX_Parameter_SetUI(p, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_DLAA, preset);
+		NVSDK_NGX_Parameter_SetUI(p, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_UltraQuality, preset);
+		NVSDK_NGX_Parameter_SetUI(p, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Quality, preset);
+		NVSDK_NGX_Parameter_SetUI(p, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Balanced, preset);
+		NVSDK_NGX_Parameter_SetUI(p, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Performance, preset);
+		NVSDK_NGX_Parameter_SetUI(p, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_UltraPerformance, preset);
+		if (preset)
+			Msg("* DLSS: render preset %c", char('A' + preset - 1));
+	}
+
 	NVSDK_NGX_Handle* handle = nullptr;
+#ifdef USE_DX12
+	// Recorded on the frame's command list (node masks 1: single GPU), submitted right away; the context's recording
+	// thread runs it, this one waits for it
+	NVSDK_NGX_Result res = NVSDK_NGX_Result_Fail;
+	NVSDK_NGX_Parameter* params = (NVSDK_NGX_Parameter*)m_params;
+	HW.pContext->ExecuteNative([&](dx12::Context::NativeRecorder& r) {
+		res = NGX_D3D12_CREATE_DLSS_EXT(r.List(), 1, 1, &handle, params, &create);
+	});
+	HW.pContext->Synchronize();
+#else
 	NVSDK_NGX_Result res = NGX_D3D11_CREATE_DLSS_EXT(HW.pContext, &handle, (NVSDK_NGX_Parameter*)m_params, &create);
+#endif
 	if (NVSDK_NGX_FAILED(res) || !handle)
 	{
 		Msg("! DLSS: feature creation failed (0x%08x) for %ux%u -> %ux%u", u32(res), render_w, render_h, out_w, out_h);
@@ -202,6 +247,7 @@ bool CDLSS::CreateFeature(u32 render_w, u32 render_h, u32 out_w, u32 out_h, u32 
 
 	m_handle = handle;
 	m_eval_failures = 0;
+	m_eval_failed = false;
 	Msg("* DLSS: feature created, %ux%u -> %ux%u, quality %u", render_w, render_h, out_w, out_h, quality);
 	return true;
 }
@@ -210,7 +256,14 @@ void CDLSS::ReleaseFeature()
 {
 	if (m_handle)
 	{
+#ifdef USE_DX12
+		// The feature's resources may still be in use by frames in flight
+		if (HW.pDevice)
+			HW.pDevice->WaitIdle();
+		NVSDK_NGX_D3D12_ReleaseFeature((NVSDK_NGX_Handle*)m_handle);
+#else
 		NVSDK_NGX_D3D11_ReleaseFeature((NVSDK_NGX_Handle*)m_handle);
+#endif
 		m_handle = nullptr;
 	}
 }
@@ -220,12 +273,17 @@ bool CDLSS::Evaluate(const UpscalerEvalParams& p)
 	if (!m_handle)
 		return false;
 
+#ifdef USE_DX12
+	// The resources are set where the evaluation is recorded
+	NVSDK_NGX_D3D12_DLSS_Eval_Params eval = {};
+#else
 	NVSDK_NGX_D3D11_DLSS_Eval_Params eval = {};
 	eval.Feature.pInColor = p.color;
 	eval.Feature.pInOutput = p.output;
 	eval.pInDepth = p.depth;
 	eval.pInMotionVectors = p.motion;
 	eval.pInBiasCurrentColorMask = p.reactive;
+#endif
 	eval.InJitterOffsetX = p.jitter_x;
 	eval.InJitterOffsetY = p.jitter_y;
 	eval.InMVScaleX = p.mv_scale_x;
@@ -235,6 +293,41 @@ bool CDLSS::Evaluate(const UpscalerEvalParams& p)
 	eval.InReset = p.reset ? 1 : 0;
 	eval.InFrameTimeDeltaInMsec = p.frame_time_ms;
 
+#ifdef USE_DX12
+	// Recorded in order with the frame's commands (on the context's recording thread when threaded): a failure is
+	// known there, and this call reports the one of the frame before
+	const bool failed_before = m_eval_failed.exchange(false);
+	dx12::Resource* color = p.color;
+	dx12::Resource* output = p.output;
+	dx12::Resource* depth = p.depth;
+	dx12::Resource* motion = p.motion;
+	dx12::Resource* reactive = p.reactive;
+	NVSDK_NGX_Handle* handle = (NVSDK_NGX_Handle*)m_handle;
+	NVSDK_NGX_Parameter* params = (NVSDK_NGX_Parameter*)m_params;
+	HW.pContext->ExecuteNative([this, eval, color, output, depth, motion, reactive, handle, params](dx12::Context::NativeRecorder& r) mutable {
+		// NGX expects the inputs readable by compute and the output as UAV; the context's tracking follows
+		r.Transition(color, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+		r.Transition(depth, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+		r.Transition(motion, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+		if (reactive)
+			r.Transition(reactive, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+		r.Transition(output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+		eval.Feature.pInColor = color ? color->Native() : nullptr;
+		eval.Feature.pInOutput = output ? output->Native() : nullptr;
+		eval.pInDepth = depth ? depth->Native() : nullptr;
+		eval.pInMotionVectors = motion ? motion->Native() : nullptr;
+		eval.pInBiasCurrentColorMask = reactive ? reactive->Native() : nullptr;
+		const NVSDK_NGX_Result res = NGX_D3D12_EVALUATE_DLSS_EXT(r.List(), handle, params, &eval);
+		if (NVSDK_NGX_FAILED(res))
+		{
+			// Don't flood the log if every frame fails
+			if (m_eval_failures++ < 8)
+				Msg("! DLSS: evaluate failed (0x%08x)", u32(res));
+			m_eval_failed = true;
+		}
+	});
+	return !failed_before;
+#else
 	NVSDK_NGX_Result res = NGX_D3D11_EVALUATE_DLSS_EXT(HW.pContext, (NVSDK_NGX_Handle*)m_handle,
 	                                                   (NVSDK_NGX_Parameter*)m_params, &eval);
 	if (NVSDK_NGX_FAILED(res))
@@ -245,6 +338,7 @@ bool CDLSS::Evaluate(const UpscalerEvalParams& p)
 		return false;
 	}
 	return true;
+#endif
 }
 
 #else // XR_DLSS_SDK

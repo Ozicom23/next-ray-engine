@@ -28,6 +28,7 @@ namespace frame_pacing
 		u64 done;       // the GPU finished the frame (fence, CPU QPC); 1 when the wait timed out
 		double gpu_begin, gpu_end; // GPU timestamps (ms on the GPU clock), 0 until known
 		float wait, sleep;
+		float step;     // the game's time step of the frame (Device.fTimeDelta, ms)
 		bool jit;       // went through the just-in-time path
 	};
 	static frame_info s_frames[kRing];
@@ -48,9 +49,9 @@ namespace frame_pacing
 	static const u32 kQueries = 8;
 	struct query
 	{
-		ID3D11Query* disjoint;
-		ID3D11Query* begin;
-		ID3D11Query* end;
+		ID3DQuery* disjoint;
+		ID3DQuery* begin;
+		ID3DQuery* end;
 		u64 id;
 		bool pending;
 	};
@@ -60,8 +61,13 @@ namespace frame_pacing
 	static bool s_q_failed = false;
 
 	// GPU completion: a fence signalled before each Present, a thread that stamps the CPU time each value completes
+#ifdef USE_DX12
+	// D3D12: signalled on the queue right after the frame's commands are submitted (in Present)
+	static ID3D12Fence* s_fence = nullptr;
+#else
 	static ID3D11Fence* s_fence = nullptr;
 	static ID3D11DeviceContext4* s_ctx4 = nullptr;
+#endif
 	static bool s_fence_failed = false;
 	static HANDLE s_done_event = nullptr;
 	static HANDLE s_work_sem = nullptr;
@@ -92,7 +98,7 @@ namespace frame_pacing
 	// stat_frame_pacing
 	struct sample
 	{
-		float t, interval, wait, sleep, cpu, present, gpu, gpu_interval, gpu_idle, queue, latency;
+		float t, interval, wait, sleep, cpu, present, gpu, gpu_interval, gpu_idle, queue, latency, step;
 	};
 	static xr_vector<sample> s_samples;
 	static bool s_recording = false;
@@ -101,6 +107,11 @@ namespace frame_pacing
 	static u64 s_rec_start_qpc = 0;
 	static float s_rec_seconds = 0.f;
 	static u64 s_prev_present1 = 0;
+	// The swap chain's own present count over the recording: with frame generation it also counts the generated frames
+	static UINT s_rec_presents0 = 0;
+	static bool s_rec_presents_ok = false;
+	static u32 s_rec_presents = 0;
+	static float s_rec_presents_ms = 0.f;
 	static double s_prev_gpu_end = 0.0;
 	static u64 s_prev_retired = 0;
 
@@ -158,6 +169,15 @@ namespace frame_pacing
 			return true;
 		if (s_fence_failed)
 			return false;
+#ifdef USE_DX12
+		if (FAILED(HW.pDevice->Native()->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), (void**)&s_fence)) || !s_fence)
+		{
+			Msg("! Frame pacing: D3D12 fence creation failed, no just-in-time frame start");
+			_RELEASE(s_fence);
+			s_fence_failed = true;
+			return false;
+		}
+#else
 		ID3D11Device5* device5 = nullptr;
 		if (SUCCEEDED(HW.pDevice->QueryInterface(__uuidof(ID3D11Device5), (void**)&device5)) && device5)
 		{
@@ -174,6 +194,7 @@ namespace frame_pacing
 			s_fence_failed = true;
 			return false;
 		}
+#endif
 		s_done_event = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 		s_work_sem = CreateSemaphore(nullptr, 0, LONG(kWork), nullptr);
 		for (auto& d : s_done_id)
@@ -391,6 +412,7 @@ namespace frame_pacing
 		}
 		if (f.start && f.done > 1)
 			s.latency = float(qpc_ms(f.done) - qpc_ms(f.start));
+		s.step = f.step;
 		s_samples.push_back(s);
 		s_prev_present1 = f.present1;
 		s_prev_gpu_end = f.gpu_end;
@@ -483,6 +505,9 @@ namespace frame_pacing
 		if (c.n)
 			Msg("* [Frame pacing] %u frames in %.1f s: %.1f fps (average %.2f ms, median %.2f, 1%% low %.1f fps = %.2f ms, longest %.1f ms), frame to frame change %.2f ms, deviation %.2f ms, %u frames over twice the median",
 				n, seconds, 1000.f / c.mean, c.mean, c.median, 1000.f / c.low1, c.low1, c.longest, c.change, c.deviation, c.over2);
+		if (s_rec_presents_ok && s_rec_presents_ms > 0.f)
+			Msg("*   swap chain: %u presents in %.1f s, %.1f fps on the screen (frame generation included)", s_rec_presents,
+				s_rec_presents_ms / 1000.f, float(s_rec_presents) * 1000.f / s_rec_presents_ms);
 		const stats g = compute(gpu_iv);
 		if (g.n)
 			Msg("*   GPU side (%u intervals): average %.2f ms, median %.2f, 1%% low %.2f ms, longest %.1f ms, frame to frame change %.2f ms, deviation %.2f ms, %u over twice the median",
@@ -512,12 +537,12 @@ namespace frame_pacing
 			Msg("! [Frame pacing] cannot write %s", path);
 			return;
 		}
-		w->w_printf("frame,t_ms,interval_ms,wait_ms,sleep_ms,cpu_ms,present_ms,gpu_ms,gpu_interval_ms,gpu_idle_ms,queued_ms,latency_ms\r\n");
+		w->w_printf("frame,t_ms,interval_ms,wait_ms,sleep_ms,cpu_ms,present_ms,gpu_ms,gpu_interval_ms,gpu_idle_ms,queued_ms,latency_ms,step_ms\r\n");
 		for (u32 i = 0; i < n; i++)
 		{
 			const sample& s = s_samples[i];
-			w->w_printf("%u,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\r\n", i, s.t, s.interval, s.wait, s.sleep, s.cpu,
-				s.present, s.gpu, s.gpu_interval, s.gpu_idle, s.queue, s.latency);
+			w->w_printf("%u,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\r\n", i, s.t, s.interval, s.wait, s.sleep, s.cpu,
+				s.present, s.gpu, s.gpu_interval, s.gpu_idle, s.queue, s.latency, s.step);
 		}
 		FS.w_close(w);
 		Msg("*   written to %s", path);
@@ -534,6 +559,9 @@ namespace frame_pacing
 		s_rec_last = u64(-1);
 		s_rec_start_qpc = CPU::QPC();
 		s_rec_seconds = seconds;
+		s_rec_presents_ok = HW.m_pSwapChain && SUCCEEDED(HW.m_pSwapChain->GetLastPresentCount(&s_rec_presents0));
+		if (!s_rec_presents_ok)
+			Msg("! [Frame pacing] the swap chain's present count is not available");
 		s_recording = true;
 		s_rec_open = true;
 		Msg("* [Frame pacing] recording %.0f s...", seconds);
@@ -573,6 +601,7 @@ namespace frame_pacing
 		if (f.begin)
 			return;
 		f.begin = CPU::QPC();
+		f.step = Device.fTimeDelta * 1000.f;
 		s_q_active = false;
 		if (!wanted() || !create_queries())
 			return;
@@ -602,7 +631,11 @@ namespace frame_pacing
 		}
 		if (wanted() && create_fence() && s_work_tail - s_work_head < kWork - 1)
 		{
+#ifdef USE_DX12
+			HW.pContext->SignalAfterSubmit(s_fence, s_id);
+#else
 			s_ctx4->Signal(s_fence, s_id);
+#endif
 			s_work_ids[s_work_tail % kWork] = s_id;
 			s_work_tail++;
 			s_last_signaled = s_id;
@@ -619,6 +652,14 @@ namespace frame_pacing
 		{
 			s_rec_last = s_id;
 			s_rec_open = false;
+			UINT presents = 0;
+			if (s_rec_presents_ok && HW.m_pSwapChain && SUCCEEDED(HW.m_pSwapChain->GetLastPresentCount(&presents)))
+			{
+				s_rec_presents = presents - s_rec_presents0;
+				s_rec_presents_ms = float(qpc_ms(f.present1) - qpc_ms(s_rec_start_qpc));
+			}
+			else
+				s_rec_presents_ok = false;
 		}
 
 		// The next frame's slot: the frame it held retires (all of its data arrived long ago)
@@ -638,8 +679,20 @@ namespace frame_pacing
 		if (s_worker.joinable())
 		{
 			// Every value signalled so far completes first, so no completion callback fires after the event is closed
+#ifdef USE_DX12
+			// A value queued for a submission that never came is never signalled: wait a bounded time
+			if (s_fence && s_last_signaled && s_fence->GetCompletedValue() < s_last_signaled)
+			{
+				HANDLE e = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+				if (e && SUCCEEDED(s_fence->SetEventOnCompletion(s_last_signaled, e)))
+					WaitForSingleObject(e, 2000);
+				if (e)
+					CloseHandle(e);
+			}
+#else
 			if (s_fence && s_last_signaled)
 				s_fence->SetEventOnCompletion(s_last_signaled, nullptr);
+#endif
 			s_quit = true;
 			ReleaseSemaphore(s_work_sem, 1, nullptr);
 			SetEvent(s_done_event);
@@ -654,7 +707,9 @@ namespace frame_pacing
 		}
 		s_q_active = false;
 		_RELEASE(s_fence);
+#ifndef USE_DX12
 		_RELEASE(s_ctx4);
+#endif
 		if (s_done_event)
 			CloseHandle(s_done_event);
 		if (s_work_sem)

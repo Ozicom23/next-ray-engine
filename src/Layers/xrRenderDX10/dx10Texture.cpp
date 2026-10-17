@@ -144,14 +144,16 @@ void TW_Save(ID3DTexture2D* T, LPCSTR name, LPCSTR prefix, LPCSTR postfix)
 	string256 fn2;
 	strconcat(sizeof(fn2), fn2, "debug\\", fn, ".dds");
 	Log("* debug texture save: ", fn2);
-#ifdef USE_DX11
+#if defined(USE_DX12)
+	Msg("! debug texture save is not available in the DX12 renderer: %s", fn2);
+#elif defined(USE_DX11)
 	R_CHK(D3DX11SaveTextureToFile(HW.pContext, T, D3DX11_IFF_DDS, fn2));
 #else
 	R_CHK(D3DX10SaveTextureToFile(T, D3DX10_IFF_DDS, fn2));
 #endif
 }
 
-#ifdef USE_DX11
+#if defined(USE_DX11) && !defined(USE_DX12)
 // texture_lod for DDS files: D3DX11 ignores LoadInfo.FirstMipLevel and the reduced size and always creates the
 // full texture, so the mip levels are skipped here instead by creating the texture from the file's own data,
 // starting at a smaller level. Only for layouts that can be uploaded as they are; anything else returns null and
@@ -535,6 +537,106 @@ thread_local int g_texture_load_skip = 0;
 thread_local int g_texture_load_max_dim = 0;
 thread_local int g_texture_load_lod_normal = 0;
 
+#if defined(USE_DX12)
+#include "../xrRenderDX12/dx12DDS.h"
+
+// The DX12 renderer loads DDS files itself (no D3DX): same file lookup and fallbacks as below, then dds12::load
+ID3DBaseTexture* CRender::texture_load(LPCSTR fRName, u32& ret_msize, bool bStaging)
+{
+	g_texture_load_skip = 0;
+	g_texture_load_lod_normal = 0;
+
+	static bool bAllowStaging = !RImplementation.o.no_ram_textures;
+	bStaging &= bAllowStaging;
+
+	R_ASSERT(fRName);
+	R_ASSERT(fRName[0]);
+
+	string_path fn;
+	string_path fname;
+	xr_strcpy(fname, fRName);
+	fix_texture_name(fname);
+
+	// The file to load: the bump fallbacks of the DX11 path, then the level, saves, textures, the "missing" texture
+	bool found = false;
+	if (strstr(fname, "_bump"))
+	{
+		if (!FS.exist(fn, "$game_textures$", fname, ".dds"))
+		{
+			Msg("! Fallback to default bump map: %s", fname);
+			R_ASSERT2(FS.exist(fn, "$game_textures$", strstr(fname, "_bump#") ? "ed\\ed_dummy_bump#" : "ed\\ed_dummy_bump", ".dds"), fname);
+			found = true;
+		}
+		else if (Core.ParamsData.test(ECoreParams::no_bump_mode2) ||
+		         (Core.ParamsData.test(ECoreParams::no_bump_mode1) && strstr(fname, "_bump#")))
+		{
+			R_ASSERT2(FS.exist(fn, "$game_textures$", strstr(fname, "_bump#") ? "ed\\ed_dummy_bump#" : "ed\\ed_dummy_bump", ".dds"), fname);
+			found = true;
+		}
+	}
+	if (!found)
+		found = FS.exist(fn, "$level$", fname, ".dds") || FS.exist(fn, "$game_saves$", fname, ".dds") ||
+			FS.exist(fn, "$game_textures$", fname, ".dds");
+	if (!found)
+	{
+		Msg("! Can't find texture '%s'", fname);
+		R_ASSERT(FS.exist(fn, "$game_textures$", "ed\\ed_not_existing_texture", ".dds"));
+	}
+
+	for (int attempt = 0; attempt < 2; ++attempt)
+	{
+		IReader* S = FS.r_open(fn);
+		R_ASSERT2(S, fn);
+		const u32 img_size = S->length();
+		strlwr(fn);
+
+		dds12::Info info;
+		if (dds12::info(S->pointer(), S->length(), info))
+		{
+			int lod = get_texture_load_lod(fn);
+			if (!info.cube && !info.volume)
+			{
+				g_texture_load_lod_normal = lod;
+				if (g_texture_load_max_dim > 0)
+				{
+					int s = 0;
+					while (s < 15 && ((info.width >> s) > u32(g_texture_load_max_dim) || (info.height >> s) > u32(g_texture_load_max_dim)))
+						s++;
+					if (s > lod)
+						lod = s;
+				}
+			}
+			u32 mip_cnt = 0;
+			int skipped = 0;
+			ID3DBaseTexture* T = dds12::load(S->pointer(), S->length(), lod, bStaging, mip_cnt, skipped);
+			FS.r_close(S);
+			if (T)
+			{
+				g_texture_load_skip = skipped;
+				ret_msize = calc_texture_size(skipped, mip_cnt, img_size);
+				return T;
+			}
+		}
+		else
+		{
+			// Not a DDS file (a PNG named .dds, as D3DX accepted): one level, no texture_lod
+			u32 w = 0, h = 0;
+			ID3DBaseTexture* T = dds12::load_image(S->pointer(), S->length(), bStaging, w, h);
+			FS.r_close(S);
+			if (T)
+			{
+				Msg("* Texture '%s' is not a DDS file: loaded as an image (%ux%u RGBA8)", fn, w, h);
+				ret_msize = w * h * 4;
+				return T;
+			}
+		}
+		Msg("! Can't load texture '%s' (unsupported DDS layout)", fn);
+		if (!FS.exist(fn, "$game_textures$", "ed\\ed_not_existing_texture", ".dds"))
+			break;
+	}
+	return 0;
+}
+#else
 ID3DBaseTexture* CRender::texture_load(LPCSTR fRName, u32& ret_msize, bool bStaging)
 {
 	g_texture_load_skip = 0;
@@ -852,3 +954,4 @@ _BUMP_from_base:
 
 	return 0;
 }
+#endif // USE_DX12

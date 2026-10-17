@@ -78,7 +78,13 @@ void __cdecl dummy(void)
 #if  defined(STATIC_RENDERER_R1) || defined(STATIC_RENDERER_R2) || defined(STATIC_RENDERER_R3)
 		#error Only one of the renderers R1, R2, R3, and R4 can be selected at once
 #endif
+#ifdef XR_RENDERER_DX12
+	// The DX12 exe: the R4 renderer built on D3D12 (xrRender_R5, USE_DX12)
+	#pragma comment(lib, "xrRender_R5.lib")
+	#pragma comment(lib, "d3d12.lib")
+#else
 	#pragma comment(lib, "xrRender_R4.lib")
+#endif
 	#pragma comment(lib, "dxguid.lib")
 	#pragma comment(lib, "d3dx11.lib")
 	#pragma comment(lib, "D3DCompiler.lib")

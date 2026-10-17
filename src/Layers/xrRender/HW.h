@@ -69,12 +69,21 @@ public:
     IDXGIFactory2*          m_pFactory; //  DXGI factory
 	IDXGIAdapter1*			m_pAdapter;	//	pD3D equivalent
 	IDXGIOutput*			m_pOutput;	//	the output we render to (belongs to m_pAdapter)
+#if defined(USE_DX12)
+	dx12::Device*			pDevice;
+	dx12::Context*			pContext;
+	IDXGISwapChain1*        m_pSwapChain;	//	on the D3D12 queue; its buffers are wrapped by pDevice
+	dx12::RenderTargetView*	pBaseRT;	//	follows the swap chain's current buffer
+	dx12::DepthStencilView*	pBaseZB;
+	dx12::Context*			pAnnotation;	//	PIX events on the command list
+#else
 	ID3D11Device1*			pDevice;	//	combine with DX9 pDevice via typedef
 	ID3D11DeviceContext1*   pContext;	//	combine with DX9 pDevice via typedef
 	IDXGISwapChain1*        m_pSwapChain;
 	ID3D11RenderTargetView*	pBaseRT;	//	combine with DX9 pBaseRT via typedef
 	ID3D11DepthStencilView*	pBaseZB;
 	ID3DUserDefinedAnnotation* pAnnotation;
+#endif
 
 	CHWCaps					Caps;
 

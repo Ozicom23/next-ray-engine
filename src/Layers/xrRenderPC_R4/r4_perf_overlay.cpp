@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "r4_perf_overlay.h"
 #include "r4_upscaler.h"
+#include "r4_framegen.h"
 #include "../../xrEngine/Stats.h"
 #include "../../xrEngine/IGame_Persistent.h"
 
@@ -15,6 +16,11 @@
 CPerfOverlay g_PerfOverlay;
 
 static const char* s_quality_names[] = { "Ultra Performance", "Performance", "Balanced", "Quality", "Native AA" };
+#ifdef USE_DX12
+static const char* s_api = "DX12"; // the renderer the overlay is drawn by (both exes report renderer_r4)
+#else
+static const char* s_api = "DX11";
+#endif
 
 bool CPerfOverlay::CreateQueries()
 {
@@ -246,6 +252,7 @@ void CPerfOverlay::Draw()
 
 	// Refresh the numbers 4 times per second
 	m_refresh_ms += frame_ms;
+	m_presents_ms += frame_ms;
 	if (m_refresh_ms >= 250.f || m_show_fps <= 0.f)
 	{
 		m_refresh_ms = 0.f;
@@ -291,6 +298,14 @@ void CPerfOverlay::Draw()
 		if (m_sum.gpu_n)
 			m_show_gpu_ms = m_sum.gpu / float(m_sum.gpu_n);
 		m_sum = {};
+#ifdef USE_DX12
+		UINT presents = 0;
+		const bool counted = framegen::active() && HW.m_pSwapChain && SUCCEEDED(HW.m_pSwapChain->GetLastPresentCount(&presents));
+		m_show_screen_fps = counted && m_presents_valid && m_presents_ms > 0.f ? float(presents - m_presents) * 1000.f / m_presents_ms : 0.f;
+		m_presents = presents;
+		m_presents_valid = counted;
+		m_presents_ms = 0.f;
+#endif
 
 		UpdateVram();
 		UpdateRam();
@@ -322,6 +337,8 @@ void CPerfOverlay::Draw()
 			ImGui::Text("%4.0f FPS   %5.2f ms   1%% low %4.0f", m_show_fps, m_show_frame_ms, m_show_low_fps);
 		else
 			ImGui::Text("%4.0f FPS   %5.2f ms   1%% low    -", m_show_fps, m_show_frame_ms);
+		if (m_show_screen_fps > 0.f)
+			ImGui::Text("%4.0f FPS on screen with frame generation", m_show_screen_fps);
 
 		if (m_show_gpu_ms > 0.f)
 		{
@@ -382,11 +399,12 @@ void CPerfOverlay::Draw()
 			string32 custom;
 			if (ps_r4_upscaler_scale > 0.f && q != upscaler_quality_native)
 				xr_sprintf(custom, "Custom %.2f", float(target->upscale_render_width()) / float(_max(Device.dwWidth, 1u)));
-			ImGui::Text("%s %s   %ux%u -> %ux%u", upscaler->Name(), ps_r4_upscaler_scale > 0.f && q != upscaler_quality_native ? custom : s_quality_names[q],
+			ImGui::Text("%s   %s %s   %ux%u -> %ux%u", s_api, upscaler->Name(),
+			            ps_r4_upscaler_scale > 0.f && q != upscaler_quality_native ? custom : s_quality_names[q],
 			            target->upscale_render_width(), target->upscale_render_height(), Device.dwWidth, Device.dwHeight);
 		}
 		else
-			ImGui::Text("Native   %ux%u", Device.dwWidth, Device.dwHeight);
+			ImGui::Text("%s   Native   %ux%u", s_api, Device.dwWidth, Device.dwHeight);
 
 		if (ps_perf_overlay >= 2)
 		{

@@ -37,6 +37,33 @@
 	<string id="ui_mm_video_advanced_fsr_sharpness_desc">
 		<text>Sharpening applied by FSR after upscaling (RCAS). 0 turns it off. DLSS ignores it. (r4_fsr_sharpness)</text>
 	</string>
+	<string id="ui_mm_video_advanced_framegen">
+		<text>AMD FSR Frame Generation</text>
+	</string>
+	<string id="ui_mm_video_advanced_framegen_desc">
+		<text>DX12 only. Shows a generated frame between every two rendered frames, so motion looks smoother at the cost of slightly more input lag. Needs an upscaler on. Works best at 45 rendered fps or more. (r4_framegen)</text>
+	</string>
+	<string id="ui_mm_video_advanced_dlss_preset">
+		<text>DLSS Preset</text>
+	</string>
+	<string id="ui_mm_video_advanced_dlss_preset_desc">
+		<text>The DLSS model. Default lets DLSS choose. J and K are the transformer models, L and M the newer ones (they need a recent nvngx_dlss.dll). (r4_dlss_preset)</text>
+	</string>
+	<string id="ui_mm_lst_dlss_preset_default">
+		<text>Default</text>
+	</string>
+	<string id="ui_mm_lst_dlss_preset_j">
+		<text>J</text>
+	</string>
+	<string id="ui_mm_lst_dlss_preset_k">
+		<text>K</text>
+	</string>
+	<string id="ui_mm_lst_dlss_preset_l">
+		<text>L</text>
+	</string>
+	<string id="ui_mm_lst_dlss_preset_m">
+		<text>M</text>
+	</string>
 	<string id="ui_mm_lst_upscaler_off">
 		<text>Off</text>
 	</string>
@@ -1175,5 +1202,8 @@
 	</string>
 	<string id="ui_mm_modded_exes_optimizations_keyboard_buffer_size">
 		<text>Keyboard Input Buffer Size (keyboard_buffer_size)</text>
+	</string>
+	<string id="ui_mm_lst_renderer_r4_dx12">
+		<text>DX12</text>
 	</string>
 </string_table>

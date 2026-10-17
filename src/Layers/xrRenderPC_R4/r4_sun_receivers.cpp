@@ -49,15 +49,15 @@ namespace
 		u32 dims[4];
 	};
 
-	ID3D11ComputeShader* s_mark = nullptr;
+	ID3DComputeShader* s_mark = nullptr;
 	bool s_mark_failed = false;
-	ID3D11Buffer* s_params = nullptr;
-	ID3D11Texture2D* s_mask_gpu = nullptr;
-	ID3D11UnorderedAccessView* s_mask_uav = nullptr;
+	ID3DBuffer* s_params = nullptr;
+	ID3DTexture2D* s_mask_gpu = nullptr;
+	ID3DUnorderedAccessView* s_mask_uav = nullptr;
 
 	struct Slot
 	{
-		ID3D11Texture2D* staging = nullptr;
+		ID3DTexture2D* staging = nullptr;
 		Fmatrix view_proj;
 		Fmatrix xform[kCascades];
 		u32 count = 0;
@@ -273,7 +273,7 @@ void dispatch(const Fmatrix* cascade_xforms, u32 count)
 {
 	if (!wanted() || !create())
 		return;
-	ID3D11ShaderResourceView* depth = nullptr;
+	ID3DShaderResourceView* depth = nullptr;
 	Fmatrix view_proj;
 	u32 width, height;
 	if (!hiz::depth_copy(depth, view_proj, width, height))
@@ -307,13 +307,17 @@ void dispatch(const Fmatrix* cascade_xforms, u32 count)
 	HW.pContext->ClearUnorderedAccessViewUint(s_mask_uav, zero);
 
 	// Leave the compute stage as it was
-	ID3D11ComputeShader* prev_cs = nullptr;
+	ID3DComputeShader* prev_cs = nullptr;
+#ifdef USE_DX12
+	HW.pContext->CSGetShader(&prev_cs, nullptr, nullptr);
+#else
 	ID3D11ClassInstance* prev_inst[256];
 	UINT prev_inst_count = 256;
-	ID3D11ShaderResourceView* prev_srv = nullptr;
-	ID3D11UnorderedAccessView* prev_uav = nullptr;
-	ID3D11Buffer* prev_cb = nullptr;
 	HW.pContext->CSGetShader(&prev_cs, prev_inst, &prev_inst_count);
+#endif
+	ID3DShaderResourceView* prev_srv = nullptr;
+	ID3DUnorderedAccessView* prev_uav = nullptr;
+	ID3DBuffer* prev_cb = nullptr;
 	HW.pContext->CSGetShaderResources(0, 1, &prev_srv);
 	HW.pContext->CSGetUnorderedAccessViews(0, 1, &prev_uav);
 	HW.pContext->CSGetConstantBuffers(0, 1, &prev_cb);
@@ -324,16 +328,22 @@ void dispatch(const Fmatrix* cascade_xforms, u32 count)
 	HW.pContext->CSSetConstantBuffers(0, 1, &s_params);
 	HW.pContext->Dispatch((width + 7) / 8, (height + 7) / 8, 1);
 
-	ID3D11ShaderResourceView* no_srv = nullptr;
+	ID3DShaderResourceView* no_srv = nullptr;
 	HW.pContext->CSSetShaderResources(0, 1, &no_srv);
+#ifdef USE_DX12
+	HW.pContext->CSSetShader(prev_cs, nullptr, 0);
+#else
 	HW.pContext->CSSetShader(prev_cs, prev_inst, prev_inst_count);
+#endif
 	HW.pContext->CSSetShaderResources(0, 1, &prev_srv);
 	UINT keep = UINT(-1);
 	HW.pContext->CSSetUnorderedAccessViews(0, 1, &prev_uav, &keep);
 	HW.pContext->CSSetConstantBuffers(0, 1, &prev_cb);
 	_RELEASE(prev_cs);
+#ifndef USE_DX12
 	for (UINT i = 0; i < prev_inst_count; i++)
 		_RELEASE(prev_inst[i]);
+#endif
 	_RELEASE(prev_srv);
 	_RELEASE(prev_uav);
 	_RELEASE(prev_cb);

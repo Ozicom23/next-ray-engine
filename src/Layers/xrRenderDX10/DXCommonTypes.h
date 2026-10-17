@@ -1,4 +1,7 @@
 #pragma once
+#if defined(USE_DX12)
+#include "../xrRenderDX12/dx12.h"
+#endif
 
 class dx10State;
 
@@ -40,6 +43,35 @@ typedef D3D11_PRIMITIVE_TOPOLOGY D3D_PRIMITIVE_TOPOLOGY;
 typedef D3D11_VIEWPORT D3D_VIEWPORT;
 typedef D3D11_USAGE D3D_USAGE;
 
+#if defined(USE_DX12)
+// The D3D12 renderer (DX12 exe): native D3D12 objects with the D3D11 call shapes (xrRenderDX12/dx12.h)
+typedef dx12::RasterizerState ID3DRasterizerState;
+typedef dx12::DepthStencilState ID3DDepthStencilState;
+typedef dx12::BlendState ID3DBlendState;
+typedef dx12::SamplerState ID3DSamplerState;
+typedef dx12::Buffer ID3DBuffer;
+typedef dx12::Buffer ID3DVertexBuffer;
+typedef dx12::Buffer ID3DIndexBuffer;
+typedef dx12::InputLayout ID3DInputLayout;
+typedef dx12::VertexShader ID3DVertexShader;
+typedef dx12::GeometryShader ID3DGeometryShader;
+typedef dx12::PixelShader ID3DPixelShader;
+typedef dx12::HullShader ID3DHullShader;
+typedef dx12::DomainShader ID3DDomainShader;
+typedef dx12::ComputeShader ID3DComputeShader;
+typedef dx12::Texture1D ID3DTexture1D;
+typedef dx12::Texture2D ID3DTexture2D;
+typedef dx12::Texture3D ID3DTexture3D;
+typedef dx12::Resource ID3DBaseTexture;
+typedef dx12::Resource ID3DResource;
+typedef dx12::RenderTargetView ID3DRenderTargetView;
+typedef dx12::DepthStencilView ID3DDepthStencilView;
+typedef dx12::ShaderResourceView ID3DShaderResourceView;
+typedef dx12::UnorderedAccessView ID3DUnorderedAccessView;
+typedef dx12::Query ID3DQuery;
+typedef dx12::Device ID3DDevice;
+typedef dx12::Context ID3DDeviceContext;
+#else
 typedef ID3D11RasterizerState ID3DRasterizerState;
 typedef ID3D11DepthStencilState ID3DDepthStencilState;
 typedef ID3D11BlendState ID3DBlendState;
@@ -62,6 +94,11 @@ typedef ID3D11ShaderResourceView ID3DShaderResourceView;
 typedef ID3D11Query ID3DQuery;
 typedef ID3D11Device ID3DDevice;
 typedef ID3D11DeviceContext ID3DDeviceContext;
+typedef ID3D11HullShader ID3DHullShader;
+typedef ID3D11DomainShader ID3DDomainShader;
+typedef ID3D11ComputeShader ID3DComputeShader;
+typedef ID3D11UnorderedAccessView ID3DUnorderedAccessView;
+#endif
 
 #define D3D_COMMONSHADER_SAMPLER_SLOT_COUNT		D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT
 

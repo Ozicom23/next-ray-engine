@@ -20,8 +20,8 @@ namespace
 
 	struct Slot
 	{
-		ID3D11Query* disjoint;
-		ID3D11Query* stamps[kMaxEvents * 2]; // begin, end per event
+		ID3DQuery* disjoint;
+		ID3DQuery* stamps[kMaxEvents * 2]; // begin, end per event
 		Event events[kMaxEvents];
 		u32 count;
 		bool pending;
@@ -70,7 +70,7 @@ namespace
 				s_failed = true;
 				return false;
 			}
-			for (ID3D11Query*& q : s.stamps)
+			for (ID3DQuery*& q : s.stamps)
 			{
 				if (FAILED(HW.pDevice->CreateQuery(&stamp, &q)))
 				{
@@ -280,7 +280,7 @@ void destroy()
 	for (Slot& s : s_slots)
 	{
 		_RELEASE(s.disjoint);
-		for (ID3D11Query*& q : s.stamps)
+		for (ID3DQuery*& q : s.stamps)
 			_RELEASE(q);
 		s.count = 0;
 		s.pending = false;

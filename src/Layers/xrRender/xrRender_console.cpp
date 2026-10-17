@@ -334,6 +334,18 @@ xr_token upscaler_quality_token[] = {
 	{ "native", 4 },
 	{ 0, 0 }
 };
+// r4-only, DLSS model for every quality mode (NGX render preset), applied when the feature is created (vid_restart):
+// default = NVIDIA's choice per mode (K for DLAA/quality/balanced, M performance, L ultra performance); j/k transformer
+// (K the best image, J a little less ghosting with more flicker), l/m the lighter ones for performance modes
+u32   ps_r4_dlss_preset           = 0;
+xr_token dlss_preset_token[] = {
+	{ "default", 0 },
+	{ "j", 10 },
+	{ "k", 11 },
+	{ "l", 12 },
+	{ "m", 13 },
+	{ 0, 0 }
+};
 float ps_r4_fsr_sharpness         = 0.3f;   // r4-only, FSR RCAS sharpening, 0 = off
 // r4-only, FSR 3.1 stability tuning: velocity factor, shading change scale, accumulation added per frame,
 // min disocclusion accumulation (AMD defaults 1, 1, 0.333, -0.333)
@@ -644,6 +656,59 @@ extern int ps_r4_tex_stream;
 extern int ps_r4_tex_stream_keep;
 extern int ps_r4_lights_parallel_query;
 extern int ps_r4_main_parallel_cull;
+#ifdef USE_DX12
+// r__dx12_dump_rt [all | names]: render targets at the end of the next frame to PNGs in the screenshots folder, their
+// channel ranges in the log
+void dx12_request_rt_dump(LPCSTR args);
+class CCC_Dx12DumpRT : public IConsole_Command
+{
+public:
+	CCC_Dx12DumpRT(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; }
+	virtual void Execute(LPCSTR args) { dx12_request_rt_dump(args); }
+};
+// r__dx12_trace [frames]: every draw, dispatch, clear and copy of the next frame(s) in the log, with shaders, targets
+// and the resources each stage reads (DROPPED: read while written by the same draw, bound as null)
+class CCC_Dx12Trace : public IConsole_Command
+{
+public:
+	CCC_Dx12Trace(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; }
+	virtual void Execute(LPCSTR args)
+	{
+		const int frames = args && args[0] ? atoi(args) : 1;
+		HW.pContext->TraceFrames(UINT(clampr(frames, 1, 4)));
+	}
+};
+extern int ps_r4_framegen; // r4_framegen.cpp
+// r__dx12_threaded 0/1: D3D12 commands recorded on a worker thread (1), as DXVK records on its own thread, or on the
+// render thread at each call (0); switches at once
+int ps_r__dx12_threaded = 1;
+int ps_r__dx12_gpu_pacing = 0; // frame starts paced by the GPU's progress, not the swap chain's waitable object
+                                // (even frame starts, but ~8 ms more input latency on the Deck)
+class CCC_Dx12Threaded : public CCC_Integer
+{
+public:
+	CCC_Dx12Threaded(LPCSTR N, int* V) : CCC_Integer(N, V, 0, 1) {}
+	virtual void Execute(LPCSTR args)
+	{
+		CCC_Integer::Execute(args);
+		if (HW.pContext)
+			HW.pContext->SetThreaded(*value != 0);
+	}
+};
+// stat_dx12 [seconds]: D3D12 commands per frame (draws, barriers, pipeline and table sets, submissions) and the
+// barriers by pass, averaged over the time, in the log
+class CCC_Dx12Stats : public IConsole_Command
+{
+public:
+	CCC_Dx12Stats(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; }
+	virtual void Execute(LPCSTR args)
+	{
+		const float seconds = args && args[0] ? float(atof(args)) : 10.f;
+		HW.pContext->StartStats(clampr(seconds, 1.f, 120.f));
+	}
+};
+#endif
+
 class CCC_TexStreamStats : public IConsole_Command
 {
 public:
@@ -1352,6 +1417,14 @@ void xrRender_initconsole()
 
 	// Common
 	CMD1(CCC_Screenshot, "screenshot");
+#ifdef USE_DX12
+	CMD1(CCC_Dx12DumpRT, "r__dx12_dump_rt");
+	CMD1(CCC_Dx12Trace, "r__dx12_trace");
+	CMD1(CCC_Dx12Stats, "stat_dx12");
+	CMD2(CCC_Dx12Threaded, "r__dx12_threaded", &ps_r__dx12_threaded);
+	CMD4(CCC_Integer, "r__dx12_gpu_pacing", &ps_r__dx12_gpu_pacing, 0, 1);
+	CMD4(CCC_Integer, "r4_framegen", &ps_r4_framegen, 0, 1); // FSR frame generation, vid_restart; needs an upscaler on
+#endif
 
 	//	Igor: just to test bug with rain/particles corruption
 	CMD1(CCC_RestoreQuadIBData, "r_restore_quad_ib_data");
@@ -1528,6 +1601,7 @@ void xrRender_initconsole()
 	CMD3(CCC_Token,   "r4_upscaler",              &ps_r4_upscaler,                   upscaler_token);
 	CMD3(CCC_Token,   "r4_upscaler_quality",      &ps_r4_upscaler_quality,           upscaler_quality_token);
 	CMD4(CCC_Float,   "r4_upscaler_scale",        &ps_r4_upscaler_scale,             0.f, 0.95f); // 0 = the quality mode's; vid_restart
+	CMD3(CCC_Token,   "r4_dlss_preset",           &ps_r4_dlss_preset,                dlss_preset_token); // vid_restart
 	CMD4(CCC_Float,   "r4_fsr_sharpness",         &ps_r4_fsr_sharpness,              0.f, 1.f);
 	CMD4(CCC_Vector4, "r4_fsr_tuning",            &ps_r4_fsr_tuning, Fvector4().set(0, 0, 0, -1), Fvector4().set(1, 8, 1, 1));
 	CMD4(CCC_Integer, "r4_fsr_debug_view",        &ps_r4_fsr_debug_view,             0, 1);

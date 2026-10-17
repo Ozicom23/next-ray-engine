@@ -98,8 +98,8 @@ namespace R_dsgraph
 	using vs_type = SVS*;
 	using gs_type = ID3DGeometryShader*;
 #ifdef USE_DX11
-	using hs_type = ID3D11HullShader*;
-	using ds_type = ID3D11DomainShader*;
+	using hs_type = ID3DHullShader*;
+	using ds_type = ID3DDomainShader*;
 #endif
 #else	//	USE_DX10
 	using vs_type = ID3DVertexShader*;

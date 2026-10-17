@@ -3,6 +3,9 @@
 #include "xr_ioconsole.h"
 #include "igame_persistent.h"
 #include "IGame_Level.h"
+#include <atomic>
+#include <thread>
+#include <tlhelp32.h>
 
 namespace remote_console
 {
@@ -147,6 +150,130 @@ namespace remote_console
 
 			xrLogger::FlushLog();
 		}
+	}
+
+	namespace
+	{
+		std::atomic<u32> s_log_lines{ 0 };
+		string_path s_hang_dir;
+
+		void on_log(const char*) { s_log_lines.fetch_add(1, std::memory_order_relaxed); }
+
+		// Return addresses of a suspended thread, unwound with the modules' unwind data (no allocation: the thread may
+		// hold the heap lock)
+		u32 walk_stack(HANDLE thread, u64* frames, u32 max)
+		{
+			CONTEXT ctx = {};
+			ctx.ContextFlags = CONTEXT_FULL;
+			if (!GetThreadContext(thread, &ctx))
+				return 0;
+			u32 n = 0;
+			__try
+			{
+				while (n < max && ctx.Rip)
+				{
+					frames[n++] = ctx.Rip;
+					DWORD64 image = 0;
+					PRUNTIME_FUNCTION fn = RtlLookupFunctionEntry(ctx.Rip, &image, nullptr);
+					if (!fn)
+					{
+						// A leaf function: the return address is on top of the stack
+						ctx.Rip = *reinterpret_cast<const DWORD64*>(ctx.Rsp);
+						ctx.Rsp += 8;
+						continue;
+					}
+					void* handler_data = nullptr;
+					DWORD64 establisher = 0;
+					RtlVirtualUnwind(UNW_FLAG_NHANDLER, image, ctx.Rip, fn, &ctx, &handler_data, &establisher, nullptr);
+				}
+			}
+			__except (EXCEPTION_EXECUTE_HANDLER)
+			{
+			}
+			return n;
+		}
+
+		void dump_threads()
+		{
+			string64 stamp;
+			SYSTEMTIME t;
+			GetLocalTime(&t);
+			xr_sprintf(stamp, "%02u-%02u-%02u_%02u-%02u-%02u", t.wMonth, t.wDay, t.wYear % 100, t.wHour, t.wMinute, t.wSecond);
+			string_path path;
+			xr_sprintf(path, "%shang_%s.txt", s_hang_dir, stamp);
+			FILE* f = fopen(path, "w");
+			if (!f)
+				return;
+			fprintf(f, "frame %u, log lines %u\n", Device.dwFrame, s_log_lines.load());
+			HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+			THREADENTRY32 te = {};
+			te.dwSize = sizeof(te);
+			const DWORD pid = GetCurrentProcessId(), self = GetCurrentThreadId();
+			for (BOOL ok = Thread32First(snap, &te); ok; ok = Thread32Next(snap, &te))
+			{
+				if (te.th32OwnerProcessID != pid || te.th32ThreadID == self)
+					continue;
+				HANDLE th = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, te.th32ThreadID);
+				if (!th)
+					continue;
+				u64 frames[48];
+				u32 n = 0;
+				if (SuspendThread(th) != DWORD(-1))
+				{
+					n = walk_stack(th, frames, 48);
+					ResumeThread(th);
+				}
+				CloseHandle(th);
+				fprintf(f, "thread %u:", te.th32ThreadID);
+				for (u32 i = 0; i < n; ++i)
+				{
+					HMODULE mod = nullptr;
+					char name[MAX_PATH] = "?";
+					if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+					                       reinterpret_cast<LPCSTR>(frames[i]), &mod) && mod)
+					{
+						GetModuleFileNameA(mod, name, sizeof(name));
+						const char* base = strrchr(name, '\\');
+						fprintf(f, " %s+0x%llx", base ? base + 1 : name, frames[i] - u64(mod));
+					}
+					else
+						fprintf(f, " 0x%llx", frames[i]);
+				}
+				fprintf(f, "\n");
+			}
+			CloseHandle(snap);
+			fclose(f);
+		}
+
+		void watchdog()
+		{
+			u32 last = 0;
+			u32 quiet_since = GetTickCount();
+			for (;;)
+			{
+				Sleep(5000);
+				const u32 beat = s_log_lines.load(std::memory_order_relaxed) + Device.dwFrame;
+				if (beat != last)
+				{
+					last = beat;
+					quiet_since = GetTickCount();
+				}
+				else if (GetTickCount() - quiet_since >= 120000)
+				{
+					dump_threads();
+					quiet_since = GetTickCount(); // again in two minutes while it stays stuck
+				}
+			}
+		}
+	}
+
+	void start_watchdog()
+	{
+		if (!strstr(Core.Params, "-remote_console"))
+			return;
+		FS.update_path(s_hang_dir, "$logs$", "");
+		xrLogger::AddLogCallback(on_log);
+		std::thread(watchdog).detach();
 	}
 
 	void update()
