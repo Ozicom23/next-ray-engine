@@ -320,10 +320,13 @@ function on_xml_read()
 						precondition = for_r4,
 					},
 				}
-				-- DLSS preset only where DLSS can run; frame generation only in the DX12 exe (the command exists there)
-				if avail and not string.find(avail, "dlss", 1, true) then
-					for i, row in ipairs(rows) do
-						if row.id == "dlss_preset" then table.remove(rows, i) break end
+				-- DLSS preset only where DLSS can run; frame generation only in the DX12 exe (the command exists there).
+				-- Rows of commands the running exe doesn't have (an older exe with this script) are left out
+				for i = #rows, 1, -1 do
+					local row = rows[i]
+					if (row.id == "dlss_preset" and avail and not string.find(avail, "dlss", 1, true))
+						or (row.cmd and not get_console():get_string(row.cmd)) then
+						table.remove(rows, i)
 					end
 				end
 				if get_console():get_string("r4_framegen") then
