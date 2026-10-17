@@ -343,7 +343,12 @@ int   ps_r4_fsr_fp16              = 1;      // r4-only, FSR shaders with 16-bit 
 Fvector4 ps_r4_upscaler_signs     = { 1, 1, 1, 1 }; // r4-only, debug: motion vector x/y and jitter x/y sign multipliers
 // r4-only: how much the upscaler trusts the current frame over its history: 3D scope lenses, foliage (wind isn't in
 // its motion vectors), first-person items. 0 = history as usual, 1 = current frame only
+// Console name r4_upscaler_reactive: r4_upscaler_mask saved (1, 0.5, 0, 0) in the user.ltx of earlier versions, which kept
+// grass and trees pixelated (most with DLSS) after the default changed; the old name is no longer read
 Fvector4 ps_r4_upscaler_mask      = { 1.f, 0.f, 0.f, 0.f }; // y (SSS-flagged foliage) 0: at 0.5 the jittered current frame made far tree edges flicker
+int   ps_r4_upscaler_pda_late = 1;        // r4-only, the PDA screen after the upscaler at output resolution (with r4_upscaler_scope_late's targets)
+int   ps_r4_upscaler_grass_jitter = 1;    // r4-only, SSS grass jittered over the whole blade while upscaling, not only at its base (vid_restart)
+int   ps_r4_upscaler_lens_patch = 1;      // r4-only, the stock 3DSS lens shaders take their screen position from nextray_lens_res when compiled (vid_restart)
 int   ps_r4_upscaler_late_overlays = 1;     // r4-only, gas mask, night/heat vision and shader scopes after the upscaler
 
 // Performance overlay (r4-only)
@@ -1528,8 +1533,11 @@ void xrRender_initconsole()
 	CMD4(CCC_Integer, "r4_fsr_debug_view",        &ps_r4_fsr_debug_view,             0, 1);
 	CMD4(CCC_Integer, "r4_fsr_fp16",              &ps_r4_fsr_fp16,                   0, 1);
 	CMD4(CCC_Vector4, "r4_upscaler_signs",        &ps_r4_upscaler_signs, Fvector4().set(-1, -1, -1, -1), Fvector4().set(1, 1, 1, 1));
-	CMD4(CCC_Vector4, "r4_upscaler_mask",         &ps_r4_upscaler_mask, Fvector4().set(0, 0, 0, 0), Fvector4().set(1, 1, 1, 1));
+	CMD4(CCC_Vector4, "r4_upscaler_reactive",     &ps_r4_upscaler_mask, Fvector4().set(0, 0, 0, 0), Fvector4().set(1, 1, 1, 1));
 	CMD4(CCC_Integer, "r4_upscaler_late_overlays", &ps_r4_upscaler_late_overlays,     0, 1);
+	CMD4(CCC_Integer, "r4_upscaler_lens_patch",   &ps_r4_upscaler_lens_patch,        0, 1);
+	CMD4(CCC_Integer, "r4_upscaler_grass_jitter", &ps_r4_upscaler_grass_jitter,      0, 1);
+	CMD4(CCC_Integer, "r4_upscaler_pda_late",     &ps_r4_upscaler_pda_late,          0, 1);
 	CMD4(CCC_Integer, "r4_dlss_log",              &ps_r4_dlss_log,                   0, 2);
 #if defined(USE_DX11)
 	CMD3(CCC_Token,   "perf_overlay",             &ps_perf_overlay,                  perf_overlay_token);

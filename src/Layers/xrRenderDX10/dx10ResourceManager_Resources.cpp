@@ -140,6 +140,39 @@ void CResourceManager::_DeletePass(const SPass* P)
 	Msg("! ERROR: Failed to find compiled pass");
 }
 
+#if defined(USE_DX11)
+// SSS's grass (deffer_grass.vs) takes the TAA jitter only below a height of 0.1 (if (H < 0.1f) O.hpos.xy =
+// ssfx_taa_jitter(O.hpos)), so the blade above its base was never jittered. The upscalers take the jitter back out of
+// every pixel: the blades shook by it and were never sampled between pixels, grass stayed at render resolution
+// (pixelated, most with DLSS and lower internal resolutions; PC test) while the rest came out sharp. With
+// r4_upscaler_grass_jitter the condition also passes while the upscaler jitters (nextray_upscale_jitter not zero), in
+// memory when compiled; without the upscaler SSS TAA keeps its own. Patched shaders compile under their own name
+static bool patch_grass_jitter_shader(LPCSTR data, xr_string& patched)
+{
+	extern int ps_r4_upscaler_grass_jitter;
+	if (!ps_r4_upscaler_grass_jitter || strstr(data, "nextray_upscale_jitter"))
+		return false;
+
+	static const char condition[] = "if (H < 0.1f)";
+	static const char jitter[] = "O.hpos.xy = ssfx_taa_jitter(O.hpos);";
+	LPCSTR hit = strstr(data, condition);
+	if (!hit)
+		return false;
+	LPCSTR next = hit + sizeof(condition) - 1;
+	while (*next == ' ' || *next == '\t' || *next == '\r' || *next == '\n')
+		++next;
+	if (strncmp(next, jitter, sizeof(jitter) - 1) || strstr(next, condition))
+		return false;
+
+	// The declaration first, then the file as it is, its line numbers kept for compile errors
+	patched = "uniform float4 nextray_upscale_jitter;\n#line 1\n";
+	patched.append(data, hit - data);
+	patched += "if (H < 0.1f || any(nextray_upscale_jitter.xy != 0))";
+	patched += hit + sizeof(condition) - 1;
+	return true;
+}
+#endif
+
 //--------------------------------------------------------------------------------------------------------------
 SVS* CResourceManager::_CreateVS(LPCSTR _name)
 {
@@ -217,7 +250,22 @@ SVS* CResourceManager::_CreateVS(LPCSTR _name)
 			c_entry = "main_vs_2_0";
 		}
 
-		HRESULT const _hr = ::Render->shader_compile(name, (DWORD const*)data, size, c_entry, c_target,
+		LPCSTR src = data;
+		u32 src_size = size;
+		LPCSTR compile_name = name;
+#if defined(USE_DX11)
+		xr_string patched;
+		string_path patched_name;
+		if (patch_grass_jitter_shader(data, patched))
+		{
+			Msg("* %s.vs: grass jittered over the whole blade while upscaling (r4_upscaler_grass_jitter)", shName);
+			src = patched.c_str();
+			src_size = u32(patched.size());
+			xr_strconcat(patched_name, name, "_nxjit1");
+			compile_name = patched_name;
+		}
+#endif
+		HRESULT const _hr = ::Render->shader_compile(compile_name, (DWORD const*)src, src_size, c_entry, c_target,
 		                                             D3D10_SHADER_PACK_MATRIX_ROW_MAJOR, (void*&)_vs);
 
 		VERIFY(SUCCEEDED(_hr));
@@ -256,6 +304,50 @@ void CResourceManager::_DeleteVS(const SVS* vs)
 	}
 	Msg("! ERROR: Failed to find compiled vertex-shader '%s'", *vs->cName);
 }
+
+#if defined(USE_DX11)
+// The 3DSS lens shaders (any 3DSS for GAMMA version) take their screen position from the render resolution
+// (I.hpos.xy * screen_res.zw); drawn after the upscaler, at output resolution, they need nextray_lens_res there (0 without
+// it, which leaves them as they were). With r4_upscaler_lens_patch the source is changed so when it's compiled, in memory:
+// only that expression in these three shaders, and only when they don't take nextray_lens_res themselves. Patched ones
+// compile under their own name, so their cache entry is separate from the stock one
+static bool patch_3dss_lens_shader(LPCSTR sh_name, LPCSTR data, xr_string& patched)
+{
+	extern int ps_r4_upscaler_lens_patch;
+	if (!ps_r4_upscaler_lens_patch)
+		return false;
+	if (stricmp(sh_name, "models_scope_reticle") && stricmp(sh_name, "models_scope_reticle_precise") &&
+		stricmp(sh_name, "transparent_hud"))
+		return false;
+	if (strstr(data, "nextray_lens_res"))
+		return false;
+
+	static const char pattern[] = "I.hpos.xy * screen_res.zw";
+	static const char replacement[] = "I.hpos.xy * (nextray_lens_res.x > 0 ? nextray_lens_res.zw : screen_res.zw)";
+	if (!strstr(data, pattern))
+		return false;
+
+	// The declaration first, then the file as it is, its line numbers kept for compile errors
+	patched = "uniform float4 nextray_lens_res;\n#line 1\n";
+	u32 count = 0;
+	for (LPCSTR p = data;;)
+	{
+		LPCSTR hit = strstr(p, pattern);
+		if (!hit)
+		{
+			patched += p;
+			break;
+		}
+		patched.append(p, hit - p);
+		patched += replacement;
+		p = hit + sizeof(pattern) - 1;
+		++count;
+	}
+	Msg("* %s.ps: 3DSS lens screen position from the upscaler's output (%u place(s), r4_upscaler_lens_patch)", sh_name,
+		count);
+	return true;
+}
+#endif
 
 //--------------------------------------------------------------------------------------------------------------
 SPS* CResourceManager::_CreatePS(LPCSTR _name)
@@ -347,7 +439,22 @@ SPS* CResourceManager::_CreatePS(LPCSTR _name)
 			c_entry = "main_ps_2_0";
 		}
 
-		HRESULT const _hr = ::Render->shader_compile(name, (DWORD const*)data, size, c_entry, c_target,
+		LPCSTR src = data;
+		u32 src_size = size;
+		LPCSTR compile_name = name;
+#if defined(USE_DX11)
+		xr_string patched;
+		string_path patched_name;
+		if (patch_3dss_lens_shader(shName, data, patched))
+		{
+			src = patched.c_str();
+			src_size = u32(patched.size());
+			xr_strconcat(patched_name, name, "_nxlens1");
+			compile_name = patched_name;
+		}
+#endif
+
+		HRESULT const _hr = ::Render->shader_compile(compile_name, (DWORD const*)src, src_size, c_entry, c_target,
 		                                             D3D10_SHADER_PACK_MATRIX_ROW_MAJOR, (void*&)_ps);
 
 		VERIFY(SUCCEEDED(_hr));

@@ -1074,7 +1074,7 @@ void CRender::rmNormal()
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
 CRender::CRender()
-	: m_bFirstFrameAfterReset(false), upscale_jitter_on(false), upscale_scene_active(false)
+	: m_bFirstFrameAfterReset(false), upscale_jitter_on(false), upscale_scene_active(false), upscale_pda_late(false)
 {
 	upscale_jitter_ndc.set(0.f, 0.f);
 	upscale_jitter_prev_px.set(0.f, 0.f);
