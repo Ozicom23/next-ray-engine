@@ -29,7 +29,8 @@ local function source_hash(f)
 		bytes[nb] = string.char(reader:r_u8())
 	end
 	local text = table.concat(bytes)
-	getFS():r_close(reader)
+	-- Not closed: getFS():r_close takes the reader by reference (IReader*&) and throws from Lua (a fatal error at the
+	-- load). Readers from Lua's r_open stay open as in every script that reads files (slaxml has the call commented out)
 	local lines, n = {}, 0
 	for line in (text .. "\n"):gmatch("(.-)\n") do
 		n = n + 1
