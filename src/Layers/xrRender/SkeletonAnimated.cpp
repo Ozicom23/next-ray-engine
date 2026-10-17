@@ -200,6 +200,9 @@ u16 CKinematicsAnimated::LL_PartID(LPCSTR B)
 // cycles
 MotionID CKinematicsAnimated::ID_Cycle_Safe(LPCSTR N)
 {
+	// The name as a shared string once, not once per motion slot
+	if (N)
+		return ID_Cycle_Safe(shared_str(N));
 	MotionID motion_ID;
 	for (int k = int(m_Motions.size()) - 1; k >= 0; --k)
 	{
@@ -224,6 +227,22 @@ MotionID CKinematicsAnimated::ID_Cycle(shared_str N)
 MotionID CKinematicsAnimated::ID_Cycle_Safe(shared_str N)
 {
 	MotionID motion_ID;
+	// Shared strings are one per text, so the name's is the key's exactly when the texts are equal (the cycle maps
+	// compare the texts): a hash lookup per slot instead of a walk down the map's tree with string compares
+	if (N._get())
+	{
+		for (int k = int(m_Motions.size()) - 1; k >= 0; --k)
+		{
+			const auto* index = m_Motions[k].motions.cycle_index();
+			const auto I = index->find(N._get());
+			if (I != index->end())
+			{
+				motion_ID.set(u16(k), I->second);
+				break;
+			}
+		}
+		return motion_ID;
+	}
 	for (int k = int(m_Motions.size()) - 1; k >= 0; --k)
 	{
 		shared_motions* s_mots = &m_Motions[k].motions;

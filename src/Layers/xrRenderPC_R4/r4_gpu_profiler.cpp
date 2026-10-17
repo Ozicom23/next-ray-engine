@@ -8,7 +8,7 @@ namespace gpu_profiler
 namespace
 {
 	const u32 kSlots = 4;       // frames in flight before results are read back
-	const u32 kMaxEvents = 128; // per frame, later scopes are not timed
+	const u32 kMaxEvents = 256; // per frame, later scopes are not timed
 	const u32 kMaxDepth = 32;
 	const u32 kNotTimed = u32(-1);
 
@@ -206,6 +206,9 @@ void frame_begin(bool enabled)
 	s.count = 0;
 	s_thread = GetCurrentThreadId();
 	s_recording = true;
+	// The whole frame as the outermost scope (closed by frame_end): what is drawn outside the timed scopes (UI, the
+	// present copy) shows as the difference to the scopes inside it
+	event_begin(L"FRAME");
 }
 
 void frame_end()

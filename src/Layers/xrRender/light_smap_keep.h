@@ -11,6 +11,8 @@
 //   r4_light_smap_keep 0/1
 //   r4_light_smap_keep_trees <meters>: lamps with trees kept beyond this distance (20), 0 never
 //   r4_light_smap_keep_trees_refresh <seconds>: their maps drawn again after this long (1), 0 never
+//   r4_light_smap_keep_dynamic 0/1: lamps with dynamic casters kept too while those casters stay as they were drawn
+//     (each draw's visual, shader, world matrix and detail level, each skeleton's bone transforms)
 //   stat_light_keep <seconds>: per-frame counts of kept, drawn and not-kept lamps (with the reason), in the log
 class light;
 namespace light_smap_keep
@@ -18,6 +20,7 @@ namespace light_smap_keep
 	extern int ps_keep;
 	extern int ps_keep_trees;
 	extern float ps_keep_trees_refresh;
+	extern int ps_keep_dynamic;
 	void start_stats(float seconds);
 	// The light is being destroyed
 	void forget(light* L);

@@ -6,6 +6,7 @@
 #	include "xrUIXmlParser.h"
 #	include "object_broker.h"
 #endif // XRGAME_EXPORTS
+#include <unordered_set>
 
 
 //T_ID    - уникальный текстовый идентификатор (аттрибут id в XML файле)
@@ -153,6 +154,12 @@ typename void CSXML_IdToIndex::InitInternal()
 	string_path xml_file;
 	int count = _GetItemCount(file_str);
 	int index = 0;
+	// The ids so far by their shared string (one per text): the duplicate check compared each new id with every one
+	// before it, making a shared string of both for every compare (seconds at the start with GAMMA's thousands of
+	// characters and dialogs)
+	std::unordered_set<const void*> known_ids;
+	// A plain tag name: the items are walked from one to the next instead of from the first one for every index
+	const bool walk = !strchr(tag_name, ':');
 	for (int it = 0; it < count; ++it)
 	{
 		_GetItem(file_str, it, xml_file);
@@ -166,9 +173,18 @@ typename void CSXML_IdToIndex::InitInternal()
 		//общий список
 		int items_num = uiXml->GetNodesNum(uiXml->GetRoot(), tag_name);
 
+		XML_NODE* item_node = nullptr;
 		for (int i = 0; i < items_num; ++i)
 		{
-			LPCSTR item_name = uiXml->ReadAttrib(uiXml->GetRoot(), tag_name, i, "id", NULL);
+			LPCSTR item_name;
+			if (walk)
+			{
+				// NavigateToNode(root, tag_name, i): the first child named tag_name, then the next one i times
+				item_node = i == 0 ? uiXml->GetRoot()->FirstChild(tag_name) : (item_node ? item_node->NextSibling(tag_name) : nullptr);
+				item_name = uiXml->ReadAttrib(item_node, "id", NULL);
+			}
+			else
+				item_name = uiXml->ReadAttrib(uiXml->GetRoot(), tag_name, i, "id", NULL);
 
 			string256 buf;
 			xr_sprintf(buf, "id for item don't set, number %d in %s", i, xml_file);
@@ -176,14 +192,9 @@ typename void CSXML_IdToIndex::InitInternal()
 
 
 			//проверетить ID на уникальность
-			T_VECTOR::iterator t_it = m_pItemDataVector->begin();
-			for (; m_pItemDataVector->end() != t_it; ++t_it)
-			{
-				if (shared_str((*t_it).id) == shared_str(item_name))
-					break;
-			}
-
-			R_ASSERT3(m_pItemDataVector->end() == t_it, "duplicate item id", item_name);
+			const shared_str item_id(item_name);
+			const bool unique_id = known_ids.insert(item_id._get()).second;
+			R_ASSERT3(unique_id, "duplicate item id", item_name);
 
 			ITEM_DATA data;
 			data.id = item_name;

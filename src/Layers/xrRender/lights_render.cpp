@@ -12,6 +12,7 @@ namespace light_smap_keep
 {
 	int ps_keep = 1;
 	int ps_keep_trees = 20; // r4_light_smap_keep_trees: meters from the camera beyond which a lamp with trees is kept, 0 never
+	int ps_keep_dynamic = 1; // r4_light_smap_keep_dynamic: dynamic casters that are where and as they were drawn are kept too
 	float ps_keep_trees_refresh = 1.f; // r4_light_smap_keep_trees_refresh: seconds between redraws of such a map, 0 never
 
 	struct entry
@@ -21,6 +22,8 @@ namespace light_smap_keep
 		ID3DShaderResourceView* srv = nullptr;
 		u32 size = 0, bytes = 0, version = 0, used = 0, drawn = 0; // drawn: the time it was last drawn
 		Fmatrix combine;
+		u64 dynamic = 0; // signature of the dynamic casters drawn into it (0: none)
+		u64 dynamic_now = 0; // this frame's, taken before drawing
 		bool valid = false;
 	};
 	static xr_map<light*, entry> s_entries;
@@ -33,13 +36,14 @@ namespace light_smap_keep
 	static bool s_stats = false;
 	static u32 s_stats_end = 0, s_frames = 0, s_last_stat_frame = 0;
 	static u32 s_kept = 0, s_kept_trees = 0, s_drawn = 0, s_off_moving = 0, s_off_dynamic = 0, s_off_trees = 0, s_off_forward = 0,
-		s_off_grass = 0, s_off_other = 0, s_off_memory = 0;
+		s_off_grass = 0, s_off_other = 0, s_off_memory = 0, s_kept_dynamic = 0, s_dynamic_still = 0;
 
 	void start_stats(float seconds)
 	{
 		s_stats = true;
 		s_stats_end = Device.dwTimeGlobal + iFloor(seconds * 1000.f);
 		s_kept = s_kept_trees = s_drawn = s_off_moving = s_off_dynamic = s_off_trees = s_off_forward = s_off_grass = s_off_other = s_off_memory = s_frames = 0;
+		s_kept_dynamic = s_dynamic_still = 0;
 		Msg("* [Light smap keep] measuring for %.0f s...", seconds);
 	}
 
@@ -52,9 +56,11 @@ namespace light_smap_keep
 			s_stats = false;
 			const float f = float(_max(1u, s_frames));
 			Msg("* [Light smap keep] per frame over %u frames, %u maps kept (%.1f MB): shadow maps kept %.2f (with trees %.2f), drawn into their own map %.2f,"
-				" drawn as usual: moving %.2f, dynamic objects %.2f, trees near %.2f, semi-transparent %.2f, grass %.2f, memory %.2f, other %.2f",
+				" drawn as usual: moving %.2f, dynamic objects %.2f, trees near %.2f, semi-transparent %.2f, grass %.2f, memory %.2f, other %.2f;"
+				" with dynamic casters: kept %.2f, unchanged since the frame before %.2f",
 				s_frames, u32(s_entries.size()), float(s_bytes) / (1024.f * 1024.f), s_kept / f, s_kept_trees / f, s_drawn / f, s_off_moving / f,
-				s_off_dynamic / f, s_off_trees / f, s_off_forward / f, s_off_grass / f, s_off_memory / f, s_off_other / f);
+				s_off_dynamic / f, s_off_trees / f, s_off_forward / f, s_off_grass / f, s_off_memory / f, s_off_other / f,
+				s_kept_dynamic / f, s_dynamic_still / f);
 			xrLogger::FlushLog();
 			return;
 		}
@@ -135,6 +141,75 @@ namespace light_smap_keep
 		return G.RGraph.mapDynamicSorted.Sorted.empty();
 	}
 
+	// Signature of the dynamic casters captured for this lamp: each draw's visual, shader, world matrix and detail (ssa),
+	// and each skeleton's bone transforms as skinning reads them. Order-independent (a sum of item hashes). 0 when none
+	static u64 hash_bytes(const void* p, size_t n, u64 h) // n: a multiple of 4
+	{
+		const u32* w = (const u32*)p;
+		for (size_t i = 0; i < n / 4; ++i)
+			h = (h ^ w[i]) * 0x100000001b3ull + (h >> 29);
+		return h;
+	}
+
+	static u64 dynamic_signature(const CDSGraphManager& G)
+	{
+		u64 sum = 0, count = 0;
+		static xr_vector<CKinematics*> skeletons;
+		skeletons.clear();
+		for (u32 i = 0; i < SHADER_PASSES_MAX; ++i)
+		{
+			for (const auto& rp : G.RGraph.mapDynamicPasses[0][i])
+			{
+				const auto& it = rp.item;
+				u64 h = 14695981039346656037ull;
+				h = hash_bytes(&it.pVisual, sizeof(it.pVisual), h);
+				h = hash_bytes(&it.pSE, sizeof(it.pSE), h);
+				h = hash_bytes(&it.ssa, sizeof(it.ssa), h);
+				if (it.pMatrix)
+					h = hash_bytes(it.pMatrix, sizeof(Fmatrix), h);
+				sum += h;
+				++count;
+				if (it.pObject && it.pObject->renderable.visual)
+				{
+					CKinematics* K = PCKinematics((dxRender_Visual*)it.pObject->renderable.visual);
+					if (K && std::find(skeletons.begin(), skeletons.end(), K) == skeletons.end())
+						skeletons.push_back(K);
+				}
+			}
+		}
+		// A skeleton's bones hashed once per frame, whatever the number of lamps it is in
+		struct bones_hash
+		{
+			CKinematics* K;
+			u32 frame;
+			u64 h;
+		};
+		static xr_vector<bones_hash> cache;
+		static u32 cache_frame = 0;
+		if (cache_frame != Device.dwFrame)
+		{
+			cache_frame = Device.dwFrame;
+			cache.clear();
+		}
+		for (CKinematics* K : skeletons)
+		{
+			u64 h = 0;
+			auto found = std::find_if(cache.begin(), cache.end(), [K](const bones_hash& c) { return c.K == K; });
+			if (found != cache.end())
+				h = found->h;
+			else
+			{
+				h = 1469598103934665603ull;
+				h = hash_bytes(&K, sizeof(K), h);
+				for (u16 b = 0; b < K->LL_BoneCount(); ++b)
+					h = hash_bytes(&K->LL_GetTransform_R(b), sizeof(Fmatrix), h);
+				cache.push_back({ K, cache_frame, h });
+			}
+			sum += h;
+		}
+		return count ? (sum ^ (count << 56)) | 1 : 0;
+	}
+
 	// The lamp's entry when its shadow map can be kept this frame, else nullptr. fresh: the entry already holds it
 	static entry* get(light* L, bool decorative, bool forward, bool grass, bool& fresh)
 	{
@@ -174,15 +249,30 @@ namespace light_smap_keep
 			}
 			trees = true;
 		}
+		u64 dynamic = 0;
 		if (!dynamic_empty(L->GMLight))
 		{
-			count(s_off_dynamic);
-			return nullptr;
+			// Dynamic casters that are where and as they were when the map was drawn keep it too (an item on the floor,
+			// a body): r4_light_smap_keep_dynamic. The stat counts the lamps whose casters are unchanged either way
+			dynamic = dynamic_signature(L->GMLight);
+			auto found = s_entries.find(L);
+			const bool still = found != s_entries.end() && found->second.valid && found->second.dynamic == dynamic;
+			if (still)
+				count(s_dynamic_still);
+			if (!ps_keep_dynamic)
+			{
+				count(s_off_dynamic);
+				return nullptr;
+			}
 		}
 		entry& e = s_entries[L];
 		e.used = Device.dwFrame;
 		const u32 size = L->X.S.size;
-		fresh = e.valid && e.size == size && e.version == L->m_static_version && !memcmp(&e.combine, &L->X.S.combine, sizeof(Fmatrix));
+		fresh = e.valid && e.size == size && e.version == L->m_static_version && !memcmp(&e.combine, &L->X.S.combine, sizeof(Fmatrix)) &&
+			e.dynamic == dynamic;
+		e.dynamic_now = dynamic;
+		if (dynamic)
+			count(s_kept_dynamic);
 		if (fresh && trees && ps_keep_trees_refresh > 0.f && Device.dwTimeGlobal - e.drawn >= u32(ps_keep_trees_refresh * 1000.f) &&
 			s_tree_refresh_frame != Device.dwFrame)
 		{
@@ -201,6 +291,8 @@ namespace light_smap_keep
 
 	static void filled(entry& e, light* L)
 	{
+		// Taken before drawing: bones updated by the draw itself only make the next frame draw again
+		e.dynamic = e.dynamic_now;
 		e.version = L->m_static_version;
 		e.combine = L->X.S.combine;
 		e.drawn = Device.dwTimeGlobal;
@@ -495,8 +587,11 @@ void CRender::render_lights(light_Package& LP)
 								RCache.set_xform_view(L->X.S.view);
 								RCache.set_xform_project(L->X.S.project);
 								L->GMLight.r_dsgraph_render_static(0, false);
+								L->GMLight.r_dsgraph_render_dynamic(0, true);
 								light_smap_keep::filled(*keep, L);
 							}
+							else
+								L->GMLight.RGraph.clear_dynamic<false>(); // its dynamic casters are in the kept map
 							L->m_smap_keep_srv = keep->srv;
 							L->X.S.transluent = FALSE;
 							continue;

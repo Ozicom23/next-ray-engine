@@ -615,9 +615,45 @@ static int alife_object_exists_native(lua_State* L)
 	return 1;
 }
 
+// alife_first_id_of_section_native(section): the lowest id from 1 to 65534 of an object of that section (its section
+// name), false when there is none, nil without a simulator or a string. What story_objects.get_story_se_item finds
+// with "for i = 1, 65534 do sim:object(i):section_name() == story_id" (two luabind calls per object, ~30 ms a call
+// with GAMMA's 28000 objects, several calls in a level load); the neXt-Ray performance patches mod fills its cache
+// with this
+static int alife_first_id_of_section_native(lua_State* L)
+{
+	const CALifeSimulator* sim = ai().get_alife();
+	if (!sim || lua_type(L, 1) != LUA_TSTRING)
+	{
+		lua_pushnil(L);
+		return 1;
+	}
+	size_t len = 0;
+	LPCSTR section = lua_tolstring(L, 1, &len);
+	if (len != xr_strlen(section))
+	{
+		lua_pushnil(L); // a zero byte inside: the script's own compare
+		return 1;
+	}
+	for (const auto& it : sim->objects().objects())
+	{
+		if (it.first < 1 || it.first > 65534 || !it.second)
+			continue;
+		LPCSTR name = it.second->name();
+		if (name && !xr_strcmp(name, section))
+		{
+			lua_pushnumber(L, lua_Number(it.first));
+			return 1;
+		}
+	}
+	lua_pushboolean(L, false);
+	return 1;
+}
+
 void CALifeSimulator::script_register(lua_State* L)
 {
 	lua_register(L, "alife_object_exists_native", alife_object_exists_native);
+	lua_register(L, "alife_first_id_of_section_native", alife_first_id_of_section_native);
 	module(L)
 	[
 		class_<alife_object_iterator>("alife_object_iterator")

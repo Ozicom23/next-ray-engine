@@ -102,9 +102,17 @@ void CBlender_ssfx_ssr::Compile(CBlender_Compile& C)
 
 		C.r_dx10Texture("blue_noise", "fx\\blue_noise");
 
+		// The patch mod's SSR takes the sky reflection here where it shows (r4_shader_patches 0x400), as the gloss pass
+		// (case 5) did
+		C.r_dx10Texture("env_s0", r2_T_envs0);
+		C.r_dx10Texture("env_s1", r2_T_envs1);
+		C.r_dx10Texture("sky_s0", r2_T_sky0);
+		C.r_dx10Texture("sky_s1", r2_T_sky1);
+
 		C.r_dx10Sampler("smp_nofilter");
 		C.r_dx10Sampler("smp_rtlinear");
 		C.r_dx10Sampler("smp_linear");
+		// smp_base left to the default state, as for the gloss pass (case 5), so the sky taps are the same
 
 		C.r_End();
 		break;

@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "r4_fsr3.h"
+#include "r4_gpu_profiler.h"
 
 CFSR3 g_FSR3;
 
@@ -453,6 +454,41 @@ namespace
 		return FFX_OK;
 	}
 
+	// GPU pass scope names (stat_gpu_passes): literals, the profiler keeps the pointer until the results arrive
+	const wchar_t* pass_scope_name(FfxPass pass)
+	{
+		switch (pass)
+		{
+		case FFX_FSR3UPSCALER_PASS_PREPARE_INPUTS: return L"fsr_prepare_inputs";
+		case FFX_FSR3UPSCALER_PASS_LUMA_PYRAMID: return L"fsr_luma_pyramid";
+		case FFX_FSR3UPSCALER_PASS_SHADING_CHANGE_PYRAMID: return L"fsr_shading_change_pyramid";
+		case FFX_FSR3UPSCALER_PASS_SHADING_CHANGE: return L"fsr_shading_change";
+		case FFX_FSR3UPSCALER_PASS_PREPARE_REACTIVITY: return L"fsr_prepare_reactivity";
+		case FFX_FSR3UPSCALER_PASS_LUMA_INSTABILITY: return L"fsr_luma_instability";
+		case FFX_FSR3UPSCALER_PASS_ACCUMULATE:
+		case FFX_FSR3UPSCALER_PASS_ACCUMULATE_SHARPEN: return L"fsr_accumulate";
+		case FFX_FSR3UPSCALER_PASS_RCAS: return L"fsr_rcas";
+		case FFX_FSR3UPSCALER_PASS_DEBUG_VIEW: return L"fsr_debug_view";
+		default: return L"fsr_other";
+		}
+	}
+
+	// Compute shader -> scope name, filled as the pipelines are created
+	struct PipelineName
+	{
+		ID3DComputeShader* cs;
+		const wchar_t* name;
+	};
+	PipelineName s_pipeline_names[32] = {};
+
+	const wchar_t* scope_name(ID3DComputeShader* cs)
+	{
+		for (const PipelineName& n : s_pipeline_names)
+			if (n.cs == cs)
+				return n.name;
+		return L"fsr_other";
+	}
+
 	const char* pass_shader_name(FfxPass pass)
 	{
 		switch (pass)
@@ -516,6 +552,16 @@ namespace
 			return FFX_ERROR_BACKEND_API_ERROR;
 		}
 
+		for (PipelineName& n : s_pipeline_names)
+		{
+			if (!n.cs || n.cs == cs)
+			{
+				n.cs = cs;
+				n.name = pass_scope_name(pass);
+				break;
+			}
+		}
+
 		out->pipeline = cs;
 		out->srvTextureCount = 0;
 		out->uavTextureCount = 0;
@@ -551,6 +597,9 @@ namespace
 	{
 		if (pipeline && pipeline->pipeline)
 		{
+			for (PipelineName& n : s_pipeline_names)
+				if (n.cs == (ID3DComputeShader*)pipeline->pipeline)
+					n.cs = nullptr;
 			((ID3DComputeShader*)pipeline->pipeline)->Release();
 			pipeline->pipeline = nullptr;
 		}
@@ -634,7 +683,9 @@ namespace
 		if (uav_count)
 			ctx->CSSetUnorderedAccessViews(0, uav_count, uav, nullptr);
 
+		gpu_profiler::event_begin(scope_name((ID3DComputeShader*)p.pipeline));
 		ctx->Dispatch(job.dimensions[0], job.dimensions[1], job.dimensions[2]);
+		gpu_profiler::event_end();
 
 		// Unbind, the next pass may read what this one wrote
 		ID3DShaderResourceView* null_srv[kMaxSrvSlots] = {};
@@ -679,14 +730,18 @@ namespace
 				execute_compute(b, job.computeJobDescriptor);
 				break;
 			case FFX_GPU_JOB_CLEAR_FLOAT:
+				gpu_profiler::event_begin(L"fsr_clear");
 				execute_clear(b, job.clearJobDescriptor);
+				gpu_profiler::event_end();
 				break;
 			case FFX_GPU_JOB_COPY:
 			{
 				const int32_t src = job.copyJobDescriptor.src.internalIndex;
 				const int32_t dst = job.copyJobDescriptor.dst.internalIndex;
+				gpu_profiler::event_begin(L"fsr_copy");
 				if (src > 0 && dst > 0 && b->resources[src].resource && b->resources[dst].resource)
 					b->context->CopyResource(b->resources[dst].resource, b->resources[src].resource);
+				gpu_profiler::event_end();
 				break;
 			}
 			default: // barriers and discards are not needed on D3D11

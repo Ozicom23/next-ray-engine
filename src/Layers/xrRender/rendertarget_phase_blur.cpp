@@ -222,8 +222,10 @@ void CRenderTarget::phase_ssfx_ssr()
 
 	// Draw COLOR
 	RCache.set_Element(s_ssfx_ssr->E[5]);
+	RCache.set_c("ssr_setup", ps_ssfx_ssr); // the patch mod's gloss pass (r4_shader_patches 0x800) checks the SSR resolution
+	RCache.set_c("nextray_ssr_sky", 1.f, 0.f, 0.f, 0.f); // the SSR pass binds the sky (r4_shader_patches 0x400)
 	RCache.set_Geometry(g_combine);
-	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+	{ PIX_EVENT(ssr_gloss); RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2); }
 	///////////////////////////////////////////////////////////////////////////
 
 	p1.set(1.0f / ScaleFactor, 1.0f / ScaleFactor);
@@ -255,11 +257,12 @@ void CRenderTarget::phase_ssfx_ssr()
 	RCache.set_c("cam_pos", ::Random.randF(-1.0, 1.0), ::Random.randF(-1.0, 1.0), 0.0f, 0.0f);
 
 	RCache.set_c("ssr_setup", ps_ssfx_ssr);
+	RCache.set_c("nextray_ssr_sky", 1.f, 0.f, 0.f, 0.f); // the sky is bound for this pass (r4_shader_patches 0x400)
 	RCache.set_Geometry(g_combine);
-	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+	{ PIX_EVENT(ssr_march); RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2); }
 
 	// COPY SSR RESULT ( ACC ) ////////////////////////////////////////////
-	HW.pContext->CopyResource(rt_ssfx_ssr->pTexture->surface_get(), rt_ssfx->pTexture->surface_get());
+	{ PIX_EVENT(ssr_copy); HW.pContext->CopyResource(rt_ssfx_ssr->pTexture->surface_get(), rt_ssfx->pTexture->surface_get()); }
 
 	// Disable/Enable Blur if the value is <= 0
 	//if (ps_ssfx_ssr.y > 0 || ps_ssfx_ssr.x > 1.0)
@@ -282,7 +285,7 @@ void CRenderTarget::phase_ssfx_ssr()
 		RCache.set_c("blur_params", 1.0, 0.0, scale_X, scale_Y);
 		RCache.set_c("ssr_setup", ps_ssfx_ssr);
 		RCache.set_Geometry(g_combine);
-		RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+		{ PIX_EVENT(ssr_blur_1); RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2); }
 
 
 		// BLUR PHASE 2 //////////////////////////////////////////////////////////
@@ -303,7 +306,7 @@ void CRenderTarget::phase_ssfx_ssr()
 		RCache.set_c("blur_params", 0.0, 1.0, w, h);
 		RCache.set_c("ssr_setup", ps_ssfx_ssr);
 		RCache.set_Geometry(g_combine);
-		RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+		{ PIX_EVENT(ssr_blur_2); RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2); }
 	}
 
 	// COMBINE //////////////////////////////////////////////////////////
@@ -333,7 +336,7 @@ void CRenderTarget::phase_ssfx_ssr()
 	RCache.set_Element(s_ssfx_ssr->E[3]);
 	RCache.set_c("ssr_setup", ps_ssfx_ssr);
 	RCache.set_Geometry(g_combine);
-	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+	{ PIX_EVENT(ssr_combine); RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2); }
 };
 
 void CRenderTarget::phase_ssfx_volumetric_blur()

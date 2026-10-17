@@ -688,8 +688,14 @@ void CRenderTarget::phase_upscale()
 		// The upscaler binds its own state, start and leave with a clean context
 		// (OnFrameEnd clears the D3D context and RCache's cached state)
 		RCache.OnFrameEnd();
-		p.reactive = upscale_mask::build(m_upscale_render_w, m_upscale_render_h, p.motion, p.depth);
-		m_upscale_done = m_upscaler->Evaluate(p);
+		{
+			PIX_EVENT(upscale_mask);
+			p.reactive = upscale_mask::build(m_upscale_render_w, m_upscale_render_h, p.motion, p.depth);
+		}
+		{
+			PIX_EVENT(upscaler_evaluate);
+			m_upscale_done = m_upscaler->Evaluate(p);
+		}
 		RCache.OnFrameEnd();
 #ifdef USE_DX12
 		// FSR frame generation takes the same inputs, after the frame's post-processing (phase_combine)

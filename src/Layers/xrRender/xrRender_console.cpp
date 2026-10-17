@@ -1641,6 +1641,7 @@ void xrRender_initconsole()
 	CMD4(CCC_Integer, "r4_lights_parallel_query", &ps_r4_lights_parallel_query, 0, 1);
 	CMD4(CCC_Integer, "r4_light_smap_keep", &light_smap_keep::ps_keep, 0, 1);
 	CMD4(CCC_Integer, "r4_light_smap_keep_trees", &light_smap_keep::ps_keep_trees, 0, 500);
+	CMD4(CCC_Integer, "r4_light_smap_keep_dynamic", &light_smap_keep::ps_keep_dynamic, 0, 1);
 	CMD4(CCC_Float, "r4_light_smap_keep_trees_refresh", &light_smap_keep::ps_keep_trees_refresh, 0.f, 30.f);
 	CMD1(CCC_LightKeepStats, "stat_light_keep");
 	CMD4(CCC_Integer, "r4_main_parallel_cull", &ps_r4_main_parallel_cull, 0, 1);

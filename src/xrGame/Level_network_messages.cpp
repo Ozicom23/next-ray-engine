@@ -326,6 +326,14 @@ void CLevel::ClientReceive()
                 Device.LuaGC.clear();
                 Device.LuaGCDebug.clear();
 
+				// The scripts folder listed while the old level is saved and unloaded: axr_main rescans it once the new
+				// level's scripts load (fs_prefetch_scripts)
+				{
+					extern int g_fs_prefetch_scripts;
+					if (g_fs_prefetch_scripts)
+						FS.prefetch_listing("$game_scripts$");
+				}
+
 				if (m_type == M_LOAD_GAME)
 				{
 					string256 saved_name;

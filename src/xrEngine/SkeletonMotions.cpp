@@ -246,6 +246,11 @@ BOOL motions_value::load(LPCSTR N, IReader* data, vecBones* bones)
 	// Msg("Motions %d/%d %4d/%4d/%d, %s",p_cnt,m_cnt, m_load,m_total,m_r,N);
 	MS->close();
 
+	m_cycle_index.clear();
+	m_cycle_index.reserve(m_cycle.size());
+	for (const auto& it : m_cycle)
+		m_cycle_index.emplace(it.first._get(), it.second);
+
 	return bRes;
 }
 
