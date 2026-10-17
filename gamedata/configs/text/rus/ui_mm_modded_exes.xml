@@ -1193,4 +1193,7 @@
 	<string id="ui_mm_modded_exes_optimizations_keyboard_buffer_size">
 		<text>Буфер ввода для клавиатуры (keyboard_buffer_size)</text>
 	</string>
+	<string id="ui_mm_lst_renderer_r4_dx12">
+		<text>DX12</text>
+	</string>
 </string_table>

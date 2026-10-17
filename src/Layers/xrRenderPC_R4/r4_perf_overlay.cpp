@@ -16,6 +16,11 @@
 CPerfOverlay g_PerfOverlay;
 
 static const char* s_quality_names[] = { "Ultra Performance", "Performance", "Balanced", "Quality", "Native AA" };
+#ifdef USE_DX12
+static const char* s_api = "DX12"; // the renderer the overlay is drawn by (both exes report renderer_r4)
+#else
+static const char* s_api = "DX11";
+#endif
 
 bool CPerfOverlay::CreateQueries()
 {
@@ -394,11 +399,12 @@ void CPerfOverlay::Draw()
 			string32 custom;
 			if (ps_r4_upscaler_scale > 0.f && q != upscaler_quality_native)
 				xr_sprintf(custom, "Custom %.2f", float(target->upscale_render_width()) / float(_max(Device.dwWidth, 1u)));
-			ImGui::Text("%s %s   %ux%u -> %ux%u", upscaler->Name(), ps_r4_upscaler_scale > 0.f && q != upscaler_quality_native ? custom : s_quality_names[q],
+			ImGui::Text("%s   %s %s   %ux%u -> %ux%u", s_api, upscaler->Name(),
+			            ps_r4_upscaler_scale > 0.f && q != upscaler_quality_native ? custom : s_quality_names[q],
 			            target->upscale_render_width(), target->upscale_render_height(), Device.dwWidth, Device.dwHeight);
 		}
 		else
-			ImGui::Text("Native   %ux%u", Device.dwWidth, Device.dwHeight);
+			ImGui::Text("%s   Native   %ux%u", s_api, Device.dwWidth, Device.dwHeight);
 
 		if (ps_perf_overlay >= 2)
 		{

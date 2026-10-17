@@ -157,6 +157,18 @@ function on_xml_read()
 				})
 				need_init_opt_coder = true
 			end
+			-- The DX12 exe runs the same R4 renderer ("renderer_r4", shown as DX11): its entry is labelled DX12 there
+			local renderer = renderer_idx and basic.gr[renderer_idx]
+			local cont_base = renderer and renderer.content and renderer.content[1]
+			if type(cont_base) == "function" and get_console():get_string("r__dx12_threaded") then
+				renderer.content = {function(...)
+					local cont = cont_base(...)
+					for _, c in ipairs(cont or {}) do
+						if c[1] == "renderer_r4" then c[2] = "renderer_r4_dx12" end
+					end
+					return cont
+				end}
+			end
 		end
 
 		-- Persistent weather switch
