@@ -207,7 +207,7 @@ void CRenderTarget::phase_ssfx_ao()
 	RCache.set_c("m_previous", Matrix_previous);
 
 	RCache.set_Geometry(g_combine);
-	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+	{ PIX_EVENT(ao_main); RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2); }
 
 	// Save AO frame
 	HW.pContext->CopyResource(rt_ssfx_ao->pTexture->surface_get(), rt_ssfx_temp->pTexture->surface_get());
@@ -236,7 +236,7 @@ void CRenderTarget::phase_ssfx_ao()
 	RCache.set_c("blur_setup", ps_ssfx_ao.x, 0.25f, scale_X, scale_Y);
 	RCache.set_c("ao_setup", ps_ssfx_ao);
 	RCache.set_Geometry(g_combine);
-	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+	{ PIX_EVENT(ao_blur_1); RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2); }
 
 
 	// BLUR PHASE 2 //////////////////////////////////////////////////////////
@@ -257,7 +257,7 @@ void CRenderTarget::phase_ssfx_ao()
 	RCache.set_c("blur_setup", 1, 0.5f, scale_X, scale_Y);
 	RCache.set_c("ao_setup", ps_ssfx_ao);
 	RCache.set_Geometry(g_combine);
-	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+	{ PIX_EVENT(ao_blur_2); RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2); }
 
 
 	// BLUR PHASE 3 //////////////////////////////////////////////////////////
@@ -278,7 +278,7 @@ void CRenderTarget::phase_ssfx_ao()
 	RCache.set_c("blur_setup", 1, 0.75f, scale_X, scale_Y);
 	RCache.set_c("ao_setup", ps_ssfx_ao);
 	RCache.set_Geometry(g_combine);
-	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+	{ PIX_EVENT(ao_blur_3); RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2); }
 
 	// BLUR PHASE 4 //////////////////////////////////////////////////////////
 	u_setrt(rt_ssfx_temp, 0, 0, 0);
@@ -298,7 +298,7 @@ void CRenderTarget::phase_ssfx_ao()
 	RCache.set_c("blur_setup", 1, 1.0f, scale_X, scale_Y);
 	RCache.set_c("ao_setup", ps_ssfx_ao);
 	RCache.set_Geometry(g_combine);
-	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+	{ PIX_EVENT(ao_blur_4); RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2); }
 
 	set_viewport_size(HW.pContext, w, h);
 }
