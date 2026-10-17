@@ -1838,6 +1838,26 @@ bool Context::Threaded() const { return m_front->threaded; }
 
 void Context::Synchronize() { m_front->Synchronize(); }
 
+float Context::WaitGpuFrame(UINT back)
+{
+	Front& f = *m_front;
+	if (f.frame <= back)
+		return 0.f;
+	const u64 target = f.frame - back;
+	// The frame's fence is known once its Present is recorded (Present waits for the one before when threaded)
+	if (m_impl->recorded_frame.load(std::memory_order_acquire) < target)
+		return 0.f;
+	const u64 fence = m_impl->frame_fences[target % Impl::kFrameRing];
+	if (f.dev->Completed() >= fence)
+		return 0.f;
+	LARGE_INTEGER t0, t1, freq;
+	QueryPerformanceCounter(&t0);
+	f.dev->WaitFence(fence);
+	QueryPerformanceCounter(&t1);
+	QueryPerformanceFrequency(&freq);
+	return float(double(t1.QuadPart - t0.QuadPart) * 1000.0 / double(freq.QuadPart));
+}
+
 //-------------------------------------------------------------------------------------------------------------------
 // Binding
 

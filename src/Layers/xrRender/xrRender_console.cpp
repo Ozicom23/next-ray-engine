@@ -677,6 +677,7 @@ extern int ps_r4_framegen; // r4_framegen.cpp
 // r__dx12_threaded 0/1: D3D12 commands recorded on a worker thread (1), as DXVK records on its own thread, or on the
 // render thread at each call (0); switches at once
 int ps_r__dx12_threaded = 1;
+int ps_r__dx12_gpu_pacing = 1; // frame starts paced by the GPU's progress, not the swap chain's waitable object
 class CCC_Dx12Threaded : public CCC_Integer
 {
 public:
@@ -1415,6 +1416,7 @@ void xrRender_initconsole()
 	CMD1(CCC_Dx12Trace, "r__dx12_trace");
 	CMD1(CCC_Dx12Stats, "stat_dx12");
 	CMD2(CCC_Dx12Threaded, "r__dx12_threaded", &ps_r__dx12_threaded);
+	CMD4(CCC_Integer, "r__dx12_gpu_pacing", &ps_r__dx12_gpu_pacing, 0, 1);
 	CMD4(CCC_Integer, "r4_framegen", &ps_r4_framegen, 0, 1); // FSR frame generation, vid_restart; needs an upscaler on
 #endif
 

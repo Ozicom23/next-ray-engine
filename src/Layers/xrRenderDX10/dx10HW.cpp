@@ -302,6 +302,7 @@ extern u32 g_screenmode;
 extern int ps_r4_swap_wait;     // r4_frame_pacing.cpp
 #ifdef USE_DX12
 extern int ps_r__dx12_threaded; // xrRender_console.cpp
+extern int ps_r__dx12_gpu_pacing; // xrRender_console.cpp
 #include "../xrRenderPC_R4/r4_framegen.h"
 #endif
 extern int ps_r4_frame_latency;
@@ -823,6 +824,14 @@ float CHW::WaitFrameLatency()
     if (!m_hFrameLatency || !m_FrameWaitOwed)
         return 0.f;
     m_FrameWaitOwed = false;
+#if defined(USE_DX12)
+    // Paced by the GPU's progress instead (r__dx12_gpu_pacing): vkd3d-proton releases the waitable object as its
+    // present thread retires presents, and with the recording worker in between the frame starts came in pairs (12 and
+    // 21 ms with the GPU at an even 16.4): the game's time steps, and with them motion, juddered. Frame generation's
+    // swap chain paces its own presents: its waitable object stays
+    if (ps_r__dx12_gpu_pacing && pContext && !framegen::active())
+        return pContext->WaitGpuFrame(UINT(clampr(ps_r4_frame_latency, 1, 3)));
+#endif
     CTimer timer;
     timer.Start();
     WaitForSingleObject(m_hFrameLatency, 1000); // a timeout never stalls the game

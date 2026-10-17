@@ -565,6 +565,9 @@ public:
 	void SetThreaded(bool on);
 	bool Threaded() const;
 	void Synchronize();
+	// Frame pacing by the GPU's progress: blocks until the GPU is through the frame `back` frames before the one being
+	// built (presented ones only); the ms spent
+	float WaitGpuFrame(UINT back);
 
 	// Native recording (DLSS, ImGui): the function runs where the commands are recorded, in order with them, so it
 	// gets the command list from the recorder and works only with what it owns or captured. Transition moves a
