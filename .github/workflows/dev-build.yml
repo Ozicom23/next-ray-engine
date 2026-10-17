@@ -2,7 +2,8 @@
 # Runs on pushes to master and dlss-* branches and can be started manually from the Actions tab.
 # Download the "dev_DX11-AVX" artifact from the run page: it contains bin/ (AnomalyDX11AVX.exe, AnomalyDX12AVX.exe (the R4
 # renderer on D3D12, xrRender_R5 + xrEngineDX12 projects, built in the same configuration) and nvngx_dlss.dll)
-# and db/mods/00_modded_exes_gamedata.db0, laid out like the Anomaly folder. The exe's debug symbols
+# and db/mods/00_modded_exes_gamedata.db0, laid out like the Anomaly folder; mods/neXt-Ray performance patches is the MO2
+# mod that goes with the exes (copy it into MO2's mods folder and enable it). The exe's debug symbols
 # (pdb, ~190 MB, for crash analysis) are a separate artifact, "dev_DX11-AVX_pdb".
 # bin/dlss_dev/nvngx_dlss.dll is NVIDIA's development DLL (on-screen debug overlay), swap it in for debugging.
 
@@ -85,6 +86,8 @@ jobs:
         new-item -path "./package_pdb/bin" -itemtype directory -force
         copy-item -path "./_build/_game/bin_dbg/*.pdb" -destination "./package_pdb/bin"
         copy-item -path "./compressor/${{ env.PACK_GAMEDATA_NAME }}" -destination "./package/db/mods"
+        new-item -path "./package/mods" -itemtype directory -force
+        copy-item -path "./mods/neXt-Ray performance patches" -destination "./package/mods" -recurse
         $sdk = "./src/3rd party/NVIDIA-DLSS"
         copy-item -path "$sdk/lib/Windows_x86_64/rel/nvngx_dlss.dll" -destination "./package/bin"
         copy-item -path "$sdk/LICENSE.txt" -destination "./package/bin/nvngx_dlss_LICENSE.txt"
