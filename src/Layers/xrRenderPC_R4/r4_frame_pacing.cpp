@@ -28,6 +28,7 @@ namespace frame_pacing
 		u64 done;       // the GPU finished the frame (fence, CPU QPC); 1 when the wait timed out
 		double gpu_begin, gpu_end; // GPU timestamps (ms on the GPU clock), 0 until known
 		float wait, sleep;
+		float step;     // the game's time step of the frame (Device.fTimeDelta, ms)
 		bool jit;       // went through the just-in-time path
 	};
 	static frame_info s_frames[kRing];
@@ -97,7 +98,7 @@ namespace frame_pacing
 	// stat_frame_pacing
 	struct sample
 	{
-		float t, interval, wait, sleep, cpu, present, gpu, gpu_interval, gpu_idle, queue, latency;
+		float t, interval, wait, sleep, cpu, present, gpu, gpu_interval, gpu_idle, queue, latency, step;
 	};
 	static xr_vector<sample> s_samples;
 	static bool s_recording = false;
@@ -411,6 +412,7 @@ namespace frame_pacing
 		}
 		if (f.start && f.done > 1)
 			s.latency = float(qpc_ms(f.done) - qpc_ms(f.start));
+		s.step = f.step;
 		s_samples.push_back(s);
 		s_prev_present1 = f.present1;
 		s_prev_gpu_end = f.gpu_end;
@@ -535,12 +537,12 @@ namespace frame_pacing
 			Msg("! [Frame pacing] cannot write %s", path);
 			return;
 		}
-		w->w_printf("frame,t_ms,interval_ms,wait_ms,sleep_ms,cpu_ms,present_ms,gpu_ms,gpu_interval_ms,gpu_idle_ms,queued_ms,latency_ms\r\n");
+		w->w_printf("frame,t_ms,interval_ms,wait_ms,sleep_ms,cpu_ms,present_ms,gpu_ms,gpu_interval_ms,gpu_idle_ms,queued_ms,latency_ms,step_ms\r\n");
 		for (u32 i = 0; i < n; i++)
 		{
 			const sample& s = s_samples[i];
-			w->w_printf("%u,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\r\n", i, s.t, s.interval, s.wait, s.sleep, s.cpu,
-				s.present, s.gpu, s.gpu_interval, s.gpu_idle, s.queue, s.latency);
+			w->w_printf("%u,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\r\n", i, s.t, s.interval, s.wait, s.sleep, s.cpu,
+				s.present, s.gpu, s.gpu_interval, s.gpu_idle, s.queue, s.latency, s.step);
 		}
 		FS.w_close(w);
 		Msg("*   written to %s", path);
@@ -599,6 +601,7 @@ namespace frame_pacing
 		if (f.begin)
 			return;
 		f.begin = CPU::QPC();
+		f.step = Device.fTimeDelta * 1000.f;
 		s_q_active = false;
 		if (!wanted() || !create_queries())
 			return;
