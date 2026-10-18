@@ -42,3 +42,10 @@ src/3rd party/NVIDIA-DLSS/
 src/3rd party/FidelityFX-FSR3/generated/
 src/3rd party/FidelityFX-FSR3/generated_wrappers/
 src/3rd party/FidelityFX-FSR3/generated_dx12/
+
+# FSR shaders, compiled by CI and tools/vm-build
+src/3rd party/FidelityFX-FSR3/generated*/
+
+# tools/vm-build output
+/package/
+/package_pdb/
