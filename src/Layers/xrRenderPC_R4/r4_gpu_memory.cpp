@@ -305,17 +305,11 @@ void track(ID3DResource* res, const char* name, category cat)
 		xr_strcpy(t->name, name + (len >= kNameSize ? len - kNameSize + 1 : 0));
 	}
 
-	// Check and attach under the lock: a surface can be handed to the counter from several threads
+	// Counted first, attached after without the lock: D3D can hold its own lock while it calls Release on a
+	// resource's ticket (which takes s_lock), so calling D3D under s_lock deadlocked texture loading threads
+	// against the main thread freeing resources (D3DMetal on macOS, at a save's load). A ticket that is not
+	// attached, or that another thread's ticket replaces, is uncounted again by its last Release
 	AcquireSRWLockExclusive(&s_lock);
-	size = 0;
-	const bool counted = SUCCEEDED(res->GetPrivateData(kTicketGuid, &size, nullptr)) && size;
-	if (counted || FAILED(res->SetPrivateDataInterface(kTicketGuid, t)))
-	{
-		ReleaseSRWLockExclusive(&s_lock);
-		t->~Ticket();
-		free(t);
-		return;
-	}
 	t->next = s_head;
 	if (s_head)
 		s_head->prev = t;
@@ -324,7 +318,11 @@ void track(ID3DResource* res, const char* name, category cat)
 	++s_resources[t->cat];
 	ReleaseSRWLockExclusive(&s_lock);
 
-	t->Release(); // the resource holds the remaining reference
+	size = 0;
+	if (!(SUCCEEDED(res->GetPrivateData(kTicketGuid, &size, nullptr)) && size))
+		res->SetPrivateDataInterface(kTicketGuid, t);
+
+	t->Release(); // the resource holds the remaining reference, if attached
 }
 
 scope::scope(category cat, const char* name) : m_prev_cat(t_scope_cat), m_prev_name(t_scope_name)
