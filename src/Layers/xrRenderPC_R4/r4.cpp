@@ -2324,6 +2324,7 @@ HRESULT CRender::shader_compile(
 
 		if (SUCCEEDED(_result))
 		{
+			shader_progress::compiled();
 			IWriter* file = FS.w_open(file_name);
 
 			u32 const crc = crc32(pShaderBuf->GetBufferPointer(), pShaderBuf->GetBufferSize());

@@ -481,6 +481,41 @@ namespace shader_progress
 		if (!completed)
 			s_what = nullptr; // stopped (vid_restart, quit): not shown as done
 	}
+
+	// Compiles while the game runs, counted per burst: one more than 2 s after the last starts a new count
+	static const u64 kLiveShowMs = 2000;
+	static std::atomic<u32> s_live_count{ 0 };
+	static std::atomic<u64> s_live_last_ms{ 0 };
+
+	void compiled()
+	{
+		const u64 now = GetTickCount64();
+		if (now - s_live_last_ms > kLiveShowMs)
+			s_live_count = 1;
+		else
+			++s_live_count;
+		s_live_last_ms = now;
+	}
+}
+
+// "Compiling shaders: N" while shaders are compiled during the game (the frames stall meanwhile, so it mostly shows
+// right after each one)
+static void DrawLiveCompiles(const ImGuiIO& io, float scale)
+{
+	using namespace shader_progress;
+	if (GetTickCount64() - s_live_last_ms > kLiveShowMs || !s_live_count)
+		return;
+	ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y - 40.f * scale), ImGuiCond_Always, ImVec2(0.5f, 1.f));
+	ImGui::SetNextWindowBgAlpha(0.7f);
+	const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+		ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
+		ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoMove;
+	if (ImGui::Begin("##shader_compiles", nullptr, flags))
+	{
+		ImGui::SetWindowFontScale(scale);
+		ImGui::Text("Compiling shaders: %u", u32(s_live_count));
+	}
+	ImGui::End();
 }
 
 void CShaderProgressOverlay::Draw()
@@ -488,22 +523,27 @@ void CShaderProgressOverlay::Draw()
 	using namespace shader_progress;
 	static const u64 kShowDoneMs = 4000;
 
-	const char* what = s_what;
-	if (!ps_r4_shader_progress || !what)
-		return;
-	const bool running = s_running;
-	const u64 now = GetTickCount64();
-	const u64 end_ms = s_end_ms;
-	if (!running && now - end_ms > kShowDoneMs)
+	if (!ps_r4_shader_progress)
 		return;
 
 	// Only inside an open ImGui frame (not before the engine's first ImGui::NewFrame)
 	const ImGuiContext* imgui = ImGui::GetCurrentContext();
 	if (!imgui || !imgui->WithinFrameScope)
 		return;
-
 	const ImGuiIO& io = ImGui::GetIO();
 	const float scale = _max(1.f, io.DisplaySize.y / 1080.f);
+
+	// The start's window first; compiles during the game when it isn't shown
+	const char* what = s_what;
+	const bool running = s_running;
+	const u64 now = GetTickCount64();
+	const u64 end_ms = s_end_ms;
+	if (!what || (!running && now - end_ms > kShowDoneMs))
+	{
+		DrawLiveCompiles(io, scale);
+		return;
+	}
+
 	ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y - 40.f * scale), ImGuiCond_Always, ImVec2(0.5f, 1.f));
 	ImGui::SetNextWindowBgAlpha(0.7f);
 

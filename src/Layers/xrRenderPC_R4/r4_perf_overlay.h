@@ -118,6 +118,10 @@ namespace shader_progress
 	void begin(const char* what, u32 total);
 	void step();
 	void end(bool completed);
+
+	// Any thread: a shader compiled from source (no cached variant) or a D3D12 pipeline created when first drawn,
+	// while the game runs. Shown as "Compiling shaders: N" while they keep coming and for a moment after
+	void compiled();
 }
 
 class CShaderProgressOverlay : public pureRender
