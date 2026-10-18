@@ -111,8 +111,33 @@ void dxImGuiRender::Frame()
 #endif
 }
 
+// ImGui works in the window's client area (its mouse input is in client coordinates) but draws into the back buffer.
+// When the two differ (Wine on macOS: a 2304x1296 client area for a 3456x2234 back buffer) ImGui's windows landed in
+// the top-left part of the screen and too small; scaled up to the back buffer here. Same size: nothing to do
+static void FitToBackBuffer(ImDrawData* data)
+{
+    if (!data || data->DisplaySize.x <= 0.f || data->DisplaySize.y <= 0.f || !Device.dwWidth || !Device.dwHeight)
+        return;
+    const ImVec2 scale(float(Device.dwWidth) / data->DisplaySize.x, float(Device.dwHeight) / data->DisplaySize.y);
+    if (fabsf(scale.x - 1.f) < 0.001f && fabsf(scale.y - 1.f) < 0.001f)
+        return;
+    const ImVec2 origin = data->DisplayPos;
+    for (int i = 0; i < data->CmdLists.Size; ++i)
+        for (ImDrawVert& v : data->CmdLists[i]->VtxBuffer)
+        {
+            v.pos.x = origin.x + (v.pos.x - origin.x) * scale.x;
+            v.pos.y = origin.y + (v.pos.y - origin.y) * scale.y;
+        }
+    for (int i = 0; i < data->CmdLists.Size; ++i)
+        for (ImDrawCmd& cmd : data->CmdLists[i]->CmdBuffer)
+            cmd.ClipRect = ImVec4(origin.x + (cmd.ClipRect.x - origin.x) * scale.x, origin.y + (cmd.ClipRect.y - origin.y) * scale.y,
+                                  origin.x + (cmd.ClipRect.z - origin.x) * scale.x, origin.y + (cmd.ClipRect.w - origin.y) * scale.y);
+    data->DisplaySize = ImVec2(float(Device.dwWidth), float(Device.dwHeight));
+}
+
 void dxImGuiRender::Render(ImDrawData* data)
 {
+    FitToBackBuffer(data);
 #if defined(USE_DX12)
     if (!data || data->DisplaySize.x <= 0.f || data->DisplaySize.y <= 0.f || !data->TotalVtxCount)
         return;
