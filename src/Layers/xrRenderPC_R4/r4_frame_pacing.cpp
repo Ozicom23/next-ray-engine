@@ -29,6 +29,9 @@ namespace frame_pacing
 		double gpu_begin, gpu_end; // GPU timestamps (ms on the GPU clock), 0 until known
 		float wait, sleep;
 		float step;     // the game's time step of the frame (Device.fTimeDelta, ms)
+		float msg_ms;   // the message loop before the frame (g_msg_loop_ms)
+		u32 msgs;       // window messages it handled
+		u32 mouse;      // mouse events DirectInput gave the frame
 		bool jit;       // went through the just-in-time path
 	};
 	static frame_info s_frames[kRing];
@@ -98,7 +101,8 @@ namespace frame_pacing
 	// stat_frame_pacing
 	struct sample
 	{
-		float t, interval, wait, sleep, cpu, present, gpu, gpu_interval, gpu_idle, queue, latency, step;
+		float t, interval, wait, sleep, cpu, present, gpu, gpu_interval, gpu_idle, queue, latency, step, msg_ms;
+		u32 msgs, mouse;
 	};
 	static xr_vector<sample> s_samples;
 	static bool s_recording = false;
@@ -413,6 +417,9 @@ namespace frame_pacing
 		if (f.start && f.done > 1)
 			s.latency = float(qpc_ms(f.done) - qpc_ms(f.start));
 		s.step = f.step;
+		s.msg_ms = f.msg_ms;
+		s.msgs = f.msgs;
+		s.mouse = f.mouse;
 		s_samples.push_back(s);
 		s_prev_present1 = f.present1;
 		s_prev_gpu_end = f.gpu_end;
@@ -522,6 +529,35 @@ namespace frame_pacing
 		Msg("*   per frame: latency wait %.2f ms, sleep %.2f ms, CPU %.2f ms, Present %.2f ms, GPU %.2f ms, GPU idle %.2f ms, queued %.2f ms",
 			float(wait / n), float(sleep / n), float(cpu / n), float(present / n), gpu_n ? float(gpu / gpu_n) : 0.f,
 			idle_n ? float(idle / idle_n) : 0.f, queue_n ? float(queue / queue_n) : 0.f);
+		{
+			// The message loop between frames (Wine runs DirectInput's mouse hook there), and the frames that read
+			// mouse events against the others
+			double msg = 0.0, iv_mouse = 0.0, iv_still = 0.0;
+			float msg_longest = 0.f;
+			u64 msgs = 0;
+			u32 n_mouse = 0, n_still = 0;
+			for (const sample& s : s_samples)
+			{
+				msg += s.msg_ms;
+				msg_longest = _max(msg_longest, s.msg_ms);
+				msgs += s.msgs;
+				if (s.interval <= 0.f)
+					continue;
+				if (s.mouse)
+				{
+					iv_mouse += s.interval;
+					++n_mouse;
+				}
+				else
+				{
+					iv_still += s.interval;
+					++n_still;
+				}
+			}
+			Msg("*   message loop %.2f ms per frame (longest %.1f ms), %.1f messages per frame; frame interval with mouse events %.2f ms (%u frames), without %.2f ms (%u)",
+				float(msg / n), msg_longest, float(double(msgs) / n), n_mouse ? float(iv_mouse / n_mouse) : 0.f, n_mouse,
+				n_still ? float(iv_still / n_still) : 0.f, n_still);
+		}
 		Msg("*   %s, max frame latency %d, just-in-time start %s (margin %.1f ms, queue floor %.2f ms), vsync %s, r__framelimit %d",
 			HW.m_hFrameLatency ? "waitable swap chain" : "frame latency limited in Present", ps_r4_frame_latency,
 			ps_r4_frame_jit ? (s_fence ? "on" : "unavailable") : "off", ps_r4_frame_jit_margin, s_floor,
@@ -537,12 +573,12 @@ namespace frame_pacing
 			Msg("! [Frame pacing] cannot write %s", path);
 			return;
 		}
-		w->w_printf("frame,t_ms,interval_ms,wait_ms,sleep_ms,cpu_ms,present_ms,gpu_ms,gpu_interval_ms,gpu_idle_ms,queued_ms,latency_ms,step_ms\r\n");
+		w->w_printf("frame,t_ms,interval_ms,wait_ms,sleep_ms,cpu_ms,present_ms,gpu_ms,gpu_interval_ms,gpu_idle_ms,queued_ms,latency_ms,step_ms,msg_ms,msgs,mouse_events\r\n");
 		for (u32 i = 0; i < n; i++)
 		{
 			const sample& s = s_samples[i];
-			w->w_printf("%u,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\r\n", i, s.t, s.interval, s.wait, s.sleep, s.cpu,
-				s.present, s.gpu, s.gpu_interval, s.gpu_idle, s.queue, s.latency, s.step);
+			w->w_printf("%u,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%u,%u\r\n", i, s.t, s.interval, s.wait, s.sleep, s.cpu,
+				s.present, s.gpu, s.gpu_interval, s.gpu_idle, s.queue, s.latency, s.step, s.msg_ms, s.msgs, s.mouse);
 		}
 		FS.w_close(w);
 		Msg("*   written to %s", path);
@@ -593,6 +629,8 @@ namespace frame_pacing
 		}
 		f.jit = jit;
 		f.start = CPU::QPC();
+		f.msg_ms = g_msg_loop_ms;
+		f.msgs = g_msg_loop_count;
 	}
 
 	void render_begin()
@@ -602,6 +640,7 @@ namespace frame_pacing
 			return;
 		f.begin = CPU::QPC();
 		f.step = Device.fTimeDelta * 1000.f;
+		f.mouse = g_mouse_events; // input was read since the frame start
 		s_q_active = false;
 		if (!wanted() || !create_queries())
 			return;

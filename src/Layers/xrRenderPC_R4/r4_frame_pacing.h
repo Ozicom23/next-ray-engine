@@ -16,7 +16,8 @@
 //     A GPU completion fence gives the CPU-side time of each frame's end, which ties the GPU clock to the CPU clock
 //   r4_frame_jit_margin: ms of queued work kept ahead of the GPU (1.0); more absorbs CPU spikes, less cuts more lag
 //   stat_frame_pacing [seconds]: each frame's interval, latency wait, sleep, CPU, Present, GPU time, GPU idle, queue
-//     time and latency (frame start to GPU completion) to logs/frame_pacing_<time>.csv, and a summary to the log (10 s)
+//     time, latency (frame start to GPU completion), time in the message loop before the frame with its message count and
+//     the mouse events read, to logs/frame_pacing_<time>.csv, and a summary to the log (10 s)
 namespace frame_pacing
 {
 	void start(float seconds);

@@ -45,6 +45,11 @@
 ENGINE_API CRenderDevice Device;
 ENGINE_API bool g_svp_keep_main_prev = false;
 ENGINE_API bool g_stats_gather_timers = false;
+// stat_frame_pacing: window messages handled since the last frame and the time in the message loop (PeekMessage included:
+// Wine runs the low-level mouse hook that feeds DirectInput inside it), and the mouse events DirectInput gave the frame
+ENGINE_API float g_msg_loop_ms = 0.f;
+ENGINE_API u32 g_msg_loop_count = 0;
+ENGINE_API u32 g_mouse_events = 0;
 ENGINE_API CLoadScreenRenderer load_screen_renderer;
 ENGINE_API CRenderDevice* DevicePtr = nullptr;
 
@@ -652,15 +657,22 @@ void CRenderDevice::message_loop()
 #endif
 	MSG msg;
 	PeekMessage(&msg, NULL, 0U, 0U, PM_NOREMOVE);
+	u64 loop_start = CPU::QPC();
+	u32 handled = 0;
 	while (msg.message != WM_QUIT)
 	{
 		if (PeekMessage(&msg, NULL, 0U, 0U, PM_REMOVE))
 		{
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);
+			++handled;
 			continue;
 		}
+		g_msg_loop_ms = float(double(CPU::QPC() - loop_start) * 1000.0 / double(CPU::qpc_freq));
+		g_msg_loop_count = handled;
 		on_idle();
+		loop_start = CPU::QPC();
+		handled = 0;
 	}
 }
 

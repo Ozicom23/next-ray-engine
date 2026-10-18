@@ -447,6 +447,7 @@ void CInput::MouseUpdate()
 		hr = pMouse->GetDeviceData(sizeof(DIDEVICEOBJECTDATA), &od[0], &dwElements, 0);
 		if (hr != S_OK) return;
 	};
+	g_mouse_events = dwElements; // stat_frame_pacing
 
 #ifndef _EDITOR
 	if (Device.dwPrecacheFrame)

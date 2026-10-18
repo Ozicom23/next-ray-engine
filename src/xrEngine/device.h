@@ -541,6 +541,9 @@ extern ENGINE_API bool g_bBenchmark;
 extern ENGINE_API bool g_svp_keep_main_prev;
 // Set by the renderer while the performance overlay needs the engine frame timers (rs_stats collects them too)
 extern ENGINE_API bool g_stats_gather_timers;
+extern ENGINE_API float g_msg_loop_ms;
+extern ENGINE_API u32 g_msg_loop_count;
+extern ENGINE_API u32 g_mouse_events;
 
 typedef xr_delegate<bool()> LOADING_EVENT;
 extern ENGINE_API xr_list<LOADING_EVENT> g_loading_events;
