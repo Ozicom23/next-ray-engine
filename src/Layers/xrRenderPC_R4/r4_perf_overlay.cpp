@@ -9,11 +9,15 @@
 #include <psapi.h>
 #pragma comment(lib, "psapi.lib")
 #include <algorithm>
+#include <atomic>
 
 #include "imgui.h"
 #include "imgui_internal.h"
 
 CPerfOverlay g_PerfOverlay;
+CShaderProgressOverlay g_ShaderProgressOverlay;
+
+int ps_r4_shader_progress = 1;
 
 static const char* s_quality_names[] = { "Ultra Performance", "Performance", "Balanced", "Quality", "Native AA" };
 #ifdef USE_DX12
@@ -443,6 +447,86 @@ void CPerfOverlay::Draw()
 					ImGui::Text("%-28s %5.2f", "outside passes (UI, present)", m_show_gpu_ms - top_level);
 			}
 		}
+	}
+	ImGui::End();
+}
+
+namespace shader_progress
+{
+	static std::atomic<const char*> s_what{ nullptr }; // nullptr: nothing to show
+	static std::atomic<u32> s_total{ 0 };
+	static std::atomic<u32> s_done{ 0 };
+	static std::atomic<bool> s_running{ false };
+	static std::atomic<u64> s_start_ms{ 0 };
+	static std::atomic<u64> s_end_ms{ 0 };
+
+	void begin(const char* what, u32 total)
+	{
+		if (!total)
+			return;
+		s_total = total;
+		s_done = 0;
+		s_start_ms = GetTickCount64();
+		s_end_ms = 0;
+		s_running = true;
+		s_what = what;
+	}
+
+	void step() { ++s_done; }
+
+	void end(bool completed)
+	{
+		s_end_ms = GetTickCount64();
+		s_running = false;
+		if (!completed)
+			s_what = nullptr; // stopped (vid_restart, quit): not shown as done
+	}
+}
+
+void CShaderProgressOverlay::Draw()
+{
+	using namespace shader_progress;
+	static const u64 kShowDoneMs = 4000;
+
+	const char* what = s_what;
+	if (!ps_r4_shader_progress || !what)
+		return;
+	const bool running = s_running;
+	const u64 now = GetTickCount64();
+	const u64 end_ms = s_end_ms;
+	if (!running && now - end_ms > kShowDoneMs)
+		return;
+
+	// Only inside an open ImGui frame (not before the engine's first ImGui::NewFrame)
+	const ImGuiContext* imgui = ImGui::GetCurrentContext();
+	if (!imgui || !imgui->WithinFrameScope)
+		return;
+
+	const ImGuiIO& io = ImGui::GetIO();
+	const float scale = _max(1.f, io.DisplaySize.y / 1080.f);
+	ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y - 40.f * scale), ImGuiCond_Always, ImVec2(0.5f, 1.f));
+	ImGui::SetNextWindowBgAlpha(0.7f);
+
+	const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+		ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
+		ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoMove;
+
+	if (ImGui::Begin("##shader_progress", nullptr, flags))
+	{
+		ImGui::SetWindowFontScale(scale);
+		const u32 total = s_total;
+		const u32 done = _min(u32(s_done), total);
+		const float seconds = float(((running ? now : end_ms) - s_start_ms) / 1000.0);
+		if (running)
+		{
+			ImGui::Text("%s   %u / %u   %.0f s", what, done, total, seconds);
+			string32 percent;
+			xr_sprintf(percent, "%.0f%%", 100.f * float(done) / float(total));
+			ImGui::ProgressBar(float(done) / float(total), ImVec2(420.f * scale, 0.f), percent);
+			ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.f), "You can play meanwhile: until it is done, effects may stutter once");
+		}
+		else
+			ImGui::Text("%s: done, %u in %.0f s", what, total, seconds);
 	}
 	ImGui::End();
 }

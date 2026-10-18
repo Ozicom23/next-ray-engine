@@ -107,3 +107,25 @@ private:
 };
 
 extern CPerfOverlay g_PerfOverlay;
+
+// Shader compilation progress (console: r4_shader_progress): a small window at the bottom of the screen while the
+// shaders of earlier runs are created in the background at the game start (DX11: the shader warm-up in r4.cpp, DX12:
+// the pipeline cache in dx12Pipeline.cpp), and for a few seconds after. Display-only: the menu and the game run on
+// meanwhile, but until it is done an effect drawn for the first time can still stutter once.
+namespace shader_progress
+{
+	// From the worker thread: begin with the number of items, step after each, end when done or stopped
+	void begin(const char* what, u32 total);
+	void step();
+	void end(bool completed);
+}
+
+class CShaderProgressOverlay : public pureRender
+{
+public:
+	// Same place in the frame as the performance overlay
+	void OnRender() override { Draw(); }
+	void Draw();
+};
+
+extern CShaderProgressOverlay g_ShaderProgressOverlay;

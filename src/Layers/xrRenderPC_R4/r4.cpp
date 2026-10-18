@@ -555,6 +555,7 @@ void CRender::create()
 
 	// Just before ImGui itself renders (priority -5)
 	Device.seqRender.Add(&g_PerfOverlay, -4);
+	Device.seqRender.Add(&g_ShaderProgressOverlay, -4);
 }
 
 namespace hiz { void destroy(); }
@@ -581,6 +582,7 @@ void CRender::destroy()
 	for (u32 type = upscaler_dlss; type <= upscaler_fsr; ++type)
 		GetUpscaler(type)->Shutdown();
 	Device.seqRender.Remove(&g_PerfOverlay);
+	Device.seqRender.Remove(&g_ShaderProgressOverlay);
 	g_PerfOverlay.Destroy();
 	frame_pacing::destroy();
 	PSLibrary.OnDestroy();
@@ -720,17 +722,33 @@ namespace shader_warmup
 		HANDLE find = FindFirstFileA((root + "*").c_str(), &fd);
 		if (find == INVALID_HANDLE_VALUE)
 			return;
-		xr_vector<u8> buf;
+
+		// The shaders first (a folder each, named by the source file), so the progress shows their number
+		struct Item
+		{
+			xr_string path;
+			char type;
+		};
+		xr_vector<Item> items;
 		do
 		{
-			if (s_stop)
-				break;
 			if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || fd.cFileName[0] == '.')
 				continue;
 			const char* dot = strrchr(fd.cFileName, '.');
 			if (!dot || xr_strlen(dot) != 3)
 				continue;
-			const xr_string path = root + fd.cFileName + "\\" + variant;
+			items.push_back({ root + fd.cFileName + "\\" + variant, dot[1] });
+		} while (FindNextFileA(find, &fd));
+		FindClose(find);
+
+		shader_progress::begin("Compiling shaders", u32(items.size()));
+		xr_vector<u8> buf;
+		for (const Item& item : items)
+		{
+			if (s_stop)
+				break;
+			struct Step { ~Step() { shader_progress::step(); } } counted; // also on continue
+			const xr_string& path = item.path;
 			HANDLE file = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
 			if (file == INVALID_HANDLE_VALUE)
 			{
@@ -750,7 +768,7 @@ namespace shader_warmup
 			const void* code = buf.data() + 4;
 			const SIZE_T len = size - 4;
 			HRESULT hr = E_FAIL;
-			switch (dot[1])
+			switch (item.type)
 			{
 			case 'p': { ID3DPixelShader* sh = nullptr; hr = HW.pDevice->CreatePixelShader(code, len, nullptr, &sh); _RELEASE(sh); } break;
 			case 'v': { ID3DVertexShader* sh = nullptr; hr = HW.pDevice->CreateVertexShader(code, len, nullptr, &sh); _RELEASE(sh); } break;
@@ -761,8 +779,8 @@ namespace shader_warmup
 			default: continue;
 			}
 			SUCCEEDED(hr) ? created++ : failed++;
-		} while (FindNextFileA(find, &fd));
-		FindClose(find);
+		}
+		shader_progress::end(!s_stop);
 		Msg("* Shader warm-up: %u shaders created in %.2f s (%u without a cached variant for these settings, %u failed), variant %s",
 			created, timer.GetElapsed_sec(), missing, failed, variant.c_str());
 	}

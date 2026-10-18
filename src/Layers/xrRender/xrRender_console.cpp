@@ -743,6 +743,7 @@ extern int ps_r4_post_pingpong;
 extern int ps_r4_upscaler_nvg_blur;
 extern int ps_r4_tree_bender_cull;
 extern int ps_r4_shader_warmup;
+extern int ps_r4_shader_progress;
 extern int ps_r4_shader_patches;
 extern int ps_r4_upscaler_jitter;
 extern int ps_r4_upscaler_scope_late;
@@ -1637,6 +1638,7 @@ void xrRender_initconsole()
 	CMD4(CCC_Integer, "r4_upscaler_nvg_blur", &ps_r4_upscaler_nvg_blur, 0, 1); // night vision blur at output resolution
 	CMD4(CCC_Integer, "r4_tree_bender_cull", &ps_r4_tree_bender_cull, 0, 1); // benders out of a tree's reach go last
 	CMD4(CCC_Integer, "r4_shader_warmup", &ps_r4_shader_warmup, 0, 1); // cached shaders created at the game start
+	CMD4(CCC_Integer, "r4_shader_progress", &ps_r4_shader_progress, 0, 1); // shader compilation progress window at the game start
 	CMD4(CCC_Integer, "r4_shader_patches", &ps_r4_shader_patches, 0, 0xFFF); // patch mod shader changes in use (bits), vid_restart
 	CMD4(CCC_Integer, "r4_upscaler_jitter", &ps_r4_upscaler_jitter, 0, 2); // 1 on, 0 off, 2 off while aiming through 3DSS lenses drawn before the upscaler
 	CMD4(CCC_Integer, "r4_upscaler_scope_late", &ps_r4_upscaler_scope_late, 0, 1); // 3DSS lenses after the upscaler, vid_restart

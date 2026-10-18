@@ -5,6 +5,8 @@
 #include "dx12Internal.h"
 #include <D3DCompiler.h>
 
+namespace shader_progress { void begin(const char* what, u32 total); void step(); void end(bool completed); } // r4_perf_overlay.cpp
+
 namespace dx12
 {
 bool ReflectShader(const void* code, SIZE_T size, Stage stage, ShaderBindings& b)
@@ -1298,11 +1300,13 @@ void Device::StartPipelineCache(const char* path)
 			layouts[hash] = l;
 			return l;
 		};
+		shader_progress::begin("Compiling shader pipelines", UINT(job->pipelines.size()));
 		UINT created = 0, present = 0, incomplete = 0;
 		for (const DiskPipeline& p : job->pipelines)
 		{
 			if (d.disk_stop)
 				break;
+			struct Step { ~Step() { shader_progress::step(); } } counted; // also on continue
 			Shader* sh[5] = {};
 			bool ok = true;
 			for (UINT i = 0; i < 5; ++i)
@@ -1358,6 +1362,7 @@ void Device::StartPipelineCache(const char* path)
 		for (auto& kv : layouts)
 			if (kv.second)
 				kv.second->Release();
+		shader_progress::end(!d.disk_stop);
 		Msg("* D3D12: %u pipelines created ahead from the cache in %.1f s (%u there already, %u incomplete)", created,
 		    float(GetTickCount64() - start) / 1000.f, present, incomplete);
 		delete job;
