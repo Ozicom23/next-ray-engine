@@ -1373,8 +1373,12 @@ void _InitializeFont(CGameFont*& F, LPCSTR section, u32 flags)
 		F->SetInterval(pSettings->r_fvector2(section, "interval"));
 }
 
+// The thread that created the application (the main thread): the only one that draws the loading screen
+static DWORD s_app_thread = 0;
+
 CApplication::CApplication()
 {
+	s_app_thread = GetCurrentThreadId();
 	ll_dwReference = 0;
 
 	max_load_stage = 0;
@@ -1614,6 +1618,10 @@ PROTECT_API void CApplication::LoadDraw()
 	PROF_EVENT();
 
 	if (g_appLoaded) return;
+	// The level loads on a worker thread while the main one loads A-Life (alife_graph_registry.cpp); its load stages
+	// only count. Drawing from both used the immediate context from two threads, and under D3DMetal (macOS) the
+	// loading screen's Present then waited forever
+	if (GetCurrentThreadId() != s_app_thread) return;
 	Device.dwFrame += 1;
 
 

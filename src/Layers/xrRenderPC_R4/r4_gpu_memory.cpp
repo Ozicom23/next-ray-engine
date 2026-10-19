@@ -18,6 +18,7 @@ namespace
 	struct Ticket final : public IUnknown
 	{
 		std::atomic<ULONG> refs;
+		std::atomic<bool> dead; // released by its resource: unlinked and freed by prune()
 		category cat;
 		u64 bytes;
 		u32 width, height;
@@ -50,30 +51,47 @@ namespace
 	std::atomic<u32> s_resources[count];
 	SRWLOCK s_lock = SRWLOCK_INIT;
 	Ticket* s_head = nullptr;
+	std::atomic<u32> s_dead{ 0 };
 
 	thread_local category t_scope_cat = automatic;
 	thread_local const char* t_scope_name = nullptr;
 
+	// No lock here: D3D calls it with its own lock held, and D3DMetal (macOS) also from its own threads, where taking
+	// s_lock hung the game (the main thread waiting for s_lock in track() with no holder, or Present waiting for
+	// D3DMetal). The ticket stays in the list, marked dead, until prune() frees it
 	ULONG STDMETHODCALLTYPE Ticket::Release()
 	{
 		const ULONG left = --refs;
 		if (left)
 			return left;
 
-		AcquireSRWLockExclusive(&s_lock);
-		if (prev)
-			prev->next = next;
-		else
-			s_head = next;
-		if (next)
-			next->prev = prev;
 		s_bytes[cat] -= bytes;
 		--s_resources[cat];
-		ReleaseSRWLockExclusive(&s_lock);
-
-		this->~Ticket();
-		free(this);
+		dead.store(true, std::memory_order_release);
+		++s_dead;
 		return 0;
+	}
+
+	// Under s_lock (exclusive): dead tickets out of the list and freed
+	void prune()
+	{
+		for (Ticket* k = s_head; k;)
+		{
+			Ticket* next = k->next;
+			if (k->dead.load(std::memory_order_acquire))
+			{
+				if (k->prev)
+					k->prev->next = next;
+				else
+					s_head = next;
+				if (next)
+					next->prev = k->prev;
+				k->~Ticket();
+				free(k);
+				--s_dead;
+			}
+			k = next;
+		}
 	}
 
 	bool is_block_compressed(DXGI_FORMAT f)
@@ -287,6 +305,7 @@ void track(ID3DResource* res, const char* name, category cat)
 		return;
 	Ticket* t = new (mem) Ticket();
 	t->refs = 1;
+	t->dead = false;
 	t->prev = t->next = nullptr;
 	if (!describe(res, cat, *t))
 	{
@@ -310,6 +329,8 @@ void track(ID3DResource* res, const char* name, category cat)
 	// against the main thread freeing resources (D3DMetal on macOS, at a save's load). A ticket that is not
 	// attached, or that another thread's ticket replaces, is uncounted again by its last Release
 	AcquireSRWLockExclusive(&s_lock);
+	if (s_dead > 1024)
+		prune();
 	t->next = s_head;
 	if (s_head)
 		s_head->prev = t;
@@ -389,9 +410,12 @@ void dump(u32 top_n)
 
 	// Copy under the lock, sort and print without it
 	xr_vector<Entry> textures, raw_textures, models, targets;
-	AcquireSRWLockShared(&s_lock);
+	AcquireSRWLockExclusive(&s_lock);
+	prune();
 	for (const Ticket* k = s_head; k; k = k->next)
 	{
+		if (k->dead.load(std::memory_order_acquire))
+			continue;
 		Entry e;
 		e.cat = k->cat;
 		e.bytes = k->bytes;
@@ -422,7 +446,7 @@ void dump(u32 top_n)
 			break;
 		}
 	}
-	ReleaseSRWLockShared(&s_lock);
+	ReleaseSRWLockExclusive(&s_lock);
 
 	print_textures("largest textures", textures, top_n);
 	print_textures("largest uncompressed textures", raw_textures, top_n);
