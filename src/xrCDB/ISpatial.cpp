@@ -119,6 +119,9 @@ void ISpatial::Unregister()
 	{
 		// remove
 		xrSRWLockGuard guard(&spatial.space->db_lock, false);
+		// Checked again under the lock: another thread may have removed it meanwhile (null node_ptr in remove)
+		if (!spatial.node_ptr)
+			return;
 		spatial.space->remove(this);
 		spatial.node_ptr = nullptr;
 		spatial.sector = nullptr;
@@ -138,6 +141,8 @@ void ISpatial::Move()
 			return;		// ???
 
 		xrSRWLockGuard guard(&spatial.space->db_lock, false);
+		if (!spatial.node_ptr)
+			return; // unregistered by another thread meanwhile
 		spatial.space->remove(this);
 		spatial.space->insert(this);
 	}
