@@ -369,6 +369,17 @@ void dxRenderDeviceRender::WaitFrame(bool game_frame)
 	float wait_ms;
 	{
 		PROF_EVENT("Frame latency wait");
+#ifdef USE_DX12
+		// XeSS frame generation: XeLL's sleep is the only latency control it supports
+		if (framegen::latency_managed())
+		{
+			CTimer timer;
+			timer.Start();
+			framegen::frame_begin();
+			wait_ms = timer.GetElapsed_sec() * 1000.f;
+		}
+		else
+#endif
 		wait_ms = HW.WaitFrameLatency();
 	}
 	frame_pacing::frame_begin(wait_ms, game_frame);
@@ -384,6 +395,9 @@ void dxRenderDeviceRender::Begin()
 #ifdef USE_DX11
 	g_PerfOverlay.GpuFrameBegin();
 	frame_pacing::render_begin();
+#endif
+#ifdef USE_DX12
+	framegen::render_begin();
 #endif
 
 	RCache.OnFrameBegin();
@@ -438,6 +452,11 @@ void dxRenderDeviceRender::End()
 		void dx12_take_pending_screenshots();
 		dx12_take_pending_screenshots();
 	}
+#elif defined(USE_DX11)
+	{
+		void dx11_take_pending_screenshots();
+		dx11_take_pending_screenshots();
+	}
 #endif
 
 #if defined(USE_DX10) || defined(USE_DX11)
@@ -464,6 +483,7 @@ void dxRenderDeviceRender::End()
 		// The frame's commands go to the queue, then the swap chain presents
 		framegen::skip_frame();
 		HW.pContext->Present(HW.m_pSwapChain, present_interval, present_flags);
+		framegen::after_present();
 #else
 		HW.m_pSwapChain->Present(present_interval, present_flags);
 #endif

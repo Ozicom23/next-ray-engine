@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "r4_frame_pacing.h"
 #include "../xrRender/HW.h"
+#include "../../xrEngine/Stats.h"
 #include <algorithm>
 #include <atomic>
 #include <thread>
@@ -15,6 +16,10 @@ float ps_r4_frame_jit_margin = 1.f;   // ms of queued work kept ahead of the GPU
 namespace frame_pacing
 {
 	static double qpc_ms(u64 qpc) { return double(qpc) * 1000.0 / double(CPU::qpc_freq); }
+
+	// The engine's stage timers (Device.Statistic, gathered while recording), per frame in the CSV
+	static const u32 kStages = 9;
+	static const char* kStageNames = "st_engine_ms,st_scheduler_ms,st_objects_ms,st_physics_ms,st_ai_ms,st_animation_ms,st_render_ms,st_calc_ms,st_hom_ms";
 
 	// Frames by present id: the frame being built has id s_id; its Present signals the fence with that id
 	static const u32 kRing = 32;
@@ -32,6 +37,8 @@ namespace frame_pacing
 		float msg_ms;   // the message loop before the frame (g_msg_loop_ms)
 		u32 msgs;       // window messages it handled
 		u32 mouse;      // mouse events DirectInput gave the frame
+		float kb_ms, mouse_ms, mouse_read_ms; // the input step: keyboard read, mouse update, its DirectInput read
+		float stage[kStages]; // the engine's stage timers of the frame (kStageNames), from the next frame's start
 		bool jit;       // went through the just-in-time path
 	};
 	static frame_info s_frames[kRing];
@@ -103,6 +110,8 @@ namespace frame_pacing
 	{
 		float t, interval, wait, sleep, cpu, present, gpu, gpu_interval, gpu_idle, queue, latency, step, msg_ms;
 		u32 msgs, mouse;
+		float kb_ms, mouse_ms, mouse_read_ms;
+		float stage[kStages];
 	};
 	static xr_vector<sample> s_samples;
 	static bool s_recording = false;
@@ -120,6 +129,8 @@ namespace frame_pacing
 	static u64 s_prev_retired = 0;
 
 	static bool wanted() { return ps_r4_frame_jit || s_recording; }
+
+	bool recording() { return s_recording; }
 
 	template <typename T, u32 N>
 	static void ring_push(T (&v)[N], u32& n, u32& pos, T x)
@@ -420,6 +431,10 @@ namespace frame_pacing
 		s.msg_ms = f.msg_ms;
 		s.msgs = f.msgs;
 		s.mouse = f.mouse;
+		s.kb_ms = f.kb_ms;
+		s.mouse_ms = f.mouse_ms;
+		s.mouse_read_ms = f.mouse_read_ms;
+		memcpy(s.stage, f.stage, sizeof(s.stage));
 		s_samples.push_back(s);
 		s_prev_present1 = f.present1;
 		s_prev_gpu_end = f.gpu_end;
@@ -573,12 +588,15 @@ namespace frame_pacing
 			Msg("! [Frame pacing] cannot write %s", path);
 			return;
 		}
-		w->w_printf("frame,t_ms,interval_ms,wait_ms,sleep_ms,cpu_ms,present_ms,gpu_ms,gpu_interval_ms,gpu_idle_ms,queued_ms,latency_ms,step_ms,msg_ms,msgs,mouse_events\r\n");
+		w->w_printf("frame,t_ms,interval_ms,wait_ms,sleep_ms,cpu_ms,present_ms,gpu_ms,gpu_interval_ms,gpu_idle_ms,queued_ms,latency_ms,step_ms,msg_ms,msgs,mouse_events,input_kb_ms,input_mouse_ms,input_mouse_read_ms,%s\r\n", kStageNames);
 		for (u32 i = 0; i < n; i++)
 		{
 			const sample& s = s_samples[i];
-			w->w_printf("%u,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%u,%u\r\n", i, s.t, s.interval, s.wait, s.sleep, s.cpu,
-				s.present, s.gpu, s.gpu_interval, s.gpu_idle, s.queue, s.latency, s.step, s.msg_ms, s.msgs, s.mouse);
+			w->w_printf("%u,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%u,%u,%.3f,%.3f,%.3f", i, s.t, s.interval, s.wait, s.sleep, s.cpu,
+				s.present, s.gpu, s.gpu_interval, s.gpu_idle, s.queue, s.latency, s.step, s.msg_ms, s.msgs, s.mouse, s.kb_ms, s.mouse_ms, s.mouse_read_ms);
+			for (u32 k = 0; k < kStages; ++k)
+				w->w_printf(",%.3f", s.stage[k]);
+			w->w_printf("\r\n");
 		}
 		FS.w_close(w);
 		Msg("*   written to %s", path);
@@ -605,6 +623,17 @@ namespace frame_pacing
 
 	void frame_begin(float wait_ms, bool game_frame)
 	{
+		// The frame before has ended: its stage timers are final
+		if (s_recording && Device.Statistic)
+		{
+			frame_info& prev = frame(s_id - 1);
+			const CStats* st = Device.Statistic;
+			const CStatTimer* timers[kStages] = { &st->EngineTOTAL, &st->Sheduler, &st->UpdateClient, &st->Physics, &st->AI_Think,
+				&st->Animation, &st->RenderTOTAL, &st->RenderCALC, &st->RenderCALC_HOM };
+			if (prev.id == s_id - 1)
+				for (u32 i = 0; i < kStages; ++i)
+					prev.stage[i] = timers[i]->last;
+		}
 		frame_info& f = cur();
 		if (f.start)
 			return; // a frame that did not present (the 3D scope's view): one start per presented frame
@@ -641,6 +670,9 @@ namespace frame_pacing
 		f.begin = CPU::QPC();
 		f.step = Device.fTimeDelta * 1000.f;
 		f.mouse = g_mouse_events; // input was read since the frame start
+		f.kb_ms = g_input_kb_ms;
+		f.mouse_ms = g_input_mouse_ms;
+		f.mouse_read_ms = g_input_mouse_read_ms;
 		s_q_active = false;
 		if (!wanted() || !create_queries())
 			return;

@@ -14,6 +14,10 @@ IInputReceiver dummyController;
 ENGINE_API float psMouseSens = 1.f;
 ENGINE_API float psMouseSensScale = 1.f;
 ENGINE_API float psMouseSensVerticalK = 1.f;
+// mouse_filter 0/1: the camera turns by the average of this and the last frame's mouse movement (Quake's m_filter). For
+// mouse updates that don't line up with the frames: under Wine on macOS about one per display refresh reaches the game,
+// so a frame got one or two and the camera turned by uneven steps (felt as stutter). Costs half a frame of delay
+ENGINE_API int psMouseFilter = 0;
 ENGINE_API Flags32 psMouseInvert = {FALSE};
 
 float stop_vibration_time = flt_max;
@@ -63,6 +67,8 @@ CInput::CInput(BOOL bExclusive, int deviceForInit)
 	ZeroMemory(timeStamp, sizeof(timeStamp));
 	ZeroMemory(timeSave, sizeof(timeStamp));
 	ZeroMemory(offs, sizeof(offs));
+	ZeroMemory(filter_prev, sizeof(filter_prev));
+	ZeroMemory(filter_rest, sizeof(filter_rest));
 
 	//===================== Dummy pack
 	iCapture(&dummyController);
@@ -424,6 +430,34 @@ BOOL CInput::iGetAsyncKeyState(int dik)
 		return FALSE; //unknown key ???
 }
 
+void CInput::inject_key(int dik, bool press)
+{
+	if (dik < 0 || dik >= COUNT_KB_BUTTONS || cbStack.empty())
+		return;
+	KBState[dik] = press;
+	if (press)
+		cbStack.back()->IR_OnKeyboardPress(dik);
+	else
+		cbStack.back()->IR_OnKeyboardRelease(dik);
+}
+
+void CInput::inject_mouse_button(int btn, bool press)
+{
+	if (btn < 0 || btn >= COUNT_MOUSE_BUTTONS || cbStack.empty())
+		return;
+	mouseState[btn] = press;
+	if (press)
+		cbStack.back()->IR_OnMousePress(btn);
+	else
+		cbStack.back()->IR_OnMouseRelease(btn);
+}
+
+void CInput::inject_mouse_move(int dx, int dy)
+{
+	if (!cbStack.empty())
+		cbStack.back()->IR_OnMouseMove(dx, dy);
+}
+
 BOOL CInput::iGetAsyncBtnState(int btn)
 {
 	if ((btn == 0 || btn == 1) && !!GetSystemMetrics(SM_SWAPBUTTON))
@@ -439,6 +473,7 @@ void CInput::MouseUpdate()
 
 	VERIFY(pMouse);
 
+	const u64 t_read = CPU::QPC();
 	hr = pMouse->GetDeviceData(sizeof(DIDEVICEOBJECTDATA), &od[0], &dwElements, 0);
 	if ((hr == DIERR_INPUTLOST) || (hr == DIERR_NOTACQUIRED))
 	{
@@ -448,6 +483,7 @@ void CInput::MouseUpdate()
 		if (hr != S_OK) return;
 	};
 	g_mouse_events = dwElements; // stat_frame_pacing
+	g_input_mouse_read_ms = float(double(CPU::QPC() - t_read) * 1000.0 / double(CPU::qpc_freq));
 
 #ifndef _EDITOR
 	if (Device.dwPrecacheFrame)
@@ -622,9 +658,28 @@ void CInput::MouseUpdate()
 		cbStack.back()->IR_OnMouseHold(7);
 	}
 
+	// mouse_filter: half of this frame's movement and half of the last frame's, also in a frame without new movement;
+	// the fractions carry over, so the camera ends up where it would have
+	int move[2] = { offs[0], offs[1] };
+	if (psMouseFilter)
+	{
+		for (int axis = 0; axis < 2; ++axis)
+		{
+			const float want = 0.5f * float(offs[axis] + filter_prev[axis]) + filter_rest[axis];
+			move[axis] = int(want); // toward zero, the rest next frame
+			filter_rest[axis] = want - float(move[axis]);
+			filter_prev[axis] = offs[axis];
+		}
+	}
+	else
+	{
+		filter_prev[0] = filter_prev[1] = 0;
+		filter_rest[0] = filter_rest[1] = 0.f;
+	}
+	if (move[0] || move[1]) cbStack.back()->IR_OnMouseMove(move[0], move[1]);
+
 	if (dwElements)
 	{
-		if (offs[0] || offs[1]) cbStack.back()->IR_OnMouseMove(offs[0], offs[1]);
 		if (offs[2]) cbStack.back()->IR_OnMouseWheel(offs[2]);
 	}
 	else
@@ -724,8 +779,14 @@ void CInput::OnFrame(void)
 	PROF_EVENT("CInput::OnFrame");
 	RDEVICE.Statistic->Input.Begin();
 	dwCurTime = RDEVICE.TimerAsync_MMT();
+	const u64 t_start = CPU::QPC();
 	if (pKeyboard) KeyUpdate();
+	const u64 t_kb = CPU::QPC();
+	g_input_mouse_read_ms = 0.f;
 	if (pMouse) MouseUpdate();
+	const double to_ms = 1000.0 / double(CPU::qpc_freq);
+	g_input_kb_ms = float(double(t_kb - t_start) * to_ms);
+	g_input_mouse_ms = float(double(CPU::QPC() - t_kb) * to_ms); // stat_frame_pacing
 	RDEVICE.Statistic->Input.End();
 }
 

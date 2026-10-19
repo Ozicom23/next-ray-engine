@@ -781,6 +781,9 @@ void CHW::DestroySwapChain()
     }
     _SHOW_REF("refCount:m_pSwapChain", m_pSwapChain);
     _RELEASE(m_pSwapChain);
+#if defined(USE_DX12)
+    framegen::release(); // XeSS frame generation: its context and the native swap chain, once nothing holds its proxy
+#endif
 }
 
 void CHW::SetupFrameLatency()

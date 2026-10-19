@@ -53,6 +53,9 @@ private:
 	u32 timeStamp[COUNT_MOUSE_AXIS];
 	u32 timeSave[COUNT_MOUSE_AXIS];
 	int offs[COUNT_MOUSE_AXIS];
+	// mouse_filter: the last frame's movement and the fractions not applied yet (x, y)
+	int filter_prev[2];
+	float filter_rest[2];
 	BOOL mouseState[COUNT_MOUSE_BUTTONS];
 
 	//----------------------
@@ -103,6 +106,12 @@ public:
 	bool dik_to_text(int dik, bool shift, bool caps, bool ctrl, bool alt, bool altgr, LPSTR dest, int dest_sz);
 
 	void feedback(u16 s1, u16 s2, float time);
+
+	// Synthetic input for the remote console (rc_key, rc_click, rc_cursor): sent to the current receiver like
+	// DirectInput's, with the key and button states kept for iGetAsyncKeyState / iGetAsyncBtnState
+	void inject_key(int dik, bool press);
+	void inject_mouse_button(int btn, bool press);
+	void inject_mouse_move(int dx, int dy);
 };
 
 extern ENGINE_API CInput* pInput;

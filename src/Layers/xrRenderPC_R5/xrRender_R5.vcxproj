@@ -561,6 +561,8 @@
     <ClInclude Include="..\xrRenderPC_R4\r2_types.h" />
     <ClInclude Include="..\xrRenderPC_R4\r4.h" />
     <ClInclude Include="..\xrRenderPC_R4\r4_dlss.h" />
+    <ClInclude Include="..\xrRenderPC_R4\r4_xess.h" />
+    <ClInclude Include="..\xrRenderPC_R4\r4_xefg.h" />
     <ClInclude Include="..\xrRenderPC_R4\r4_fsr3.h" />
     <ClInclude Include="..\xrRenderPC_R4\r4_perf_overlay.h" />
     <ClInclude Include="..\xrRenderPC_R4\r4_gpu_memory.h" />
@@ -793,6 +795,8 @@
     <ClCompile Include="..\xrRenderPC_R4\r4_rendertarget_phase_luminance.cpp" />
     <ClCompile Include="..\xrRenderPC_R4\r4_rendertarget_phase_occq.cpp" />
     <ClCompile Include="..\xrRenderPC_R4\r4_dlss.cpp" />
+    <ClCompile Include="..\xrRenderPC_R4\r4_xess.cpp" />
+    <ClCompile Include="..\xrRenderPC_R4\r4_xefg.cpp" />
     <ClCompile Include="..\xrRenderPC_R4\r4_fsr3.cpp">
       <AdditionalIncludeDirectories>$(SolutionDir)3rd party\FidelityFX-FSR3\include;$(SolutionDir)3rd party\FidelityFX-FSR3\src\shared;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>

@@ -1221,6 +1221,7 @@ void CCC_Register()
 	CMD3(CCC_Mask, "mouse_invert", &psMouseInvert, 1);
 	psMouseSens = 0.12f;
 	CMD4(CCC_Float, "mouse_sens", &psMouseSens, 0.001f, 0.6f);
+	CMD4(CCC_Integer, "mouse_filter", &psMouseFilter, 0, 1); // average of this and the last frame's movement
 
 	// demonized: vertical mouse sens
 	psMouseSensVerticalK = 1.0f;

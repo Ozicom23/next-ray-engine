@@ -572,6 +572,7 @@ void CRenderTarget::upscale_begin_scene()
 
 	Device.dwRenderWidth = m_upscale_render_w;
 	Device.dwRenderHeight = m_upscale_render_h;
+	RCache.constants_epoch++; // per-frame constants (screen_res...) again, at render resolution
 	m_upscale_saved_zb = HW.pBaseZB;
 	HW.pBaseZB = rt_upscale_depth->pZRT;
 	RImplementation.upscale_scene_active = true;
@@ -640,6 +641,10 @@ void CRenderTarget::upscale_end_scene()
 
 	Device.dwRenderWidth = m_upscale_output_w;
 	Device.dwRenderHeight = m_upscale_output_h;
+	// Per-frame constants are written once per buffer and epoch (r4_constants_per_frame): without a new epoch the 2D UI
+	// drawn after this kept the scene's screen_res (render resolution) in the buffers already written this frame, so the
+	// font shader put the inventory's text at twice its position, off screen, while upscaling
+	RCache.constants_epoch++;
 	HW.pBaseZB = m_upscale_saved_zb;
 	m_upscale_saved_zb = nullptr;
 
@@ -739,7 +744,7 @@ void CRenderTarget::phase_upscale()
 		}
 		RCache.OnFrameEnd();
 #ifdef USE_DX12
-		// FSR frame generation takes the same inputs, after the frame's post-processing (phase_combine)
+		// Frame generation (FSR, XeSS) takes the same inputs, after the frame's post-processing (phase_combine)
 		if (framegen::active())
 		{
 			framegen::FrameParams& f = framegen::g_pending;
@@ -760,6 +765,8 @@ void CRenderTarget::phase_upscale()
 			f.camera_up.set(Device.vCameraTop);
 			f.camera_right.set(Device.vCameraRight);
 			f.camera_forward.set(Device.vCameraDirection);
+			f.view.set(Device.mView);
+			f.project.set(Device.mProject);
 			framegen::g_pending_ready = m_upscale_done;
 		}
 #endif

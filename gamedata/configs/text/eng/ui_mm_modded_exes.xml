@@ -19,34 +19,34 @@
 		<text>Saves current weather conditions so they will be exactly recreated on load</text>
 	</string>
 
-	<string id="ui_mm_video_advanced_upscaler">
+	<string id="ui_mm_video_basic_upscaler">
 		<text>Upscaler</text>
 	</string>
-	<string id="ui_mm_video_advanced_upscaler_desc">
-		<text>Renders the 3D scene at a lower resolution and upscales it with a temporal upscaler. NVIDIA DLSS needs an NVIDIA RTX GPU and nvngx_dlss.dll next to the exe. AMD FSR 3.1 works on any DX11 GPU. Both need Screen Space Shaders (for motion vectors), replace SMAA and SSS TAA, and need MSAA off. (r4_upscaler)</text>
+	<string id="ui_mm_video_basic_upscaler_desc">
+		<text>Renders the 3D scene at a lower resolution and upscales it with a temporal upscaler. NVIDIA DLSS needs an NVIDIA RTX GPU and nvngx_dlss.dll next to the exe. AMD FSR 3.1 works on any DX11 GPU. Intel XeSS (DX12 only) works on any GPU with Shader Model 6.4. All need Screen Space Shaders (for motion vectors), replace SMAA and SSS TAA, and need MSAA off. (r4_upscaler)</text>
 	</string>
-	<string id="ui_mm_video_advanced_upscaler_quality">
+	<string id="ui_mm_video_basic_upscaler_quality">
 		<text>Upscaler Mode</text>
 	</string>
-	<string id="ui_mm_video_advanced_upscaler_quality_desc">
-		<text>Internal render resolution. DLSS: Native (DLAA) 100%, Quality 67%, Balanced 58%, Performance 50%, Ultra Performance 33%. FSR: Native AA 100%, Quality 67%, Balanced 59%, Performance 50%, Ultra Performance 33%. (r4_upscaler_quality)</text>
+	<string id="ui_mm_video_basic_upscaler_quality_desc">
+		<text>Internal render resolution. DLSS: Native AA (DLAA) 100%, Quality 67%, Balanced 58%, Performance 50%, Ultra Performance 33%. FSR and XeSS: Native AA 100%, Quality 67%, Balanced 59%, Performance 50%, Ultra Performance 33%. (r4_upscaler_quality)</text>
 	</string>
-	<string id="ui_mm_video_advanced_fsr_sharpness">
-		<text>FSR Sharpness</text>
+	<string id="ui_mm_video_basic_fsr_sharpness">
+		<text>Sharpness (FSR only)</text>
 	</string>
-	<string id="ui_mm_video_advanced_fsr_sharpness_desc">
-		<text>Sharpening applied by FSR after upscaling (RCAS). 0 turns it off. DLSS ignores it. (r4_fsr_sharpness)</text>
+	<string id="ui_mm_video_basic_fsr_sharpness_desc">
+		<text>Sharpening applied by AMD FSR after upscaling (RCAS). 0 turns it off. Only FSR uses it: DLSS and XeSS ignore it. (r4_fsr_sharpness)</text>
 	</string>
-	<string id="ui_mm_video_advanced_framegen">
-		<text>AMD FSR Frame Generation</text>
+	<string id="ui_mm_video_basic_framegen">
+		<text>Frame Generation</text>
 	</string>
-	<string id="ui_mm_video_advanced_framegen_desc">
-		<text>DX12 only. Shows a generated frame between every two rendered frames, so motion looks smoother at the cost of slightly more input lag. Needs an upscaler on. Works best at 45 rendered fps or more. (r4_framegen)</text>
+	<string id="ui_mm_video_basic_framegen_desc">
+		<text>DX12 only. Shows a generated frame between every two rendered frames, so motion looks smoother at the cost of slightly more input lag. Works with any upscaler, which must be on. AMD FSR works on any GPU. Intel XeSS needs Shader Model 6.4 and adds Intel XeLL latency reduction. Works best at 45 rendered fps or more. (r4_framegen)</text>
 	</string>
-	<string id="ui_mm_video_advanced_dlss_preset">
+	<string id="ui_mm_video_basic_dlss_preset">
 		<text>DLSS Preset</text>
 	</string>
-	<string id="ui_mm_video_advanced_dlss_preset_desc">
+	<string id="ui_mm_video_basic_dlss_preset_desc">
 		<text>The DLSS model. Default lets DLSS choose. J and K are the transformer models, L and M the newer ones (they need a recent nvngx_dlss.dll). (r4_dlss_preset)</text>
 	</string>
 	<string id="ui_mm_lst_dlss_preset_default">
@@ -73,8 +73,20 @@
 	<string id="ui_mm_lst_upscaler_fsr">
 		<text>AMD FSR 3.1</text>
 	</string>
+	<string id="ui_mm_lst_upscaler_xess">
+		<text>Intel XeSS</text>
+	</string>
+	<string id="ui_mm_lst_framegen_off">
+		<text>Off</text>
+	</string>
+	<string id="ui_mm_lst_framegen_fsr">
+		<text>AMD FSR</text>
+	</string>
+	<string id="ui_mm_lst_framegen_xess">
+		<text>Intel XeSS</text>
+	</string>
 	<string id="ui_mm_lst_upscaler_native">
-		<text>Native AA (DLAA)</text>
+		<text>Native AA</text>
 	</string>
 	<string id="ui_mm_lst_upscaler_quality">
 		<text>Quality</text>

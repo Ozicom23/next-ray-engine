@@ -316,12 +316,13 @@ int   ps_r4_hdr10_pda             = 0;	    // r4-only (NOTE: this is a hack to n
 int   ps_r4_hdr10_on              = 0;	    // r4-only, default = off
 int   ps_r4_hdr10_colorspace      = 2;      // r4-only, default = Rec.2020
 
-// Temporal upscaling: DLSS / FSR (r4-only)
+// Temporal upscaling: DLSS / FSR / XeSS (r4-only; XeSS in the DX12 renderer)
 u32   ps_r4_upscaler              = 0;      // r4-only, applied with vid_restart
 xr_token upscaler_token[] = {
 	{ "off", 0 },
 	{ "dlss", 1 },
 	{ "fsr", 2 },
+	{ "xess", 3 }, // DX12 renderer only
 	{ 0, 0 }
 };
 u32   ps_r4_upscaler_quality      = 3;      // r4-only, applied with vid_restart
@@ -387,7 +388,7 @@ xr_token perf_overlay_pos_token[] = {
 	{ 0, 0 }
 };
 int   ps_r4_dlss_log              = 0;      // r4-only, forward NGX log into the engine log, needs vid_restart
-u32   ps_r4_upscaler_available    = 0;      // r4-only, set by the renderer at startup: bit 0 DLSS, bit 1 FSR
+u32   ps_r4_upscaler_available    = 0;      // r4-only, set by the renderer at startup: bit 0 DLSS, bit 1 FSR, bit 2 XeSS
 
 int   ps_r4_hdr10_tonemapper   		   = 0;    // r4-only, default = ACES (Narkowicz)
 int   ps_r4_hdr10_tonemap_mode 		   = 1;	   // r4-only, default = Color
@@ -639,6 +640,8 @@ public:
 			xr_strcat(S, "dlss");
 		if (ps_r4_upscaler_available & 2)
 			xr_strcat(S, S[0] ? ",fsr" : "fsr");
+		if (ps_r4_upscaler_available & 4)
+			xr_strcat(S, S[0] ? ",xess" : "xess");
 	}
 	virtual void Info(TInfo& I) { xr_strcpy(I, "upscalers supported on this GPU (read-only)"); }
 	virtual void Save(IWriter*) {}
@@ -678,7 +681,10 @@ public:
 		HW.pContext->TraceFrames(UINT(clampr(frames, 1, 4)));
 	}
 };
-extern int ps_r4_framegen; // r4_framegen.cpp
+extern u32 ps_r4_framegen; // r4_framegen.cpp
+extern int ps_r4_xefg_ui; // r4_xefg.cpp
+// 0 and 1 as written by builds where it was a switch (FSR's)
+xr_token framegen_token[] = { { "off", 0 }, { "fsr", 1 }, { "xess", 2 }, { "0", 0 }, { "1", 1 }, { 0, 0 } };
 // r__dx12_threaded 0/1: D3D12 commands recorded on a worker thread (1), as DXVK records on its own thread, or on the
 // render thread at each call (0); switches at once
 int ps_r__dx12_threaded = 1;
@@ -1033,6 +1039,7 @@ class CCC_Screenshot : public IConsole_Command
 public:
 	CCC_Screenshot(LPCSTR N) : IConsole_Command(N)
 	{
+		bEmptyArgsHandled = TRUE; // "screenshot" alone printed the command's status and took none
 	};
 
 	virtual void Execute(LPCSTR args)
@@ -1424,7 +1431,8 @@ void xrRender_initconsole()
 	CMD1(CCC_Dx12Stats, "stat_dx12");
 	CMD2(CCC_Dx12Threaded, "r__dx12_threaded", &ps_r__dx12_threaded);
 	CMD4(CCC_Integer, "r__dx12_gpu_pacing", &ps_r__dx12_gpu_pacing, 0, 1);
-	CMD4(CCC_Integer, "r4_framegen", &ps_r4_framegen, 0, 1); // FSR frame generation, vid_restart; needs an upscaler on
+	CMD3(CCC_Token, "r4_framegen", &ps_r4_framegen, framegen_token); // off, AMD FSR or Intel XeSS, vid_restart; needs an upscaler on
+	CMD4(CCC_Integer, "r4_xefg_ui", &ps_r4_xefg_ui, 0, 1); // XeSS frame generation: UI composited (1) or interpolated, vid_restart
 #endif
 
 	//	Igor: just to test bug with rain/particles corruption

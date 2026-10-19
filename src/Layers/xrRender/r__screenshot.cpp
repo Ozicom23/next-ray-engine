@@ -45,8 +45,9 @@ IC void MouseRayFromPoint(Fvector& direction, int x, int y, Fmatrix& m_CamMat)
 
 extern int ps_r4_hdr10_on;
 
-#if defined(USE_DX12)
-// D3D12 renderer: no D3DX. The back buffer is read back through a staging copy and encoded here: JPEG with libjpeg
+#if defined(USE_DX11)
+// D3D12 renderer (and console screenshots of the D3D11 one, where D3DX11SaveTextureToMemory failed under Wine/macOS
+// and the shot was taken at the frame start, from an older swap chain buffer): no D3DX. The back buffer is read back through a staging copy and encoded here: JPEG with libjpeg
 // (linked into the exe), PNG with stored deflate blocks, DDS (BC1/BC3 or 32-bit) and TGA written directly.
 #include <setjmp.h>
 #pragma push_macro("FAR")
@@ -112,7 +113,11 @@ namespace dx12_screenshot
 	static bool read_back_buffer(xr_vector<u32>& pixels, u32& w, u32& h)
 	{
 		ID3DTexture2D* bb = nullptr;
+#ifdef USE_DX12
 		if (FAILED(HW.pDevice->GetBackBuffer(&bb)) || !bb)
+#else
+		if (FAILED(HW.m_pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&bb)) || !bb)
+#endif
 		{
 			Msg("! Screenshot: no back buffer");
 			return false;
@@ -584,7 +589,7 @@ namespace dx12_screenshot
 		FS.w_close(fs);
 	}
 }
-#endif // USE_DX12
+#endif // USE_DX11
 
 #if defined(USE_DX12)
 // The swap chain has several buffers: at the console command (frame start) the current one holds an older frame. Shots
@@ -965,6 +970,22 @@ void CRender::ScreenshotImpl(ScreenshotMode mode, LPCSTR name, CMemoryWriter* me
 }
 
 #elif defined(USE_DX10) || defined(USE_DX11)
+#ifdef USE_DX11
+// Console screenshots wait for the end of the frame, when the back buffer holds the image that goes on screen
+static bool dx11_screenshot_pending = false;
+static bool dx11_screenshot_at_frame_end = false;
+
+void dx11_take_pending_screenshots()
+{
+	if (!dx11_screenshot_pending)
+		return;
+	dx11_screenshot_pending = false;
+	dx11_screenshot_at_frame_end = true;
+	RImplementation.Screenshot(IRender_interface::SM_NORMAL, nullptr);
+	dx11_screenshot_at_frame_end = false;
+}
+#endif
+
 void CRender::ScreenshotImpl(ScreenshotMode mode, LPCSTR name, CMemoryWriter* memory_writer)
 {
 	// demonized: Disable screenshots if HDR is enabled
@@ -1090,6 +1111,31 @@ void CRender::ScreenshotImpl(ScreenshotMode mode, LPCSTR name, CMemoryWriter* me
 			string_path buf;
 			xr_sprintf(buf, sizeof(buf), "ss_%s_%s_(%s).%s", Core.UserName, timestamp(t_stemp),
 				(g_pGameLevel) ? g_pGameLevel->name().c_str() : "mainmenu", ps_r_screenshot_token == 0 ? "jpg" : (ps_r_screenshot_token == 1 ? "png" : "tga"));
+#ifdef USE_DX11
+			// At the end of the frame, before Present (dx11_take_pending_screenshots), read back and encoded here
+			if (!dx11_screenshot_at_frame_end)
+			{
+				dx11_screenshot_pending = true;
+				break;
+			}
+			if (ps_r_screenshot_token <= 1)
+			{
+				xr_vector<u32> pixels;
+				u32 w = 0, h = 0;
+				if (dx12_screenshot::read_back_buffer(pixels, w, h))
+				{
+					xr_vector<u8> file;
+					if (ps_r_screenshot_token == 1)
+						dx12_screenshot::encode_png(pixels.data(), w, h, file);
+					if (ps_r_screenshot_token == 1 || dx12_screenshot::encode_jpeg(pixels.data(), w, h, file))
+					{
+						dx12_screenshot::write_file("$screenshots$", buf, file);
+						Msg("* Screenshot: %s", buf);
+					}
+				}
+				break;
+			}
+#endif
 			ID3DBlob* saved = 0;
 #ifdef USE_DX11
 			CHK_DX(D3DX11SaveTextureToMemory(HW.pContext, pSrcTexture, ps_r_screenshot_token == 0 ? D3DX11_IFF_JPG : (ps_r_screenshot_token == 1 ? D3DX11_IFF_PNG : D3DX11_IFF_BMP), &saved, 0));

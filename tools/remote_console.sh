@@ -1,32 +1,47 @@
 #!/bin/bash
-# Drives the game's remote console (engine flag -remote_console) on the Steam Deck.
-#   remote_console.sh launch            start the game through Steam, wait for the main menu
+# Drives the game's remote console (engine flag -remote_console) on the Steam Deck (Steam shortcut) or on macOS
+# (Sikarugir wrapper app in the game folder, through MO2).
+#   remote_console.sh launch [s]         start the game, wait for the main menu (default 300 s)
 #   remote_console.sh send <cmd>...     queue console commands (one argument per command)
 #   remote_console.sh run <file>        queue the commands in a file
 #   remote_console.sh load <save> [s]   load a save from the main menu or a level, wait until it runs (default 600 s)
 #   remote_console.sh wait <state> [s]  wait until state is menu / level / idle (default 300 s)
 #   remote_console.sh idle [s]          wait until the command queue is empty and no rc_wait is running
+#   remote_console.sh screenshot [out]  take a screenshot (end of the frame, UI included), copy it to out (.png/.jpg)
 #   remote_console.sh transition <x> <y> <z> [s]
 #                                       teleport onto a level changer and travel (without its dialog), wait for the end
 #                                       of the new level's precache frames, print the phases' times (default 300 s)
 #   remote_console.sh status | log [n] | running | quit
+# Input for UI tests (console commands): rc_key <key name> [down|up], rc_click <left|right> [down|up],
+# rc_cursor <x> <y> (UI coordinates, 1024x768)
+# Env: GAMMA_ROOT (the game folder with anomaly/ and gamma/), GAMMA_SHORTCUT (MO2 executable, macOS, default
+# "Anomaly (DX11-AVX)"), GAMMA_GAMEID (Steam shortcut id, Deck)
 set -u
-APPDATA="${GAMMA_APPDATA:-/home/deck/Games/gamma/anomaly/appdata}"
+if [ "$(uname)" = Darwin ]; then
+	ROOT="${GAMMA_ROOT:-/Volumes/SSD/stalker-gamma+mac.arm64}"
+	LOGNAME_="xray_crossover.log"
+	mtime() { stat -f %m "$1"; }
+else
+	ROOT="${GAMMA_ROOT:-/home/deck/Games/gamma}"
+	LOGNAME_="xray_steamuser.log"
+	mtime() { stat -c %Y "$1"; }
+fi
+APPDATA="${GAMMA_APPDATA:-$ROOT/anomaly/appdata}"
 GAMEID="${GAMMA_GAMEID:-12049572732266872832}"   # "stalker gamma" non-Steam shortcut
 CMD="$APPDATA/remote_cmd.txt"
 STATUS="$APPDATA/remote_status.txt"
-LOG="$APPDATA/logs/xray_steamuser.log"
+LOG="$APPDATA/logs/$LOGNAME_"
 
-running() { pgrep -f -i '^[A-Za-z]:\\.*Anomaly[A-Za-z0-9]*\.exe' >/dev/null; }
+running() { pgrep -f -i 'anomalydx[a-z0-9]*\.exe' >/dev/null; }
 
 # Status is rewritten twice a second; older than 5 s means the game is not updating it
-status_fresh() { [ -f "$STATUS" ] && [ $(( $(date +%s) - $(stat -c %Y "$STATUS") )) -le 5 ]; }
+status_fresh() { [ -f "$STATUS" ] && [ $(( $(date +%s) - $(mtime "$STATUS") )) -le 5 ]; }
 
 field() { sed -n "s/^$1=//p" "$STATUS" 2>/dev/null | tr -d '\r'; }
 
 send_lines() {
 	local tmp="$APPDATA/remote_cmd.$$.tmp"
-	# Append to commands the game has not picked up yet
+	# Wait until the game has taken the commands before
 	while [ -f "$CMD" ]; do sleep 0.1; done
 	cat > "$tmp"
 	mv "$tmp" "$CMD"
@@ -48,7 +63,15 @@ case "${1:-}" in
 	launch)
 		if running; then echo "already running"; else
 			rm -f "$STATUS" "$CMD"
-			steam -ifrunning "steam://rungameid/$GAMEID" >/dev/null 2>&1 &
+			if [ "$(uname)" = Darwin ]; then
+				# The wrapper app runs a .bat: MO2 with the executable's shortcut (its arguments hold -remote_console)
+				bat="${TMPDIR:-/tmp}/nextray_launch.bat"
+				printf '"Z:%s/gamma/ModOrganizer.exe" "moshortcut://:%s"\r\n' "$ROOT" "${GAMMA_SHORTCUT:-Anomaly (DX11-AVX)}" > "$bat"
+				app=$(ls -d "$ROOT"/*.app | head -1)
+				open -a "$app" "$bat"
+			else
+				steam -ifrunning "steam://rungameid/$GAMEID" >/dev/null 2>&1 &
+			fi
 		fi
 		wait_state menu "${2:-300}"
 		;;
@@ -107,6 +130,31 @@ for name, _ in marks:
 '
 		;;
 	wait)  wait_state "$2" "${3:-300}" ;;
+	screenshot)
+		dir="$APPDATA/screenshots"
+		before=$(ls -t "$dir" 2>/dev/null | head -1)
+		printf 'screenshot\n' | send_lines
+		start=$(date +%s)
+		while :; do
+			new=$(ls -t "$dir" 2>/dev/null | head -1)
+			if [ -n "$new" ] && [ "$new" != "$before" ]; then
+				sleep 1 # written in one piece, but give the encoder its time
+				break
+			fi
+			[ $(( $(date +%s) - start )) -ge 30 ] && { echo "no screenshot after 30 s" >&2; exit 1; }
+			sleep 0.5
+		done
+		if [ -n "${2:-}" ]; then
+			if [ "$(uname)" = Darwin ] && [ "${2##*.}" != "${new##*.}" ]; then
+				sips -s format "$( [ "${2##*.}" = jpg ] && echo jpeg || echo "${2##*.}")" "$dir/$new" --out "$2" >/dev/null
+			else
+				cp "$dir/$new" "$2"
+			fi
+			echo "$2"
+		else
+			echo "$dir/$new"
+		fi
+		;;
 	idle)
 		timeout="${2:-600}"; start=$(date +%s)
 		sleep 1
@@ -124,5 +172,5 @@ for name, _ in marks:
 		for i in $(seq 60); do running || exit 0; sleep 1; done
 		echo "still running after 60 s" >&2; exit 1
 		;;
-	*) sed -n '2,9p' "$0"; exit 1 ;;
+	*) sed -n '2,20p' "$0"; exit 1 ;;
 esac

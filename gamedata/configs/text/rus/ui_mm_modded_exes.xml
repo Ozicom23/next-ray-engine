@@ -19,109 +19,7 @@
 		<text>Сохраняет состояние текущей погоды чтобы точно восстановить её при загрузке</text>
 	</string>
 
-	<string id="ui_mm_video_advanced_upscaler">
-		<text>Upscaler</text>
-	</string>
-	<string id="ui_mm_video_advanced_upscaler_desc">
-		<text>Renders the 3D scene at a lower resolution and upscales it with a temporal upscaler. NVIDIA DLSS needs an NVIDIA RTX GPU and nvngx_dlss.dll next to the exe. AMD FSR 3.1 works on any DX11 GPU. Both need Screen Space Shaders (for motion vectors), replace SMAA and SSS TAA, and need MSAA off. (r4_upscaler)</text>
-	</string>
-	<string id="ui_mm_video_advanced_upscaler_quality">
-		<text>Upscaler Mode</text>
-	</string>
-	<string id="ui_mm_video_advanced_upscaler_quality_desc">
-		<text>Internal render resolution. DLSS: Native (DLAA) 100%, Quality 67%, Balanced 58%, Performance 50%, Ultra Performance 33%. FSR: Native AA 100%, Quality 67%, Balanced 59%, Performance 50%, Ultra Performance 33%. (r4_upscaler_quality)</text>
-	</string>
-	<string id="ui_mm_video_advanced_fsr_sharpness">
-		<text>FSR Sharpness</text>
-	</string>
-	<string id="ui_mm_video_advanced_fsr_sharpness_desc">
-		<text>Sharpening applied by FSR after upscaling (RCAS). 0 turns it off. DLSS ignores it. (r4_fsr_sharpness)</text>
-	</string>
-	<string id="ui_mm_video_advanced_framegen">
-		<text>AMD FSR Frame Generation</text>
-	</string>
-	<string id="ui_mm_video_advanced_framegen_desc">
-		<text>DX12 only. Shows a generated frame between every two rendered frames, so motion looks smoother at the cost of slightly more input lag. Needs an upscaler on. Works best at 45 rendered fps or more. (r4_framegen)</text>
-	</string>
-	<string id="ui_mm_video_advanced_dlss_preset">
-		<text>DLSS Preset</text>
-	</string>
-	<string id="ui_mm_video_advanced_dlss_preset_desc">
-		<text>The DLSS model. Default lets DLSS choose. J and K are the transformer models, L and M the newer ones (they need a recent nvngx_dlss.dll). (r4_dlss_preset)</text>
-	</string>
-	<string id="ui_mm_lst_dlss_preset_default">
-		<text>Default</text>
-	</string>
-	<string id="ui_mm_lst_dlss_preset_j">
-		<text>J</text>
-	</string>
-	<string id="ui_mm_lst_dlss_preset_k">
-		<text>K</text>
-	</string>
-	<string id="ui_mm_lst_dlss_preset_l">
-		<text>L</text>
-	</string>
-	<string id="ui_mm_lst_dlss_preset_m">
-		<text>M</text>
-	</string>
-	<string id="ui_mm_lst_upscaler_off">
-		<text>Off</text>
-	</string>
-	<string id="ui_mm_lst_upscaler_dlss">
-		<text>NVIDIA DLSS</text>
-	</string>
-	<string id="ui_mm_lst_upscaler_fsr">
-		<text>AMD FSR 3.1</text>
-	</string>
-	<string id="ui_mm_lst_upscaler_native">
-		<text>Native AA (DLAA)</text>
-	</string>
-	<string id="ui_mm_lst_upscaler_quality">
-		<text>Quality</text>
-	</string>
-	<string id="ui_mm_lst_upscaler_balanced">
-		<text>Balanced</text>
-	</string>
-	<string id="ui_mm_lst_upscaler_performance">
-		<text>Performance</text>
-	</string>
-	<string id="ui_mm_lst_upscaler_ultra_performance">
-		<text>Ultra Performance</text>
-	</string>
 
-	<string id="ui_mm_video_advanced_perf_overlay">
-		<text>Performance Overlay</text>
-	</string>
-	<string id="ui_mm_video_advanced_perf_overlay_desc">
-		<text>On-screen FPS, frame time, 1% low, GPU and CPU time, VRAM and render resolution. Detailed adds the engine CPU breakdown, draw calls and a frame-time graph. Bind a key with: bind_console perf_overlay_toggle kF10 (perf_overlay)</text>
-	</string>
-	<string id="ui_mm_video_advanced_perf_overlay_pos">
-		<text>Overlay Position</text>
-	</string>
-	<string id="ui_mm_video_advanced_perf_overlay_pos_desc">
-		<text>Screen corner of the performance overlay. (perf_overlay_pos)</text>
-	</string>
-	<string id="ui_mm_lst_perf_overlay_off">
-		<text>Off</text>
-	</string>
-	<string id="ui_mm_lst_perf_overlay_compact">
-		<text>Compact</text>
-	</string>
-	<string id="ui_mm_lst_perf_overlay_detailed">
-		<text>Detailed</text>
-	</string>
-	<string id="ui_mm_lst_perf_overlay_top_left">
-		<text>Top Left</text>
-	</string>
-	<string id="ui_mm_lst_perf_overlay_top_right">
-		<text>Top Right</text>
-	</string>
-	<string id="ui_mm_lst_perf_overlay_bottom_left">
-		<text>Bottom Left</text>
-	</string>
-	<string id="ui_mm_lst_perf_overlay_bottom_right">
-		<text>Bottom Right</text>
-	</string>
 
 	<string id="ui_mm_lst_ON">
 		<text>ВКЛ</text>
@@ -1192,8 +1090,5 @@
 	</string>
 	<string id="ui_mm_modded_exes_optimizations_keyboard_buffer_size">
 		<text>Буфер ввода для клавиатуры (keyboard_buffer_size)</text>
-	</string>
-	<string id="ui_mm_lst_renderer_r4_dx12">
-		<text>DX12</text>
 	</string>
 </string_table>

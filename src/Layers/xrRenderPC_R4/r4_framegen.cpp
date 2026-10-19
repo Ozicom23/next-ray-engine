@@ -1,4 +1,4 @@
-// FSR 3.1 frame generation for the DX12 exe (see r4_framegen.h), on AMD's FidelityFX SDK v1.1.4 (MIT): the frame
+// FSR 3.1 frame generation for the DX12 exe (see r4_framegen.h; Intel XeSS's in r4_xefg.cpp, chosen by r4_framegen xess), on AMD's FidelityFX SDK v1.1.4 (MIT): the frame
 // interpolation swap chain, its D3D12 backend, optical flow and frame interpolation. This file does what AMD's FSR3
 // context does in interpolation-only mode: the contexts and their shared resources, the per-frame prepare pass
 // (depth and motion vectors dilated at render resolution) and the frame generation callback the swap chain calls at
@@ -9,6 +9,7 @@
 
 #ifdef USE_DX12
 #include "r4_framegen.h"
+#include "r4_xefg.h"
 #include <FidelityFX/host/ffx_frameinterpolation.h>
 #include <FidelityFX/host/ffx_opticalflow.h>
 #include <FidelityFX/host/backends/dx12/ffx_dx12.h>
@@ -17,7 +18,7 @@
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "winmm.lib")
 
-int ps_r4_framegen = 0;
+u32 ps_r4_framegen = 0;
 
 namespace framegen
 {
@@ -209,6 +210,8 @@ bool create_swap_chain(IDXGIFactory* factory, ID3D12CommandQueue* queue, HWND hw
 {
 	if (!ps_r4_framegen)
 		return false;
+	if (ps_r4_framegen == 2)
+		return xefg::create_swap_chain(factory, queue, hwnd, desc, fullscreen, out);
 	FfxSwapchain swap = nullptr;
 	const FfxErrorCode e = ffxCreateFrameinterpolationSwapchainForHwndDX12(hwnd, desc, fullscreen, queue, factory, swap);
 	IDXGISwapChain4* swap4 = swap ? ffxGetDX12SwapchainPtr(swap) : nullptr;
@@ -229,7 +232,12 @@ bool create_swap_chain(IDXGIFactory* factory, ID3D12CommandQueue* queue, HWND hw
 FrameParams g_pending = {};
 bool g_pending_ready = false;
 
-bool active() { return s_swap != nullptr; }
+bool active() { return s_swap != nullptr || xefg::active(); }
+bool latency_managed() { return xefg::active(); }
+void frame_begin() { xefg::frame_begin(); }
+void render_begin() { xefg::render_begin(); }
+void after_present() { xefg::after_present(); }
+void release() { xefg::release(); }
 
 ID3DResource* hudless_target(u32 width, u32 height)
 {
@@ -257,6 +265,11 @@ ID3DResource* hudless_target(u32 width, u32 height)
 
 void frame(const FrameParams& p)
 {
+	if (xefg::active())
+	{
+		xefg::frame(p);
+		return;
+	}
 	if (!s_swap || !p.depth || !p.motion || !p.hudless)
 		return;
 	dx12::Texture2D* bb = HW.pDevice->BackBufferAlias();
@@ -326,6 +339,7 @@ void frame(const FrameParams& p)
 void skip_frame()
 {
 	// A Present without frame() before it (menus, loading, the upscaler off): nothing to interpolate from
+	xefg::before_present();
 	if (!s_swap)
 		return;
 	if (!s_had_inputs && s_configured_on)
@@ -339,6 +353,7 @@ void skip_frame()
 
 void shutdown()
 {
+	xefg::shutdown();
 	if (!s_swap)
 		return;
 	HW.pContext->Synchronize();

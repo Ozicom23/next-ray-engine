@@ -21,6 +21,8 @@
 namespace frame_pacing
 {
 	void start(float seconds);
+	// stat_frame_pacing is recording (the engine's stage timers are gathered meanwhile)
+	bool recording();
 	// At the start of a frame of the game loop, after the latency wait (wait_ms spent in it). game_frame: not the
 	// loading screen, the just-in-time sleep may apply. Sleeps if due, then stamps the frame start (input comes after)
 	void frame_begin(float wait_ms, bool game_frame);

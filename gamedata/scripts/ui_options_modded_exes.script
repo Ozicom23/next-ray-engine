@@ -204,24 +204,28 @@ function on_xml_read()
 			end
 		end
 
-		-- Upscaler (DLSS / FSR, DX11 only), below SMAA in Video > Advanced
-		local advanced = nil
+		-- Upscaling (upscaler, its mode, DLSS preset, FSR sharpness, frame generation) at the end of Video > Basic, next
+		-- to the resolution; the performance overlay and the Deck preset below SMAA in Video > Advanced
+		local basic, advanced = nil, nil
 		for _, top in ipairs(ui_options.options) do
 			if top.id == "video" and top.gr then
 				for _, sub in ipairs(top.gr) do
-					if sub.id == "advanced" then advanced = sub; break end
+					if sub.id == "basic" then basic = sub end
+					if sub.id == "advanced" then advanced = sub end
 				end
 				break
 			end
 		end
-		if advanced and advanced.gr then
+		if basic and basic.gr and advanced and advanced.gr then
 			local already_present = false
 			local insert_idx = #advanced.gr + 1
-			for i, row in ipairs(advanced.gr) do
+			for _, row in ipairs(basic.gr) do
 				if row.id == "upscaler" then
 					already_present = true
 					break
 				end
+			end
+			for i, row in ipairs(advanced.gr) do
 				if row.id == "smaa" then
 					insert_idx = i + 1
 				end
@@ -229,7 +233,7 @@ function on_xml_read()
 			if not already_present then
 				local for_r4 = {ui_options.for_renderer, "renderer_r4"}
 
-				-- Only offer the upscalers this GPU supports ("dlss,fsr", "fsr" or "");
+				-- Only offer the upscalers this GPU supports ("dlss,fsr,xess", "fsr" or "");
 				-- nil when the engine doesn't report it (other renderers, older exes): offer both
 				local avail = get_console():get_string("r4_upscaler_available")
 				local upscaler_content = {{"off", "upscaler_off"}}
@@ -238,6 +242,10 @@ function on_xml_read()
 				end
 				if not avail or string.find(avail, "fsr", 1, true) then
 					table.insert(upscaler_content, {"fsr", "upscaler_fsr"})
+				end
+				-- XeSS only where the engine reports it (the DX12 exe)
+				if avail and string.find(avail, "xess", 1, true) then
+					table.insert(upscaler_content, {"xess", "upscaler_xess"})
 				end
 				local rows = {
 					{
@@ -329,20 +337,38 @@ function on_xml_read()
 						table.remove(rows, i)
 					end
 				end
+				-- Frame generation (the DX12 exe has the command): one list, off or which one. XeSS's only where the exe
+				-- reports XeSS (built with Intel's SDK). After the upscaler's rows, before the overlay's
 				if get_console():get_string("r4_framegen") then
-					table.insert(rows, 4, {
+					local framegen_content = {{"off", "framegen_off"}, {"fsr", "framegen_fsr"}}
+					if avail and string.find(avail, "xess", 1, true) then
+						table.insert(framegen_content, {"xess", "framegen_xess"})
+					end
+					local at = #rows + 1
+					for i, row in ipairs(rows) do
+						if row.id == "perf_overlay" then
+							at = i
+							break
+						end
+					end
+					table.insert(rows, at, {
 						id           = "framegen",
-						type         = "check",
-						val          = 1,
-						def          = false,
+						type         = "list",
+						val          = 0,
 						cmd          = "r4_framegen",
-						bool_to_num  = true,
+						content      = framegen_content,
 						vid          = true,
 						precondition = for_r4,
 					})
 				end
-				for i, row in ipairs(rows) do
-					table.insert(advanced.gr, insert_idx + i - 1, row)
+				local in_basic = {upscaler = true, upscaler_quality = true, dlss_preset = true, fsr_sharpness = true, framegen = true}
+				for _, row in ipairs(rows) do
+					if in_basic[row.id] then
+						table.insert(basic.gr, row)
+					else
+						table.insert(advanced.gr, insert_idx, row)
+						insert_idx = insert_idx + 1
+					end
 				end
 				need_init_opt_coder = true
 			end

@@ -2,6 +2,9 @@
 #include "r4_upscaler.h"
 #include "r4_dlss.h"
 #include "r4_fsr3.h"
+#ifdef USE_DX12
+#include "r4_xess.h"
+#endif
 
 static float halton(u32 index, u32 base)
 {
@@ -58,6 +61,9 @@ CUpscaler* GetUpscaler(u32 type)
 	{
 	case upscaler_dlss: return &g_DLSS;
 	case upscaler_fsr: return &g_FSR3;
+#ifdef USE_DX12
+	case upscaler_xess: return &g_XeSS;
+#endif
 	default: return nullptr;
 	}
 }

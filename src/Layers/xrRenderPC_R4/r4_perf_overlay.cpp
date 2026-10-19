@@ -2,6 +2,7 @@
 #include "r4_perf_overlay.h"
 #include "r4_upscaler.h"
 #include "r4_framegen.h"
+#include "r4_frame_pacing.h"
 #include "../../xrEngine/Stats.h"
 #include "../../xrEngine/IGame_Persistent.h"
 
@@ -210,7 +211,7 @@ void CPerfOverlay::Destroy()
 void CPerfOverlay::Draw()
 {
 	// The engine frame timers are collected while the overlay is on (normally only with rs_stats)
-	g_stats_gather_timers = ps_perf_overlay != 0;
+	g_stats_gather_timers = ps_perf_overlay != 0 || frame_pacing::recording();
 
 	// Wall-clock frame time, measured here once per frame
 	const float frame_ms = m_frame_timer_started ? m_frame_timer.GetElapsed_sec() * 1000.f : 0.f;

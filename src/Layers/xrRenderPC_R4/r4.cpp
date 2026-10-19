@@ -579,8 +579,9 @@ void CRender::destroy()
 	HWOCC.occq_destroy();
 	xr_delete(Models);
 	xr_delete(Target);
-	for (u32 type = upscaler_dlss; type <= upscaler_fsr; ++type)
-		GetUpscaler(type)->Shutdown();
+	for (u32 type = upscaler_dlss; type < upscaler_count; ++type)
+		if (CUpscaler* upscaler = GetUpscaler(type))
+			upscaler->Shutdown();
 	Device.seqRender.Remove(&g_PerfOverlay);
 	Device.seqRender.Remove(&g_ShaderProgressOverlay);
 	g_PerfOverlay.Destroy();
@@ -627,8 +628,18 @@ void CRender::upscaler_probe()
 			dlss->Shutdown();
 		}
 	}
-	Msg("* Upscalers available: %s%s%s", (ps_r4_upscaler_available & 1) ? "DLSS " : "",
-	    (ps_r4_upscaler_available & 2) ? "FSR" : "", ps_r4_upscaler_available ? "" : "none");
+	// XeSS (DX12 renderer): any GPU with Shader Model 6.4; released again when not in use, like DLSS
+	if (o.upscaler == upscaler_xess)
+		ps_r4_upscaler_available |= 4;
+	else if (CUpscaler* xess = GetUpscaler(upscaler_xess))
+	{
+		if (xess->Init())
+			ps_r4_upscaler_available |= 4;
+		xess->Shutdown();
+	}
+	Msg("* Upscalers available: %s%s%s%s", (ps_r4_upscaler_available & 1) ? "DLSS " : "",
+	    (ps_r4_upscaler_available & 2) ? "FSR " : "", (ps_r4_upscaler_available & 4) ? "XeSS" : "",
+	    ps_r4_upscaler_available ? "" : "none");
 }
 
 u32 CRender::upscaler_check()
@@ -637,7 +648,7 @@ u32 CRender::upscaler_check()
 	if (!upscaler)
 		return upscaler_off;
 
-	// Both upscalers are set up for tonemapped SDR input; with HDR10 the scene color is not tonemapped yet
+	// The upscalers are set up for tonemapped SDR input; with HDR10 the scene color is not tonemapped yet
 	if (o.dx11_hdr10)
 	{
 		Msg("! %s: disabled, not supported together with HDR10 (r4_hdr10_on)", upscaler->Name());

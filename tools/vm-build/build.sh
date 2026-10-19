@@ -2,12 +2,15 @@
 # Builds the working tree on a Windows VM over SSH: a snapshot commit of the tree as it is (uncommitted and untracked
 # files included, the real index and branches untouched) is pushed to the VM's repo and built there by build.ps1,
 # like the dev build CI. Incremental: only what changed since the last build recompiles.
-# Usage: tools/vm-build/build.sh [-c CONF] [--package] [--rebuild] [--fetch] [--install] [--deck] [--install-to DEST]
+# Usage: tools/vm-build/build.sh [-c CONF] [--package] [--rebuild] [--no-build] [--fetch] [--install] [--deck] [--install-to DEST]
 #   -c CONF          build configuration (default DX11-AVX)
 #   --package        also stage the CI artifact layout (bin, db/mods, mods) on the VM
-#   --fetch          copy the result back to _build/vm/ (package/ with --package, else the exes and nvngx_dlss.dll)
+#   --no-build       no snapshot and no build: fetch/install what the VM built last (build while the game runs,
+#                    then close it and install in seconds; another build relinks both exes, ~5 min)
+#   --fetch          copy the result back to _build/vm/ (package/ with --package, else the exes, nvngx_dlss.dll
+#                    and the XeSS DLLs)
 #   --install-to DEST  --fetch, then install into the game folder DEST (the one with anomaly/ and gamma/), a local
-#                    path or user@host:/path over SSH: the exes and nvngx_dlss.dll to anomaly/bin (the replaced ones
+#                    path or user@host:/path over SSH: the exes and DLLs (DLSS, XeSS) to anomaly/bin (the replaced ones
 #                    kept in backup-nextray-exes-prev/), gamedata/ to anomaly/gamedata, the MO2 mod to gamma/mods.
 #                    Can be given more than once
 #   --install        --install-to $NEXTRAY_GAME (default /Volumes/SSD/stalker-gamma+mac.arm64)
@@ -22,6 +25,7 @@ MOD="neXt-Ray performance patches"
 CONF=DX11-AVX
 PS_ARGS=()
 FETCH=0
+BUILD=1
 PACKAGE=0
 TARGETS=()
 while [ $# -gt 0 ]; do
@@ -30,6 +34,7 @@ while [ $# -gt 0 ]; do
         --package) PS_ARGS+=(-Package); PACKAGE=1 ;;
         --rebuild) PS_ARGS+=(-Rebuild) ;;
         --fetch) FETCH=1 ;;
+        --no-build) BUILD=0 ;;
         --install) TARGETS+=("${NEXTRAY_GAME:-/Volumes/SSD/stalker-gamma+mac.arm64}") ;;
         --deck) TARGETS+=("${NEXTRAY_DECK:-deck@192.168.0.230:/home/deck/Games/gamma}") ;;
         --install-to) TARGETS+=("$2"); shift ;;
@@ -61,21 +66,28 @@ for t in ${TARGETS[@]+"${TARGETS[@]}"}; do
     on_target "$t" "test -d anomaly/bin && test -d gamma/mods" 2>/dev/null ||
         { echo "not a game folder (anomaly/bin, gamma/mods) or not reachable: $t" >&2; exit 1; }
 done
+# Never replace the files of a running game (checked again right before installing)
+game_running() {
+    if [ -n "$(target_host "$1")" ]; then ssh -o LogLevel=ERROR "$(target_host "$1")" "pgrep -f -i 'anomalydx[a-z0-9]*\.exe'" >/dev/null
+    else pgrep -f -i 'anomalydx[a-z0-9]*\.exe' >/dev/null; fi
+}
 
-# Snapshot of the working tree through a scratch index
-idx=$(mktemp)
-trap 'rm -f "$idx"' EXIT
-cp "$(git rev-parse --git-path index)" "$idx"
-GIT_INDEX_FILE=$idx git add -A
-commit=$(git commit-tree "$(GIT_INDEX_FILE=$idx git write-tree)" -p HEAD -m "VM build snapshot")
+if [ $BUILD = 1 ]; then
+    # Snapshot of the working tree through a scratch index
+    idx=$(mktemp)
+    trap 'rm -f "$idx"' EXIT
+    cp "$(git rev-parse --git-path index)" "$idx"
+    GIT_INDEX_FILE=$idx git add -A
+    commit=$(git commit-tree "$(GIT_INDEX_FILE=$idx git write-tree)" -p HEAD -m "VM build snapshot")
 
-vm "if not exist $WIN_DIR\\.git (git init -q $WIN_DIR && git -C $WIN_DIR config core.longpaths true && git -C $WIN_DIR config core.autocrlf false)"
-# cmd keeps the single quotes git puts around the path, PowerShell strips them
-git -c core.sshCommand="ssh -o LogLevel=ERROR" push -q -f --receive-pack="powershell -NoProfile -c git-receive-pack" \
-    "$VM:$DIR" "$commit:refs/heads/vm-build"
-vm "cd /d $WIN_DIR && git checkout -q -f --detach vm-build && git submodule update -q --init --recursive"
+    vm "if not exist $WIN_DIR\\.git (git init -q $WIN_DIR && git -C $WIN_DIR config core.longpaths true && git -C $WIN_DIR config core.autocrlf false)"
+    # cmd keeps the single quotes git puts around the path, PowerShell strips them
+    git -c core.sshCommand="ssh -o LogLevel=ERROR" push -q -f --receive-pack="powershell -NoProfile -c git-receive-pack" \
+        "$VM:$DIR" "$commit:refs/heads/vm-build"
+    vm "cd /d $WIN_DIR && git checkout -q -f --detach vm-build && git submodule update -q --init --recursive"
 
-vm "powershell -NoProfile -ExecutionPolicy Bypass -File $WIN_DIR\\tools\\vm-build\\build.ps1 -Conf $CONF ${PS_ARGS[*]:-}"
+    vm "powershell -NoProfile -ExecutionPolicy Bypass -File $WIN_DIR\\tools\\vm-build\\build.ps1 -Conf $CONF ${PS_ARGS[*]:-}"
+fi
 
 if [ $FETCH = 1 ]; then
     rm -rf _build/vm && mkdir -p _build/vm
@@ -84,19 +96,21 @@ if [ $FETCH = 1 ]; then
         bin=_build/vm/package/bin
     else
         scp -q -o LogLevel=ERROR "$VM:$DIR/_build/_game/bin_dbg/*.exe" \
-            "$VM:$DIR/src/3rd party/NVIDIA-DLSS/lib/Windows_x86_64/rel/nvngx_dlss.dll" _build/vm/
+            "$VM:$DIR/src/3rd party/NVIDIA-DLSS/lib/Windows_x86_64/rel/nvngx_dlss.dll" \
+            "$VM:$DIR/src/3rd party/Intel-XeSS/bin/*.dll" _build/vm/
         bin=_build/vm
     fi
     echo "Fetched to _build/vm/"
 fi
 
 for t in ${TARGETS[@]+"${TARGETS[@]}"}; do
+    if game_running "$t"; then echo "the game is running on $t: close it first, nothing installed" >&2; exit 1; fi
     echo "--- installing to $t"
-    names=$(cd "$bin" && ls *.exe nvngx_dlss.dll | tr '\n' ' ')
+    names=$(cd "$bin" && ls *.exe *.dll | tr '\n' ' ')
     on_target "$t" "rm -rf backup-nextray-exes-prev && mkdir backup-nextray-exes-prev &&
         for f in $names; do if [ -f anomaly/bin/\$f ]; then cp -p anomaly/bin/\$f backup-nextray-exes-prev/; fi; done"
     # -c: by content, timestamps differ between checkouts; -t so later runs list only real changes
-    rsync -ct "$bin"/*.exe "$bin/nvngx_dlss.dll" "$(at "$t" anomaly/bin/)"
+    rsync -ct "$bin"/*.exe "$bin"/*.dll "$(at "$t" anomaly/bin/)"
     on_target "$t" "cd anomaly/bin && chmod 644 $names"
     echo "bin: $names"
     rsync -rct --itemize-changes gamedata/ "$(at "$t" anomaly/gamedata/)" | sed 's/^/gamedata: /'

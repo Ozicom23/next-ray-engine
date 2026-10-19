@@ -19,6 +19,9 @@
 #include "Actor_Flags.h"
 #include "Inventory.h"
 #include "xr_level_controller.h"
+#include "../xrEngine/xr_input.h"
+#include "UICursor.h"
+#include "ui_base.h"
 #include "customzone.h"
 #include "script_engine.h"
 #include "script_engine_space.h"
@@ -414,6 +417,68 @@ class CCC_IntegerNotSaved : public CCC_Integer
 public:
 	CCC_IntegerNotSaved(LPCSTR N, int* V, int _min, int _max) : CCC_Integer(N, V, _min, _max) {}
 	virtual void Save(IWriter*) {}
+};
+
+// Synthetic input for automated tests through the remote console:
+//   rc_key <key name or DIK code> [down|up]   e.g. rc_key kI (pressed and released unless down/up)
+//   rc_click <left|right|middle> [down|up]    at the UI cursor
+//   rc_cursor <x> <y>                         the UI cursor to (x, y) in UI coordinates (1024x768)
+class CCC_RcKey : public IConsole_Command
+{
+public:
+	CCC_RcKey(LPCSTR N) : IConsole_Command(N) {}
+
+	virtual void Execute(LPCSTR args)
+	{
+		string64 key = "", mode = "";
+		sscanf(args, "%63s %63s", key, mode);
+		int dik = (key[0] >= '0' && key[0] <= '9') ? atoi(key) : keyname_to_dik(key);
+		if (dik <= 0)
+		{
+			Msg("! rc_key: unknown key '%s'", key);
+			return;
+		}
+		if (xr_strcmp(mode, "up"))
+			pInput->inject_key(dik, true);
+		if (xr_strcmp(mode, "down"))
+			pInput->inject_key(dik, false);
+	}
+};
+
+class CCC_RcClick : public IConsole_Command
+{
+public:
+	CCC_RcClick(LPCSTR N) : IConsole_Command(N) {}
+
+	virtual void Execute(LPCSTR args)
+	{
+		string64 button = "", mode = "";
+		sscanf(args, "%63s %63s", button, mode);
+		const int btn = !xr_strcmp(button, "right") ? 1 : (!xr_strcmp(button, "middle") ? 2 : 0);
+		if (xr_strcmp(mode, "up"))
+			pInput->inject_mouse_button(btn, true);
+		if (xr_strcmp(mode, "down"))
+			pInput->inject_mouse_button(btn, false);
+	}
+};
+
+class CCC_RcCursor : public IConsole_Command
+{
+public:
+	CCC_RcCursor(LPCSTR N) : IConsole_Command(N) {}
+
+	virtual void Execute(LPCSTR args)
+	{
+		Fvector2 pos;
+		if (sscanf(args, "%f %f", &pos.x, &pos.y) != 2)
+		{
+			Msg("! rc_cursor: x y expected");
+			return;
+		}
+		GetUICursor().SetUICursorPosition(pos);
+		// A zero move: the windows under the cursor get it (hover, focus) as after a real move
+		pInput->inject_mouse_move(0, 0);
+	}
 };
 
 class CCC_MemStats : public IConsole_Command
@@ -2602,6 +2667,9 @@ void CCC_RegisterCommands()
 	//g_OptConCom.Init();
 
 	CMD1(CCC_MemStats, "stat_memory");
+	CMD1(CCC_RcKey, "rc_key");
+	CMD1(CCC_RcClick, "rc_click");
+	CMD1(CCC_RcCursor, "rc_cursor");
 	CMD1(CCC_MemStatsAsync, "stat_memory_async");
 	CMD1(CCC_SharedStringDump, "stat_shared_string_dump");
 #ifdef DEBUG

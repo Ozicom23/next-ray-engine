@@ -1,6 +1,6 @@
 #pragma once
 
-// Temporal upscalers (DLSS, FSR) behind one interface. The render target renders the scene at
+// Temporal upscalers (DLSS, FSR, XeSS) behind one interface. The render target renders the scene at
 // GetRenderSize() and calls Evaluate() once per frame before the final post-process pass.
 
 enum EUpscalerType
@@ -8,6 +8,8 @@ enum EUpscalerType
 	upscaler_off = 0,
 	upscaler_dlss,
 	upscaler_fsr,
+	upscaler_xess, // DX12 renderer only
+	upscaler_count
 };
 
 enum EUpscalerQuality
@@ -73,5 +75,5 @@ public:
 	static u32 GetJitterPhaseCount(u32 render_w, u32 out_w);
 };
 
-// Upscaler implementation for EUpscalerType, nullptr for upscaler_off
+// Upscaler implementation for EUpscalerType, nullptr for upscaler_off (and XeSS outside the DX12 renderer)
 CUpscaler* GetUpscaler(u32 type);

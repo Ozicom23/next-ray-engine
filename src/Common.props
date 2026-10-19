@@ -50,6 +50,24 @@
       <AdditionalLibraryDirectories>$(xrNgxSdkDir)lib\Windows_x86_64\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
+  <!-- Intel XeSS SDK (DX12 renderer): optional, fetched into "src/3rd party/Intel-XeSS"; the DX12 exe delay-loads its DLLs -->
+  <PropertyGroup>
+    <xrXessSdkDir>$(xr3rdPartyDir)Intel-XeSS\</xrXessSdkDir>
+    <xrXessSdk Condition="Exists('$(xrXessSdkDir)lib\libxess.lib')">true</xrXessSdk>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(xrXessSdk)'=='true' And '$(MSBuildProjectName)'=='xrRender_R5'">
+    <ClCompile>
+      <PreprocessorDefinitions>XR_XESS_SDK;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(xrXessSdkDir)inc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(xrXessSdk)'=='true' And '$(MSBuildProjectName)'=='xrEngineDX12'">
+    <Link>
+      <AdditionalLibraryDirectories>$(xrXessSdkDir)lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>delayimp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <DelayLoadDLLs>libxess.dll;libxess_fg.dll;libxell.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+    </Link>
+  </ItemDefinitionGroup>
   <ItemGroup>
     <BuildMacro Include="xrBinRootDir">
       <Value>$(xrBinRootDir)</Value>

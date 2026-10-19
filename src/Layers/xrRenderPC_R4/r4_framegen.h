@@ -4,7 +4,7 @@
 // dilates depth and motion vectors with its own prepare pass. Needs an upscaler on (its motion vectors and depth).
 #ifdef USE_DX12
 
-extern int ps_r4_framegen;
+extern u32 ps_r4_framegen; // 0 off, 1 AMD FSR, 2 Intel XeSS (r4_xefg.h)
 
 namespace framegen
 {
@@ -21,6 +21,7 @@ struct FrameParams
 	float camera_near, camera_far, camera_fov_y;
 	bool reset;
 	Fvector camera_position, camera_up, camera_right, camera_forward;
+	Fmatrix view, project; // unjittered (XeSS)
 };
 
 // The swap chain for CHW: AMD's frame interpolation swap chain when r4_framegen is on (false: create DXGI's)
@@ -34,6 +35,15 @@ void frame(const FrameParams& p);
 ID3DResource* hudless_target(u32 width, u32 height);
 // Before each Present: frame generation off for the frames that had no frame() (menus, loading, upscaler off)
 void skip_frame();
+// After each Present (XeSS: its latency markers)
+void after_present();
+// XeSS's latency reduction (XeLL) in place of the swap chain's latency wait: true when it runs, then the frame start
+// (before input) and the rendering start are marked
+bool latency_managed();
+void frame_begin();
+void render_begin();
+// After the engine released the swap chain (XeSS destroys its context and the native swap chain then)
+void release();
 // phase_upscale's inputs kept for frame() after the post-processing (set when the upscaler ran this frame)
 extern FrameParams g_pending;
 extern bool g_pending_ready;

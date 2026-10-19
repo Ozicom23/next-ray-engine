@@ -1223,6 +1223,12 @@ static HRESULT CreateTextureCommon(Device* device, Resource* t, const D3D11_SUBR
 
 	D3D12MA::ALLOCATION_DESC ad = {};
 	ad.HeapType = D3D12_HEAP_TYPE_DEFAULT;
+	// Render, depth and UAV targets in their own (zeroed) memory: placed in a reused heap they start with what was there
+	// (DX12 leaves that to a clear the engine doesn't do, D3D11 zeroes them). A target read before it's fully written
+	// showed the old contents, after a vid_restart a frame of the previous size as a jittering grid with FSR (Deck)
+	if (rd.Flags & (D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL |
+	                D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS))
+		ad.Flags = D3D12MA::ALLOCATION_FLAG_COMMITTED;
 	D3D12_CLEAR_VALUE clear = {};
 	const D3D12_CLEAR_VALUE* clear_ptr = nullptr;
 	if (rd.Flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL)

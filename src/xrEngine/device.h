@@ -544,6 +544,9 @@ extern ENGINE_API bool g_stats_gather_timers;
 extern ENGINE_API float g_msg_loop_ms;
 extern ENGINE_API u32 g_msg_loop_count;
 extern ENGINE_API u32 g_mouse_events;
+extern ENGINE_API float g_input_kb_ms;
+extern ENGINE_API float g_input_mouse_ms;
+extern ENGINE_API float g_input_mouse_read_ms;
 
 typedef xr_delegate<bool()> LOADING_EVENT;
 extern ENGINE_API xr_list<LOADING_EVENT> g_loading_events;

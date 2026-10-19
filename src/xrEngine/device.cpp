@@ -50,6 +50,10 @@ ENGINE_API bool g_stats_gather_timers = false;
 ENGINE_API float g_msg_loop_ms = 0.f;
 ENGINE_API u32 g_msg_loop_count = 0;
 ENGINE_API u32 g_mouse_events = 0;
+// stat_frame_pacing: the frame's input step: keyboard read, mouse update (read and the game's handling), DirectInput mouse read
+ENGINE_API float g_input_kb_ms = 0.f;
+ENGINE_API float g_input_mouse_ms = 0.f;
+ENGINE_API float g_input_mouse_read_ms = 0.f;
 ENGINE_API CLoadScreenRenderer load_screen_renderer;
 ENGINE_API CRenderDevice* DevicePtr = nullptr;
 

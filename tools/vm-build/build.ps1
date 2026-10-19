@@ -3,7 +3,7 @@
 # Usage: powershell -File build.ps1 [-Conf DX11-AVX] [-Package] [-Rebuild]
 #   -Package: also packs gamedata and stages package/ (bin, db/mods, mods) like the CI artifact
 #   -Rebuild: msbuild /t:Rebuild instead of an incremental build
-# The DLSS SDK and the FSR shaders are fetched/compiled only when missing or when their inputs changed.
+# The DLSS and XeSS SDKs and the FSR shaders are fetched/compiled only when missing or when their inputs changed.
 
 param(
     [string]$Conf = "DX11-AVX",
@@ -30,6 +30,16 @@ if ($have -ne $tag) {
     if (Test-Path $dlss) { Remove-Item -Recurse -Force $dlss }
     git -c advice.detachedHead=false clone -q --depth 1 --branch $tag --filter=blob:none --sparse https://github.com/NVIDIA/DLSS.git $dlss; Check "DLSS SDK clone"
     git -C $dlss sparse-checkout set --no-cone /include/ /LICENSE.txt /lib/Windows_x86_64/x64/nvsdk_ngx_d.lib /lib/Windows_x86_64/rel/nvngx_dlss.dll /lib/Windows_x86_64/dev/nvngx_dlss.dll; Check "DLSS SDK checkout"
+} else { Write-Host "up to date" }
+
+$xtag = (Select-String -Path ".github\workflows\dev-build.yml" -Pattern "XESS_SDK_TAG:\s*(\S+)").Matches[0].Groups[1].Value
+Step "Intel XeSS SDK $xtag"
+$xess = "src\3rd party\Intel-XeSS"
+$have = if (Test-Path "$xess\.git") { git -C $xess tag --points-at HEAD } else { "" }
+if ($have -notcontains $xtag) {
+    if (Test-Path $xess) { Remove-Item -Recurse -Force $xess }
+    git -c advice.detachedHead=false clone -q --depth 1 --branch $xtag --filter=blob:none --sparse https://github.com/intel/xess.git $xess; Check "XeSS SDK clone"
+    git -C $xess sparse-checkout set --no-cone /inc/ /lib/ /LICENSE.txt /bin/libxess.dll /bin/libxess_fg.dll /bin/libxell.dll; Check "XeSS SDK checkout"
 } else { Write-Host "up to date" }
 
 # The FSR shaders are recompiled when the FSR folder's tree (in the built snapshot) changed
@@ -85,6 +95,8 @@ if ($Package) {
     Copy-Item "$dlss\lib\Windows_x86_64\rel\nvngx_dlss.dll" "package\bin"
     Copy-Item "$dlss\LICENSE.txt" "package\bin\nvngx_dlss_LICENSE.txt"
     Copy-Item "$dlss\lib\Windows_x86_64\dev\nvngx_dlss.dll" "package\bin\dlss_dev"
+    Copy-Item "$xess\bin\libxess.dll", "$xess\bin\libxess_fg.dll", "$xess\bin\libxell.dll" "package\bin"
+    Copy-Item "$xess\LICENSE.txt" "package\bin\libxess_LICENSE.txt"
 }
 
 Step "Done"
