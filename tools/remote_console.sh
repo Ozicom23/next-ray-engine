@@ -68,6 +68,12 @@ case "${1:-}" in
 				bat="${TMPDIR:-/tmp}/nextray_launch.bat"
 				printf '"Z:%s/gamma/ModOrganizer.exe" "moshortcut://:%s"\r\n' "$ROOT" "${GAMMA_SHORTCUT:-Anomaly (DX11-AVX)}" > "$bat"
 				app=$(ls -d "$ROOT"/*.app | head -1)
+				# Right after a quit the wrapper app and Wine are still exiting: open would only bring that app to the
+				# front and the .bat would not run
+				for _ in $(seq 1 60); do
+					ps -eo args | grep -v grep | grep -q -e "$(basename "$app")" -e wineserver || break
+					sleep 1
+				done
 				open -a "$app" "$bat"
 			else
 				steam -ifrunning "steam://rungameid/$GAMEID" >/dev/null 2>&1 &
