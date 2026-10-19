@@ -266,6 +266,9 @@ void CDSGraphManager::r_dsgraph_insert_static(dxRender_Visual *pVisual, bool pre
 	if (i_sun_cascade >= 0 && sun_receivers::test_caster(pVisual->vis.box, u32(i_sun_cascade)))
 		return;
 
+	if (i_static_filter && (pVisual->Type == MT_TREE_ST || pVisual->Type == MT_TREE_PM) != (i_static_filter == 2))
+		return;
+
 	if (pVisual->Type == MT_TREE_ST || pVisual->Type == MT_TREE_PM)
 		i_static_trees++;
 #endif

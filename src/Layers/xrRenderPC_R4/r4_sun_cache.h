@@ -1,13 +1,13 @@
 #pragma once
 
-// Far sun cascades kept between frames (r4_sun_cascade_cache). A far cascade's static casters are drawn into a map of
+// Far sun cascades kept between frames (r4_sun_cascade_cache). A far cascade's static casters but trees and bushes are drawn into a map of
 // its own with the box grown by a margin on each side (the same texel size, more texels) and a grown depth range.
 // Every frame the window of that map that matches the cascade's transform of the frame is copied into the shadow map
-// atlas, at the cascade's place and scale there, and the dynamic casters (NPCs, the player, physics objects) and
-// grass are drawn over it; the accumulation then samples the atlas exactly as it would after a full render. The kept
+// atlas, at the cascade's place and scale there, and the trees and bushes (they sway), the dynamic casters (NPCs, the
+// player, physics objects) and grass are drawn over it; the accumulation then samples the atlas exactly as it would after a full render. The kept
 // map is drawn again when the sun turned enough to move a far caster's shadow by a fraction of a texel
 // (r4_sun_cascade_cache_drift), when the cascade's receiver slab left the kept box (the view moved or turned), or
-// when the map's size changed. Tree sway in a kept map stands still between refreshes; near shadows (cascade 0) stay live.
+// when the map's size changed. Near shadows (cascade 0) are not kept.
 //   r4_sun_cascade_cache 0/1/2: off, the far cascade, the two far cascades
 //   r4_sun_cascade_cache_drift: texels of sun movement allowed before a refresh (0.5)
 //   stat_sun_cache <seconds>: frames served from the kept maps and refreshes with their reasons, in the log

@@ -18,6 +18,20 @@ static u32 sun_smap_used(u32 cascade_ind)
 	const float smap_scale = cascade_ind < 3 ? clampr((&ps_r4_sun_smap_scale.x)[cascade_ind], 0.25f, 1.f) : 1.f;
 	return _min(smap_size, u32(iFloor(float(smap_size) * smap_scale)));
 }
+
+// A kept cascade (r4_sun_cache.h): the trees and bushes of the frame's frustum, drawn over the kept map's window every
+// frame, so their shadows sway; the kept map holds the other statics. Leaves the graph on the frame's frustum
+static void capture_kept_trees(sun::cascade& cascade, CSector* sector)
+{
+	cascade.GMCascade.i_static_filter = 2;
+	cascade.GMCascade.traverse(sector, cascade.cull_frustum, cascade.cull_COP, cascade.cull_xform);
+	cascade.GMCascade.r_dsgraph_capture_static();
+	cascade.GMCascade.i_static_filter = 0;
+	// No sector (traverse returned early): the dynamic casters are still queried with the frame's frustum
+	cascade.GMCascade.i_vBase = cascade.cull_COP;
+	cascade.GMCascade.i_frustum = cascade.cull_frustum;
+	cascade.GMCascade.i_mXFORM = cascade.cull_xform;
+}
 #endif
 
 // render_sun_cascade in steps, for culling the cascades' static geometry in parallel (r4_sun_parallel_cull)
@@ -125,18 +139,20 @@ void CRender::render_sun_cascades()
 				sun::cascade& cascade = m_sun_cascades[i];
 				if (cascade.cache_mode == sun_cache::m_window)
 				{
-					// Kept map: no statics; the dynamic casters are queried with the frame's frustum
-					cascade.GMCascade.i_vBase = cascade.cull_COP;
-					cascade.GMCascade.i_frustum = cascade.cull_frustum;
-					cascade.GMCascade.i_mXFORM = cascade.cull_xform;
+					// Kept map: only the trees and bushes of the frame (they sway); the dynamic casters are queried
+					// with the frame's frustum too
+					capture_kept_trees(cascade, pOutdoorSector);
 					return;
 				}
 				if (cascade.cache_mode == sun_cache::m_refresh)
 				{
-					// The kept map's grown box; the receivers of later frames are unknown: no caster culling
+					// The kept map's grown box without trees and bushes; the receivers of later frames are unknown: no
+					// caster culling. The frame's trees are captured once the kept map is drawn
 					cascade.GMCascade.i_sun_cascade = -1;
+					cascade.GMCascade.i_static_filter = 1;
 					cascade.GMCascade.traverse(pOutdoorSector, sun_cache::big_frustum(i), cascade.cull_COP, sun_cache::big_xform(i));
 					cascade.GMCascade.r_dsgraph_capture_static();
+					cascade.GMCascade.i_static_filter = 0;
 					return;
 				}
 				cascade.GMCascade.traverse(pOutdoorSector, cascade.cull_frustum, cascade.cull_COP, cascade.cull_xform);
@@ -398,12 +414,16 @@ void CRender::render_sun_cascade(u32 cascade_ind)
             if (cascade.cache_mode == sun_cache::m_refresh)
             {
                 cascade.GMCascade.i_sun_cascade = -1;
+                cascade.GMCascade.i_static_filter = 1;
                 cascade.GMCascade.traverse(pOutdoorSector, sun_cache::big_frustum(cascade_ind), cascade.cull_COP, sun_cache::big_xform(cascade_ind));
                 cascade.GMCascade.r_dsgraph_capture_static();
+                cascade.GMCascade.i_static_filter = 0;
+                cascade.GMCascade.i_vBase = cascade.cull_COP;
+                cascade.GMCascade.i_frustum = cascade.cull_frustum;
+                cascade.GMCascade.i_mXFORM = cascade.cull_xform;
             }
-            cascade.GMCascade.i_vBase = cascade.cull_COP;
-            cascade.GMCascade.i_frustum = cascade.cull_frustum;
-            cascade.GMCascade.i_mXFORM = cascade.cull_xform;
+            else
+                capture_kept_trees(cascade, pOutdoorSector);
             cascade.GMCascade.r_dsgraph_capture_dynamic();
         }
         else
@@ -460,6 +480,9 @@ void CRender::render_sun_cascade(u32 cascade_ind)
                     RCache.set_xform_view(Fidentity);
                     RCache.set_xform_project(sun_cache::big_xform(cascade_ind));
                     cascade.GMCascade.r_dsgraph_render_static(0);
+                    // The frame's trees and bushes, drawn over the window like on the other frames
+                    cascade.GMCascade.i_sun_cascade = cascade_ind < 3 ? int(cascade_ind) : -1;
+                    capture_kept_trees(cascade, pOutdoorSector);
                 }
                 // The map outside the cascade's corner (r4_sun_smap_scale) holds an earlier cascade's depth: cleared,
                 // so the far pass's pixels beyond the cascade read "lit" as with a full clear (the window copy writes
@@ -472,6 +495,7 @@ void CRender::render_sun_cascade(u32 cascade_ind)
                 RCache.set_xform_world(Fidentity);
                 RCache.set_xform_view(Fidentity);
                 RCache.set_xform_project(fuckingsun->X.D.combine);
+                cascade.GMCascade.r_dsgraph_render_static(0);
                 cascade.GMCascade.r_dsgraph_render_dynamic(0);
                 if (psDeviceFlags2.test(rsGrassShadow) && cascade_ind <= ps_ssfx_grass_shadows.x)
                 {
