@@ -143,6 +143,7 @@ void CResourceManager::_ParseList(sh_list& dest, LPCSTR names)
 
 ShaderElement* CResourceManager::_CreateElement(ShaderElement& S)
 {
+	PROF_EVENT("_CreateElement");
 	if (S.passes.empty()) return 0;
 
 	xrCriticalSectionGuard guard(creationGuard);
@@ -170,6 +171,7 @@ void CResourceManager::_DeleteElement(const ShaderElement* S)
 Shader* CResourceManager::_cpp_Create(IBlender* B, LPCSTR s_shader, LPCSTR s_textures, LPCSTR s_constants,
                                       LPCSTR s_matrices)
 {
+	PROF_EVENT("_cpp_Create");
 	xrCriticalSectionGuard guard(creationGuard);
 
 	CBlender_Compile C;

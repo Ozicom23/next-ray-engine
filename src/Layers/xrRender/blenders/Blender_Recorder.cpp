@@ -39,6 +39,7 @@ CBlender_Compile::~CBlender_Compile()
 
 void CBlender_Compile::_cpp_Compile(ShaderElement* _SH)
 {
+	PROF_EVENT("_cpp_Compile");
 	SH = _SH;
 	RS.Invalidate();
 

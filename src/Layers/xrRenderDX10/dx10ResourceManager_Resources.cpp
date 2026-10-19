@@ -176,6 +176,7 @@ static bool patch_grass_jitter_shader(LPCSTR data, xr_string& patched)
 //--------------------------------------------------------------------------------------------------------------
 SVS* CResourceManager::_CreateVS(LPCSTR _name)
 {
+	PROF_EVENT("_CreateVS");
 	xrCriticalSectionGuard guard(creationGuard);
 	xr_string res_name = _name;
 
@@ -352,6 +353,7 @@ static bool patch_3dss_lens_shader(LPCSTR sh_name, LPCSTR data, xr_string& patch
 //--------------------------------------------------------------------------------------------------------------
 SPS* CResourceManager::_CreatePS(LPCSTR _name)
 {
+	PROF_EVENT("_CreatePS");
 	xrCriticalSectionGuard guard(creationGuard);
 	string_path name;
 	xr_strcpy(name, _name);
@@ -485,6 +487,7 @@ void CResourceManager::_DeletePS(const SPS* ps)
 //--------------------------------------------------------------------------------------------------------------
 SGS* CResourceManager::_CreateGS(LPCSTR name)
 {
+	PROF_EVENT("_CreateGS");
 	xrCriticalSectionGuard guard(creationGuard);
 	LPSTR N = LPSTR(name);
 	map_GS::iterator I = m_gs.find(N);

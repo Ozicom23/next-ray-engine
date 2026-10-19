@@ -77,6 +77,7 @@ void CResourceManager::_DeleteState(const SState* state)
 //--------------------------------------------------------------------------------------------------------------
 SPass* CResourceManager::_CreatePass(const SPass& proto)
 {
+	PROF_EVENT("_CreatePass");
 	xrCriticalSectionGuard guard(creationGuard);
 	for (u32 it = 0; it < v_passes.size(); it++)
 		if (v_passes[it]->equal(proto))

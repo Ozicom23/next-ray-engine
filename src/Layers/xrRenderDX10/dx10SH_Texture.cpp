@@ -262,9 +262,11 @@ CTexture::~CTexture()
 
 void CTexture::surface_set(ID3DBaseTexture* surf)
 {
-	while (flags.bLoading)
+	if (flags.bLoading)
 	{
-		SwitchToThread();
+		PROF_EVENT("CTexture: wait for its load");
+		while (flags.bLoading)
+			SwitchToThread();
 	}
 	if (surf) surf->AddRef();
 	_RELEASE(pSurface);
@@ -337,9 +339,11 @@ ID3DBaseTexture* CTexture::surface_get()
 	if (m_stream)
 		stream_whole_now();
 #endif
-	while (flags.bLoading)
+	if (flags.bLoading)
 	{
-		SwitchToThread();
+		PROF_EVENT("CTexture: wait for its load");
+		while (flags.bLoading)
+			SwitchToThread();
 	}
 	if (flags.bLoadedAsStaging)
 		ProcessStaging();
@@ -456,9 +460,11 @@ void CTexture::Apply(u32 dwStage)
 	tex_stream::note_bound(this);
 	m_last_used = Device.dwTimeContinual;
 #endif
-	while (flags.bLoading)
+	if (flags.bLoading)
 	{
-		SwitchToThread();
+		PROF_EVENT("CTexture: wait for its load");
+		while (flags.bLoading)
+			SwitchToThread();
 	}
 	if (flags.bLoadedAsStaging)
 		ProcessStaging();
@@ -510,9 +516,11 @@ void CTexture::Apply(u32 dwStage)
 
 void CTexture::apply_theora(u32 dwStage)
 {
-	while (flags.bLoading)
+	if (flags.bLoading)
 	{
-		SwitchToThread();
+		PROF_EVENT("CTexture: wait for its load");
+		while (flags.bLoading)
+			SwitchToThread();
 	}
 	if (pTheora->Update(m_play_time != 0xFFFFFFFF ? m_play_time : Device.dwTimeContinual))
 	{
@@ -553,9 +561,11 @@ void CTexture::apply_theora(u32 dwStage)
 
 void CTexture::apply_avi(u32 dwStage)
 {
-	while (flags.bLoading)
+	if (flags.bLoading)
 	{
-		SwitchToThread();
+		PROF_EVENT("CTexture: wait for its load");
+		while (flags.bLoading)
+			SwitchToThread();
 	}
 	if (pAVI->NeedUpdate())
 	{
@@ -589,9 +599,11 @@ void CTexture::apply_avi(u32 dwStage)
 
 void CTexture::apply_seq(u32 dwStage)
 {
-	while (flags.bLoading)
+	if (flags.bLoading)
 	{
-		SwitchToThread();
+		PROF_EVENT("CTexture: wait for its load");
+		while (flags.bLoading)
+			SwitchToThread();
 	}
 	// SEQ
 	u32 frame = Device.dwTimeContinual / seqMSPF; //Device.dwTimeGlobal
@@ -615,9 +627,11 @@ void CTexture::apply_seq(u32 dwStage)
 
 void CTexture::apply_normal(u32 dwStage)
 {
-	while (flags.bLoading)
+	if (flags.bLoading)
 	{
-		SwitchToThread();
+		PROF_EVENT("CTexture: wait for its load");
+		while (flags.bLoading)
+			SwitchToThread();
 	}
 	//CHK_DX(HW.pDevice->SetTexture(dwStage,pSurface));
 	Apply(dwStage);
@@ -854,9 +868,11 @@ void CTexture::Load()
 
 void CTexture::Unload()
 {
-	while (flags.bLoading)
+	if (flags.bLoading)
 	{
-		SwitchToThread();
+		PROF_EVENT("CTexture: wait for its load");
+		while (flags.bLoading)
+			SwitchToThread();
 	}
 #ifdef USE_DX11
 	stream_drop();
@@ -901,9 +917,11 @@ void CTexture::Unload()
 
 void CTexture::desc_update()
 {
-	while (flags.bLoading)
+	if (flags.bLoading)
 	{
-		SwitchToThread();
+		PROF_EVENT("CTexture: wait for its load");
+		while (flags.bLoading)
+			SwitchToThread();
 	}
 	desc_cache = pSurface;
 	if (pSurface)
@@ -965,36 +983,44 @@ D3D_USAGE CTexture::GetUsage()
 
 void CTexture::video_Play(BOOL looped, u32 _time)
 {
-	while (flags.bLoading)
+	if (flags.bLoading)
 	{
-		SwitchToThread();
+		PROF_EVENT("CTexture: wait for its load");
+		while (flags.bLoading)
+			SwitchToThread();
 	}
 	if (pTheora) pTheora->Play(looped, (_time != 0xFFFFFFFF) ? (m_play_time = _time) : Device.dwTimeContinual);
 }
 
 void CTexture::video_Pause(BOOL state)
 {
-	while (flags.bLoading)
+	if (flags.bLoading)
 	{
-		SwitchToThread();
+		PROF_EVENT("CTexture: wait for its load");
+		while (flags.bLoading)
+			SwitchToThread();
 	}
 	if (pTheora) pTheora->Pause(state);
 }
 
 void CTexture::video_Stop()
 {
-	while (flags.bLoading)
+	if (flags.bLoading)
 	{
-		SwitchToThread();
+		PROF_EVENT("CTexture: wait for its load");
+		while (flags.bLoading)
+			SwitchToThread();
 	}
 	if (pTheora) pTheora->Stop();
 }
 
 BOOL CTexture::video_IsPlaying()
 {
-	while (flags.bLoading)
+	if (flags.bLoading)
 	{
-		SwitchToThread();
+		PROF_EVENT("CTexture: wait for its load");
+		while (flags.bLoading)
+			SwitchToThread();
 	}
 	return (pTheora) ? pTheora->IsPlaying() : FALSE;
 }

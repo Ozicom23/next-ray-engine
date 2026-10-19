@@ -35,6 +35,7 @@ void CRender::level_Load(IReader* fs)
 	//	g_pGamePersistent->LoadTitle		("st_loading_shaders");
 	g_pGamePersistent->LoadTitle();
 	{
+		PROF_EVENT("level_Load: shaders");
 		chunk = fs->open_chunk(fsL_SHADERS);
 		R_ASSERT2(chunk, "Level doesn't builded correctly.");
 		u32 count = chunk->r_u32();
@@ -67,6 +68,7 @@ void CRender::level_Load(IReader* fs)
 		//		g_pGamePersistent->LoadTitle("st_loading_geometry");
 		g_pGamePersistent->LoadTitle();
 		{
+			PROF_EVENT("level_Load: geometry");
 			CStreamReader* geom = FS.rs_open("$level$", "level.geom");
 			R_ASSERT2(geom, "level.geom");
 			LoadBuffers(geom,FALSE);
@@ -76,6 +78,7 @@ void CRender::level_Load(IReader* fs)
 
 		//...and alternate/fast geometry
 		{
+			PROF_EVENT("level_Load: geometry x");
 			CStreamReader* geom = FS.rs_open("$level$", "level.geomx");
 			R_ASSERT2(geom, "level.geomX");
 			LoadBuffers(geom,TRUE);
@@ -85,30 +88,37 @@ void CRender::level_Load(IReader* fs)
 		// Visuals
 		//		g_pGamePersistent->LoadTitle("st_loading_spatial_db");
 		g_pGamePersistent->LoadTitle();
-		chunk = fs->open_chunk(fsL_VISUALS);
-		LoadVisuals(chunk);
-		chunk->close();
+		{
+			PROF_EVENT("level_Load: visuals");
+			chunk = fs->open_chunk(fsL_VISUALS);
+			LoadVisuals(chunk);
+			chunk->close();
+		}
 
 		// Details
 		//		g_pGamePersistent->LoadTitle("st_loading_details");
 		g_pGamePersistent->LoadTitle();
+		PROF_EVENT("level_Load: details");
 		Details->Load();
 	}
 
 	// Sectors
 	//	g_pGamePersistent->LoadTitle("st_loading_sectors_portals");
 	g_pGamePersistent->LoadTitle();
-	LoadSectors(fs);
+	{
+		PROF_EVENT("level_Load: sectors, HOM, lights");
+		LoadSectors(fs);
 
-	// 3D Fluid
-	Load3DFluid();
+		// 3D Fluid
+		Load3DFluid();
 
-	// HOM
-	HOM.Load();
+		// HOM
+		HOM.Load();
 
-	// Lights
-	// pApp->LoadTitle			("Loading lights...");
-	LoadLights(fs);
+		// Lights
+		// pApp->LoadTitle			("Loading lights...");
+		LoadLights(fs);
+	}
 
 	// End
 	pApp->LoadEnd();

@@ -461,6 +461,7 @@ BOOL CResourceManager::_lua_HasShader(LPCSTR s_shader)
 
 Shader* CResourceManager::_lua_Create(LPCSTR d_shader, LPCSTR s_textures)
 {
+	PROF_EVENT("_lua_Create");
 	xrCriticalSectionGuard guard(creationGuard);
 	CBlender_Compile C;
 	Shader S;

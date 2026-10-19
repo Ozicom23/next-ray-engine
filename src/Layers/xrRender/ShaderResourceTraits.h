@@ -76,6 +76,7 @@ inline CResourceManager::map_CS& CResourceManager::GetShaderMap() { return m_cs;
 template <typename T>
 inline T* CResourceManager::CreateShader(const char* name)
 {
+	PROF_EVENT("CreateShader (HS/DS/CS)");
 	xrCriticalSectionGuard guard(creationGuard);
 	ShaderTypeTraits<T>::MapType& sh_map = GetShaderMap<ShaderTypeTraits<T>::MapType>();
 	LPSTR N = LPSTR(name);

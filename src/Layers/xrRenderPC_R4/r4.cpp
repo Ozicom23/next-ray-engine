@@ -1231,6 +1231,7 @@ static HRESULT create_shader(
 	bool const disasm
 )
 {
+	PROF_EVENT("create_shader");
 	HRESULT _result = E_FAIL;
 	if (pTarget[0] == 'p')
 	{
@@ -2300,6 +2301,7 @@ HRESULT CRender::shader_compile(
 
 	if (FS.exist(file_name))
 	{
+		PROF_EVENT("shader_compile: from the cache");
 		IReader* file = FS.r_open(file_name);
 		if (file->length() > 4)
 		{
@@ -2321,6 +2323,7 @@ HRESULT CRender::shader_compile(
 		includer Includer;
 		LPD3DBLOB pShaderBuf = NULL;
 		LPD3DBLOB pErrorBuf = NULL;
+		PROF_EVENT("shader_compile: D3DCompile");
 		_result =
 			D3DCompile(
 				pSrcData,

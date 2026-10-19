@@ -188,8 +188,10 @@ struct resptrcode_texture : public resptr_base<CTexture>
 {
 	void create(LPCSTR _name);
 	void destroy() { _set(NULL); }
-	shared_str bump_get() { while (_get() && _get()->flags.bLoading) { SwitchToThread(); }return _get()->m_bumpmap; }
-	bool bump_exist() { while (_get() && _get()->flags.bLoading) { SwitchToThread(); }return 0!=bump_get().size(); }
+	// The bump map's name is set in Preload, before the texture loads (on a worker thread): no wait for the load, which
+	// made every shader built on a texture not loaded yet wait for its file (~3 s of a level load on macOS)
+	shared_str bump_get() { return _get()->m_bumpmap; }
+	bool bump_exist() { return 0!=bump_get().size(); }
 };
 
 typedef resptr_core<CTexture, resptrcode_texture>
