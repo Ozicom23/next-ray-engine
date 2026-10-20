@@ -1117,6 +1117,8 @@ int APIENTRY WinMain_impl(HINSTANCE hInstance,
 		splashH,
 		SWP_SHOWWINDOW
 	);
+	// Rounded corners (radius 12 px); the window owns the region afterwards
+	SetWindowRgn(logoWindow, CreateRoundRectRgn(0, 0, splashW + 1, splashH + 1, 24, 24), TRUE);
 
 	UpdateWindow(logoWindow);
 
