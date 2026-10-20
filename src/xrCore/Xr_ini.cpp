@@ -110,6 +110,7 @@ BOOL CInifile::Sect::line_exist(LPCSTR L, LPCSTR* val)
 // Initialize the static cache member
 BOOL dltx_use_cache = TRUE;
 xr_unordered_flat_map<xr_string, CInifile::Root> CInifile::CachedData;
+xr_unordered_flat_map<xr_string, CInifile::Root> CInifile::CachedTexts;
 xrCriticalSection CInifile::CacheCS;
 void CInifile::InvalidateCache(LPCSTR path) {
 	if (path)
@@ -131,6 +132,8 @@ void CInifile::InvalidateCache(LPCSTR path) {
 		}
 		CachedData.clear();
 		CachedData.rehash(0);
+		CachedTexts.clear();
+		CachedTexts.rehash(0);
 	}
 };
 
@@ -246,11 +249,40 @@ CInifile::CInifile(IReader* F, LPCSTR path
 	m_flags.set(eSaveAtEnd, FALSE);
 	m_flags.set(eReadOnly, TRUE);
 	m_flags.set(eOverrideNames, FALSE);
+	// Texts from memory (objects' custom data, spawn_ini: ~19.5k parses on every level load, mostly the same few
+	// texts) are parsed once per text and path, then copied: each CInifile keeps its own data (scripts change it)
+	const bool cacheable = dltx_use_cache && F->elapsed() <= 16 * 1024
+#ifndef _EDITOR
+		&& !allow_include_func
+#endif
+		;
+	xr_string key;
+	if (cacheable)
+	{
+		key = path ? path : "";
+		key += '\0';
+		key.append((const char*)F->pointer(), F->elapsed());
+		xrCriticalSectionGuard g(CacheCS);
+		auto it = CachedTexts.find(key);
+		if (it != CachedTexts.end())
+		{
+			DATA = it->second;
+			BuildSectIndex();
+			return;
+		}
+	}
 	Load(F, path
 #ifndef _EDITOR
 	     , allow_include_func
 #endif
 	);
+	if (cacheable)
+	{
+		xrCriticalSectionGuard g(CacheCS);
+		if (CachedTexts.size() >= 16384)
+			CachedTexts.clear();
+		CachedTexts.emplace(std::move(key), DATA);
+	}
 }
 
 // Ini loads by file name: time and whether they came from the DLTX cache (stat_script_load)

@@ -141,6 +141,7 @@ public:
 	
 private:
 	static xr_unordered_flat_map<xr_string, Root> CachedData;
+	static xr_unordered_flat_map<xr_string, Root> CachedTexts; // texts parsed from memory, by path and text
 	static xrCriticalSection CacheCS;
 
 public:
