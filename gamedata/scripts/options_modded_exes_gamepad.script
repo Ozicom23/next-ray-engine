@@ -1,0 +1,93 @@
+--- Gamepad options tree: settings and the layout (gp_bind, one list per gamepad key)
+
+-- Import smart constructors
+options_builder.import_into(this)
+
+-- The actions a gamepad key can do, in the lists' order
+local actions = {
+	"none",
+	"jump", "crouch", "accel", "sprint_toggle", "llookout", "rlookout", "freelook",
+	"wpn_fire", "wpn_zoom", "wpn_reload", "use", "use_or_reload", "wpn_next", "wpn_func",
+	"wpn_firemode_next", "wpn_firemode_prev", "wpn_swap", "wpn_holster", "next_slot", "prev_slot",
+	"wpn_1", "wpn_2", "wpn_3", "wpn_4", "wpn_5", "wpn_6",
+	"radial_menu", "show_detector", "torch", "night_vision", "drop", "safemode",
+	"inventory", "active_jobs", "quick_use_1", "quick_use_2", "quick_use_3", "quick_use_4",
+	"quick_save", "quick_load", "quit",
+	"forward", "back", "lstrafe", "rstrafe",
+}
+
+local action_content = {}
+for i, a in ipairs(actions) do
+	action_content[i] = {a, "st_gp_act_" .. a}
+end
+
+-- Gamepad keys: each button, held, and pressed while LT is held
+local buttons = {"A", "B", "X", "Y", "LB", "RB", "LT", "RT", "BACK", "START", "LS", "RS",
+	"DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT"}
+
+local function get_bind(key)
+	exec_console_cmd("gp_get_bind " .. key)
+	return get_console():get_string("gp_get_bind") or "none"
+end
+
+local function set_bind(key)
+	local val = ui_options.opt_temp["modded_exes/control/gamepad/bind_" .. key]
+	if val == nil then
+		return
+	end
+	if val == "none" then
+		exec_console_cmd("gp_unbind " .. key)
+	else
+		exec_console_cmd("gp_bind " .. key .. " " .. val)
+	end
+	exec_console_cmd("cfg_save")
+end
+
+local function bind_row(key)
+	return {
+		id = "bind_" .. key,
+		type = "list",
+		val = 0,
+		no_str = true,
+		curr = {get_bind, key},
+		functor = {set_bind, key},
+		content = {function() return action_content end},
+	}
+end
+
+local function default_layout()
+	exec_console_cmd("gp_default_layout")
+	exec_console_cmd("cfg_save")
+end
+
+local rows = {
+	{ id = "gamepad" },
+	list_bool { id = "gp_enabled" },
+	track { id = "gp_look_sens_x", step = 0.05 },
+	track { id = "gp_look_sens_y", step = 0.05 },
+	track { id = "gp_aim_sens", step = 0.05 },
+	list_bool { id = "gp_invert_y" },
+	track { id = "gp_look_curve", step = 0.1 },
+	track { id = "gp_look_boost", step = 0.1 },
+	track { id = "gp_deadzone_left", step = 0.01 },
+	track { id = "gp_deadzone_right", step = 0.01 },
+	track { id = "gp_walk_threshold", step = 0.05 },
+	track { id = "gp_cursor_speed", step = 0.1 },
+	track { id = "gp_hold_time", step = 0.05 },
+	track { id = "gp_vibration", step = 0.05 },
+	button { id = "gp_default_layout", functor_ui = default_layout },
+	line {},
+}
+for _, b in ipairs(buttons) do
+	rows[#rows + 1] = bind_row("gp" .. b)
+end
+for _, b in ipairs(buttons) do
+	rows[#rows + 1] = bind_row("gp" .. b .. "_hold")
+end
+for _, b in ipairs(buttons) do
+	if b ~= "LT" then
+		rows[#rows + 1] = bind_row("gp" .. b .. "_aim")
+	end
+end
+
+PAGE = page(rows)

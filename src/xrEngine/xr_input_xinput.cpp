@@ -1,128 +1,85 @@
 #include "stdafx.h"
-/*
+#include "xr_input.h"
 #include "xr_input_xinput.h"
 #include <xinput.h>
 
-
-DXUT_GAMEPAD g_GamePads[DXUT_MAX_CONTROLLERS];
-
-typedef DWORD (WINAPI* LPXINPUTGETSTATE)(DWORD dwUserIndex, XINPUT_STATE* pState );
-typedef DWORD (WINAPI* LPXINPUTSETSTATE)(DWORD dwUserIndex, XINPUT_VIBRATION* pVibration );
-typedef DWORD (WINAPI* LPXINPUTGETCAPABILITIES)( DWORD dwUserIndex, DWORD dwFlags, XINPUT_CAPABILITIES* pCapabilities );
-typedef void (WINAPI* LPXINPUTENABLE)(BOOL bEnable);
-
-HRESULT DXUTGetGamepadState( DWORD dwPort, DXUT_GAMEPAD* pGamePad, bool bThumbstickDeadZone, bool bSnapThumbstickToCardinals )
+namespace xinput
 {
-if( dwPort >= DXUT_MAX_CONTROLLERS || pGamePad == NULL )
-return E_FAIL;
+typedef DWORD (WINAPI* get_state_fn)(DWORD user, XINPUT_STATE* state);
+typedef DWORD (WINAPI* set_state_fn)(DWORD user, XINPUT_VIBRATION* vibration);
 
-static LPXINPUTGETSTATE s_pXInputGetState = NULL;
-static LPXINPUTGETCAPABILITIES s_pXInputGetCapabilities = NULL;
-if( NULL == s_pXInputGetState || NULL == s_pXInputGetCapabilities )
+static get_state_fn s_get_state = nullptr;
+static set_state_fn s_set_state = nullptr;
+
+static bool load()
 {
-HINSTANCE hInst = LoadLibrary( XINPUT_DLL );
-if( hInst )
-{
-s_pXInputGetState = (LPXINPUTGETSTATE)GetProcAddress( hInst, "XInputGetState" );
-s_pXInputGetCapabilities = (LPXINPUTGETCAPABILITIES)GetProcAddress( hInst, "XInputGetCapabilities" );
-}
-}
-if( s_pXInputGetState == NULL )
-return E_FAIL;
-
-XINPUT_STATE InputState;
-DWORD dwResult = s_pXInputGetState( dwPort, &InputState );
-
-// Track insertion and removals
-BOOL bWasConnected = pGamePad->bConnected;
-pGamePad->bConnected = (dwResult == ERROR_SUCCESS);
-pGamePad->bRemoved = ( bWasConnected && !pGamePad->bConnected );
-pGamePad->bInserted = ( !bWasConnected && pGamePad->bConnected );
-
-// Don't update rest of the state if not connected
-if( !pGamePad->bConnected )
-return S_OK;
-
-// Store the capabilities of the device
-if( pGamePad->bInserted )
-{
-ZeroMemory( pGamePad, sizeof(DXUT_GAMEPAD) );
-pGamePad->bConnected = true;
-pGamePad->bInserted = true;
-if( s_pXInputGetCapabilities )
-s_pXInputGetCapabilities( dwPort, XINPUT_DEVTYPE_GAMEPAD, &pGamePad->caps );
+	static bool tried = false;
+	if (tried)
+		return s_get_state != nullptr;
+	tried = true;
+	for (LPCSTR dll : {"xinput1_4.dll", "xinput1_3.dll", "xinput9_1_0.dll"})
+	{
+		HMODULE module = LoadLibrary(dll);
+		if (!module)
+			continue;
+		s_get_state = (get_state_fn)GetProcAddress(module, "XInputGetState");
+		s_set_state = (set_state_fn)GetProcAddress(module, "XInputSetState");
+		if (s_get_state)
+		{
+			Msg("* Gamepad: %s", dll);
+			return true;
+		}
+		FreeLibrary(module);
+	}
+	Msg("! Gamepad: no XInput library");
+	return false;
 }
 
-// Copy gamepad to local structure (assumes that XINPUT_GAMEPAD at the front in CONTROLER_STATE)
-memcpy( pGamePad, &InputState.Gamepad, sizeof(XINPUT_GAMEPAD) );
-
-if( bSnapThumbstickToCardinals )
+static float stick(SHORT v)
 {
-// Apply deadzone to each axis independantly to slightly snap to up/down/left/right
-if( pGamePad->sThumbLX < XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE && pGamePad->sThumbLX > -XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE )
-pGamePad->sThumbLX = 0;
-if( pGamePad->sThumbLY < XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE && pGamePad->sThumbLY > -XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE )
-pGamePad->sThumbLY = 0;
-if( pGamePad->sThumbRX < XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE && pGamePad->sThumbRX > -XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE )
-pGamePad->sThumbRX = 0;
-if( pGamePad->sThumbRY < XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE && pGamePad->sThumbRY > -XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE )
-pGamePad->sThumbRY = 0;
+	return _max(-1.f, float(v) / 32767.f);
 }
-else if( bThumbstickDeadZone )
+
+bool read(int slot, gamepad_state& state)
 {
-// Apply deadzone if centered
-if( (pGamePad->sThumbLX < XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE && pGamePad->sThumbLX > -XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE) &&
-(pGamePad->sThumbLY < XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE && pGamePad->sThumbLY > -XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE) )
+	XINPUT_STATE xs;
+	if (!load() || s_get_state(DWORD(slot), &xs) != ERROR_SUCCESS)
+		return false;
+
+	static const struct
+	{
+		WORD xinput;
+		int code;
+	} buttons[] = {
+		{XINPUT_GAMEPAD_A, GP_A}, {XINPUT_GAMEPAD_B, GP_B}, {XINPUT_GAMEPAD_X, GP_X}, {XINPUT_GAMEPAD_Y, GP_Y},
+		{XINPUT_GAMEPAD_LEFT_SHOULDER, GP_LB}, {XINPUT_GAMEPAD_RIGHT_SHOULDER, GP_RB},
+		{XINPUT_GAMEPAD_BACK, GP_BACK}, {XINPUT_GAMEPAD_START, GP_START},
+		{XINPUT_GAMEPAD_LEFT_THUMB, GP_LS}, {XINPUT_GAMEPAD_RIGHT_THUMB, GP_RS},
+		{XINPUT_GAMEPAD_DPAD_UP, GP_DPAD_UP}, {XINPUT_GAMEPAD_DPAD_DOWN, GP_DPAD_DOWN},
+		{XINPUT_GAMEPAD_DPAD_LEFT, GP_DPAD_LEFT}, {XINPUT_GAMEPAD_DPAD_RIGHT, GP_DPAD_RIGHT},
+	};
+	const XINPUT_GAMEPAD& g = xs.Gamepad;
+	state.connected = true;
+	state.buttons = 0;
+	for (const auto& b : buttons)
+		if (g.wButtons & b.xinput)
+			state.buttons |= 1u << (b.code - GP_A);
+	state.lt = float(g.bLeftTrigger) / 255.f;
+	state.rt = float(g.bRightTrigger) / 255.f;
+	state.lx = stick(g.sThumbLX);
+	state.ly = stick(g.sThumbLY);
+	state.rx = stick(g.sThumbRX);
+	state.ry = stick(g.sThumbRY);
+	return true;
+}
+
+void vibrate(int slot, float low, float high)
 {
-pGamePad->sThumbLX = 0;
-pGamePad->sThumbLY = 0;
-}
-if( (pGamePad->sThumbRX < XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE && pGamePad->sThumbRX > -XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE) &&
-(pGamePad->sThumbRY < XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE && pGamePad->sThumbRY > -XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE) )
-{
-pGamePad->sThumbRX = 0;
-pGamePad->sThumbRY = 0;
+	if (!load() || !s_set_state || slot < 0)
+		return;
+	XINPUT_VIBRATION v;
+	v.wLeftMotorSpeed = WORD(iFloor(clampr(low, 0.f, 1.f) * 65535.f));
+	v.wRightMotorSpeed = WORD(iFloor(clampr(high, 0.f, 1.f) * 65535.f));
+	s_set_state(DWORD(slot), &v);
 }
 }
-
-// Convert [-1,+1] range
-pGamePad->fThumbLX = pGamePad->sThumbLX / 32767.0f;
-pGamePad->fThumbLY = pGamePad->sThumbLY / 32767.0f;
-pGamePad->fThumbRX = pGamePad->sThumbRX / 32767.0f;
-pGamePad->fThumbRY = pGamePad->sThumbRY / 32767.0f;
-
-// Get the boolean buttons that have been pressed since the last call.
-// Each button is represented by one bit.
-pGamePad->wPressedButtons = ( pGamePad->wLastButtons ^ pGamePad->wButtons ) & pGamePad->wButtons;
-pGamePad->wLastButtons = pGamePad->wButtons;
-
-// Figure out if the left trigger has been pressed or released
-bool bPressed = ( pGamePad->bLeftTrigger > DXUT_GAMEPAD_TRIGGER_THRESHOLD );
-pGamePad->bPressedLeftTrigger = ( bPressed ) ? !pGamePad->bLastLeftTrigger : false;
-pGamePad->bLastLeftTrigger = bPressed;
-
-// Figure out if the right trigger has been pressed or released
-bPressed = ( pGamePad->bRightTrigger > DXUT_GAMEPAD_TRIGGER_THRESHOLD );
-pGamePad->bPressedRightTrigger = ( bPressed ) ? !pGamePad->bLastRightTrigger : false;
-pGamePad->bLastRightTrigger = bPressed;
-
-return S_OK;
-}
-
-void set_vibration (u16 s1, u16 s2)
-{
-static LPXINPUTSETSTATE s_pXInputSetState = NULL;
-if( NULL == s_pXInputSetState )
-{
-HINSTANCE hInst = LoadLibrary( XINPUT_DLL );
-if( hInst )
-s_pXInputSetState = (LPXINPUTSETSTATE)GetProcAddress( hInst, "XInputSetState" );
-}
-
-
-XINPUT_VIBRATION vibration;
-vibration.wLeftMotorSpeed = s1;
-vibration.wRightMotorSpeed = s2;
-s_pXInputSetState ( 0, &vibration );
-}
-*/

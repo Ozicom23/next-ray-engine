@@ -13,6 +13,51 @@ const int keyboard_device_key = 2;
 const int all_device_key = mouse_device_key | keyboard_device_key;
 const int default_key = mouse_device_key | keyboard_device_key;
 
+// Gamepad (XInput) buttons as key codes, after the mouse's (MOUSE_1..8 = 0xED+100..107): bound and sent like keys.
+// A button held for gp_hold_time is its own code (+GP_HOLD), as is a button pressed while LT is held (+GP_AIM);
+// the left stick's directions are codes too (movement)
+enum
+{
+	GP_A = 400,
+	GP_B,
+	GP_X,
+	GP_Y,
+	GP_LB,
+	GP_RB,
+	GP_LT,
+	GP_RT,
+	GP_BACK,
+	GP_START,
+	GP_LS,
+	GP_RS,
+	GP_DPAD_UP,
+	GP_DPAD_DOWN,
+	GP_DPAD_LEFT,
+	GP_DPAD_RIGHT,
+	GP_BUTTON_COUNT = 16,
+	GP_HOLD = 20,
+	GP_AIM = 40,
+	GP_LS_UP = 460,
+	GP_LS_DOWN,
+	GP_LS_LEFT,
+	GP_LS_RIGHT,
+	GP_VIRTUAL, // an action chosen by the game (the radial menu): sent as this key, its action set for the press
+	GP_FIRST = GP_A,
+	GP_LAST = GP_VIRTUAL,
+	GP_KEY_COUNT = GP_LAST - GP_FIRST + 1,
+};
+IC bool is_gamepad_key(int dik) { return dik >= GP_FIRST && dik <= GP_LAST; }
+
+// One gamepad's state: buttons as bits (1 << (code - GP_A), the triggers past half way as buttons), sticks -1..1
+// (y up), triggers 0..1
+struct gamepad_state
+{
+	bool connected = false;
+	u32 buttons = 0;
+	float lx = 0.f, ly = 0.f, rx = 0.f, ry = 0.f;
+	float lt = 0.f, rt = 0.f;
+};
+
 class ENGINE_API CInput
 #ifndef M_BORLAND
 	:
@@ -60,6 +105,19 @@ private:
 
 	//----------------------
 	BOOL KBState[COUNT_KB_BUTTONS];
+	BOOL padKeyState[GP_KEY_COUNT];
+
+	// Gamepad: XInput's first connected controller, or a simulated one (gp_sim); the game turns it into input
+	gamepad_state m_pad;
+	gamepad_state m_pad_sim;
+	bool m_pad_sim_on = false;
+	int m_pad_slot = -1; // the XInput user index read, -1 none
+	u32 m_pad_scan_time = 0; // the last look for a connected controller
+	u32 m_pad_vibration_until = 0;
+	bool m_pad_vibrating = false;
+	bool m_pad_in_use = false; // the gamepad was used last, not the mouse or keyboard
+	u32 m_pad_cursor_time = 0; // the gamepad last moved the cursor: mouse movement just after is from that
+	void PadUpdate();
 
 	HRESULT CreateInputDevice(LPDIRECTINPUTDEVICE8* device, GUID guidDevice,
 	                          const DIDATAFORMAT* pdidDataFormat, u32 dwFlags,
@@ -112,6 +170,18 @@ public:
 	void inject_key(int dik, bool press);
 	void inject_mouse_button(int btn, bool press);
 	void inject_mouse_move(int dx, int dy);
+	void inject_mouse_wheel(int direction);
+
+	// Gamepad
+	const gamepad_state& pad() const { return m_pad; }
+	bool pad_in_use() const { return m_pad.connected && m_pad_in_use; }
+	void pad_simulate(const gamepad_state* state); // nullptr: back to the real controller
+	void pad_cursor_moved() { m_pad_cursor_time = dwCurTime; }
+	// The game's handler, called every frame after the gamepad is read (dt in seconds): turns it into key presses
+	// (inject_key with GP_ codes), mouse input and camera turns
+	void (*pad_handler)(float dt) = nullptr;
+	// Held gamepad keys get IR_OnKeyboardHold every frame like held keyboard keys
+	void release_pad_keys();
 };
 
 extern ENGINE_API CInput* pInput;

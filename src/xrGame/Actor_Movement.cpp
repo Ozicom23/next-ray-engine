@@ -1,4 +1,7 @@
 #include "stdafx.h"
+#include "gamepad.h"
+
+extern float g_gp_walk_threshold;
 
 #include "actor.h"
 #include "inventory.h"
@@ -191,6 +194,21 @@ void CActor::g_cl_CheckControls(u32 mstate_wf, Fvector& vControlAccel, float& Ju
 	if (mstate_wf & mcBack) vControlAccel.z += -1;
 	if (mstate_wf & mcLStrafe) mstate_wf & mcSprint ? vControlAccel.x += -0.5 : vControlAccel.x += -1;
 	if (mstate_wf & mcRStrafe) mstate_wf & mcSprint ? vControlAccel.x += 0.5 : vControlAccel.x += 1;
+	// Gamepad: the stick's direction instead of the keys' eight; pushed less than gp_walk_threshold walks, slower the
+	// less it is pushed (down to a third of the walk)
+	Fvector2 pad_move;
+	float pad_speed = 1.f;
+	if ((mstate_wf & mcAnyMove) && gamepad_move(pad_move))
+	{
+		const float push = pad_move.magnitude();
+		if (push < g_gp_walk_threshold)
+		{
+			mstate_wf |= mcAccel;
+			pad_speed = clampr(push / _max(g_gp_walk_threshold, EPS), 0.35f, 1.f);
+		}
+		vControlAccel.x = pad_move.x * ((mstate_wf & mcSprint) ? 0.5f : 1.f);
+		vControlAccel.z = pad_move.y;
+	}
 
 	CPHMovementControl::EEnvironment curr_env = character_physics_support()->movement()->Environment();
 	if (curr_env == CPHMovementControl::peOnGround || curr_env == CPHMovementControl::peAtWall)
@@ -309,7 +327,7 @@ void CActor::g_cl_CheckControls(u32 mstate_wf, Fvector& vControlAccel, float& Ju
 						scale *= m_fWalk_StrafeFactor;
 				}
 
-				vControlAccel.mul(scale);
+				vControlAccel.mul(scale * pad_speed);
 				cam_eff_factor = scale;
 			} //scale>EPS
 		} //(mstate_real&mcAnyMove)

@@ -7113,6 +7113,9 @@
     <ClInclude Include="UICursor.h">
       <Filter>UI\Cursor</Filter>
     </ClInclude>
+    <ClInclude Include="gamepad.h">
+      <Filter>UI\Cursor</Filter>
+    </ClInclude>
     <ClInclude Include="ui\UIGameTutorial.h">
       <Filter>UI\Tutorial</Filter>
     </ClInclude>
@@ -10809,6 +10812,9 @@
       <Filter>UI\Cursor</Filter>
     </ClCompile>
     <ClCompile Include="UICursor.cpp">
+      <Filter>UI\Cursor</Filter>
+    </ClCompile>
+    <ClCompile Include="gamepad.cpp">
       <Filter>UI\Cursor</Filter>
     </ClCompile>
     <ClCompile Include="ui\UIGameTutorial.cpp">

@@ -31,6 +31,7 @@
 
 #include "../xrEngine/xr_input.h"
 #include "../xrEngine/x_ray.h"
+#include "gamepad.h"
 
 #ifndef MASTER_GOLD
 #	include "custommonster.h"
@@ -163,11 +164,13 @@ void CGamePersistent::OnAppStart()
 	m_pUI_core = xr_new<ui_core>();
 	m_pMainMenu = xr_new<CMainMenu>();
 	m_pWallmarksManager = xr_new<ScriptWallmarksManager>();
+	gamepad_start();
 }
 
 
 void CGamePersistent::OnAppEnd()
 {
+	gamepad_stop();
 	if (m_pMainMenu->IsActive())
 		m_pMainMenu->Activate(false);
 

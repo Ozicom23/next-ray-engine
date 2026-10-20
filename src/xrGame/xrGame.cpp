@@ -11,6 +11,7 @@
 #include "ui/xrUIXmlParser.h"
 #include "xr_level_controller.h"
 #include "profiler.h"
+#include "gamepad.h"
 
 //AVO: lua re-org
 #ifdef USE_LUAJIT_ONE //defined in project props
@@ -56,6 +57,7 @@ BOOL DllMainXrGame(HANDLE hModule, u32 ul_reason_for_call, LPVOID lpReserved)
 			CCC_RegisterCommands();
 			// keyboard binding
 			CCC_RegisterInput();
+			gamepad_register_commands();
 
 			setup_luabind_allocator();
 #ifdef DEBUG

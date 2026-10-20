@@ -14,12 +14,13 @@ protected:
 	ref_sound m_global_sound;
 	xr_deque<CUISequenceItem*> m_sequencer_items;
 
-	bool GrabInput();
 	CUISequenceItem* GetNextItem();
 	shared_str m_start_lua_function;
 	shared_str m_stop_lua_function;
 
 public:
+	// The playing item keeps the input; otherwise it goes on to the receiver before (the level)
+	bool GrabInput();
 	IInputReceiver* m_pStoredInputReceiver;
 	CUISequencer();
 	void Start(LPCSTR tutor_name);

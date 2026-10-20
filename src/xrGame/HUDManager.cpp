@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "gamepad.h"
 #include "HUDManager.h"
 #include "hudtarget.h"
 #include "actor.h"
@@ -320,6 +321,7 @@ void CHUDManager::RenderUI()
 			xrCriticalSectionGuard guard(&ui_lock);
 			pUIGame->Render();
 		}
+		gamepad_render_ui();
 
 		UI().RenderFont();
 	}

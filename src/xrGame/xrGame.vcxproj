@@ -1845,6 +1845,7 @@
     <ClInclude Include="trajectories.h" />
     <ClInclude Include="UIAchivementsIndicator.h" />
     <ClInclude Include="UICursor.h" />
+    <ClInclude Include="gamepad.h" />
     <ClInclude Include="UIDialogHolder.h" />
     <ClInclude Include="UIDosimeter.h" />
     <ClInclude Include="UIGameAHunt.h" />
@@ -3926,6 +3927,7 @@
     <ClCompile Include="trajectories.cpp" />
     <ClCompile Include="UIAchivementsIndicator.cpp" />
     <ClCompile Include="UICursor.cpp" />
+    <ClCompile Include="gamepad.cpp" />
     <ClCompile Include="UIDialogHolder.cpp" />
     <ClCompile Include="UIDosimeter.cpp" />
     <ClCompile Include="UIGameAHunt.cpp" />

@@ -4,6 +4,7 @@ local page_keyboard = options_modded_exes_keyboard.PAGE
 local page_mouse = options_modded_exes_mouse.PAGE
 local page_camera = options_modded_exes_camera.PAGE
 local page_pda = options_modded_exes_pda.PAGE
+local page_gamepad = options_modded_exes_gamepad.PAGE
 
 -- Import smart constructors
 options_builder.import_into(this)
@@ -15,4 +16,5 @@ GROUP = group {
 	page_mouse,
 	page_camera,
 	page_pda,
+	page_gamepad,
 }

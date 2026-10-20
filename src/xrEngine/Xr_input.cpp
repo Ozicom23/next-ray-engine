@@ -5,9 +5,7 @@
 #include "IInputReceiver.h"
 //#include "../include/editor/ide.hpp"
 
-#ifndef _EDITOR
-# include "xr_input_xinput.h"
-#endif
+#include "xr_input_xinput.h"
 CInput* pInput = NULL;
 IInputReceiver dummyController;
 
@@ -19,8 +17,8 @@ ENGINE_API float psMouseSensVerticalK = 1.f;
 // so a frame got one or two and the camera turned by uneven steps (felt as stutter). Costs half a frame of delay
 ENGINE_API int psMouseFilter = 0;
 ENGINE_API Flags32 psMouseInvert = {FALSE};
-
-float stop_vibration_time = flt_max;
+// gp_vibration: the gamepad's motors 0..1 of what the game asks
+ENGINE_API float psGamepadVibration = 1.f;
 
 // demonized: configurable buffer sizes for mouse and kb
 int MOUSEBUFFERSIZE = 1024;
@@ -64,6 +62,7 @@ CInput::CInput(BOOL bExclusive, int deviceForInit)
 
 	ZeroMemory(mouseState, sizeof(mouseState));
 	ZeroMemory(KBState, sizeof(KBState));
+	ZeroMemory(padKeyState, sizeof(padKeyState));
 	ZeroMemory(timeStamp, sizeof(timeStamp));
 	ZeroMemory(timeSave, sizeof(timeStamp));
 	ZeroMemory(offs, sizeof(offs));
@@ -217,6 +216,8 @@ void CInput::KeyUpdate()
 	}
 
 	bool b_dik_pause_was_pressed = false;
+	if (dwElements)
+		m_pad_in_use = false;
 	for (u32 idx = 0; idx < dwElements; idx++)
 	{
 		if (od[idx].dwOfs == DIK_PAUSE)
@@ -281,42 +282,6 @@ void CInput::KeyUpdate()
 			SendMessage(Device.m_hWnd, WM_SYSCOMMAND, SC_MINIMIZE, 0);
 	}
 #endif
-	/*
-	#ifndef _EDITOR
-	//update xinput if exist
-	for( DWORD iUserIndex=0; iUserIndex<DXUT_MAX_CONTROLLERS; iUserIndex++ )
-	{
-	DXUTGetGamepadState( iUserIndex, &g_GamePads[iUserIndex], true, false );
-
-	if( !g_GamePads[iUserIndex].bConnected )
-	continue; // unplugged?
-
-	bool new_b, old_b;
-	new_b = !!(g_GamePads[iUserIndex].wPressedButtons & XINPUT_GAMEPAD_A);
-	old_b = !!(g_GamePads[iUserIndex].wLastButtons & XINPUT_GAMEPAD_A);
-
-	if(new_b != old_b)
-	{
-	if(old_b)
-	cbStack.back()->IR_OnMousePress(0);
-	else
-	cbStack.back()->IR_OnMouseRelease(0);
-	}
-	int dx,dy;
-	dx = iFloor(g_GamePads[iUserIndex].fThumbRX*6);
-	dy = iFloor(g_GamePads[iUserIndex].fThumbRY*6);
-	if(dx || dy)
-	cbStack.back()->IR_OnMouseMove ( dx, dy );
-	}
-
-	if(Device.fTimeGlobal > stop_vibration_time)
-	{
-	stop_vibration_time = flt_max;
-	set_vibration (0, 0);
-	}
-	//xinput
-	#endif
-	*/
 }
 
 void CInput::resetMouseState()
@@ -421,6 +386,8 @@ BOOL CInput::iGetAsyncKeyState(int dik)
 {
 	if (dik < COUNT_KB_BUTTONS)
 		return !!KBState[dik];
+	else if (is_gamepad_key(dik))
+		return !!padKeyState[dik - GP_FIRST];
 	else if (dik >= MOUSE_1 && dik <= MOUSE_8)
 	{
 		int mk = dik - MOUSE_1;
@@ -432,9 +399,14 @@ BOOL CInput::iGetAsyncKeyState(int dik)
 
 void CInput::inject_key(int dik, bool press)
 {
-	if (dik < 0 || dik >= COUNT_KB_BUTTONS || cbStack.empty())
+	if (cbStack.empty())
 		return;
-	KBState[dik] = press;
+	if (is_gamepad_key(dik))
+		padKeyState[dik - GP_FIRST] = press;
+	else if (dik >= 0 && dik < COUNT_KB_BUTTONS)
+		KBState[dik] = press;
+	else
+		return;
 	if (press)
 		cbStack.back()->IR_OnKeyboardPress(dik);
 	else
@@ -456,6 +428,71 @@ void CInput::inject_mouse_move(int dx, int dy)
 {
 	if (!cbStack.empty())
 		cbStack.back()->IR_OnMouseMove(dx, dy);
+}
+
+void CInput::inject_mouse_wheel(int direction)
+{
+	if (!cbStack.empty())
+		cbStack.back()->IR_OnMouseWheel(direction);
+}
+
+void CInput::release_pad_keys()
+{
+	for (int i = 0; i < GP_KEY_COUNT; ++i)
+		if (padKeyState[i])
+			inject_key(GP_FIRST + i, false);
+}
+
+void CInput::pad_simulate(const gamepad_state* state)
+{
+	m_pad_sim_on = state != nullptr;
+	if (state)
+		m_pad_sim = *state;
+}
+
+void CInput::PadUpdate()
+{
+	gamepad_state now;
+	if (m_pad_sim_on)
+		now = m_pad_sim;
+	else
+	{
+		// A missing controller is looked for once a second: XInputGetState on an empty user index is slow
+		if (m_pad_slot >= 0 && !xinput::read(m_pad_slot, now))
+			m_pad_slot = -1;
+		if (m_pad_slot < 0 && dwCurTime - m_pad_scan_time > 1000)
+		{
+			m_pad_scan_time = dwCurTime;
+			for (int slot = 0; slot < 4; ++slot)
+				if (xinput::read(slot, now))
+				{
+					m_pad_slot = slot;
+					Msg("* Gamepad connected (XInput user %d)", slot);
+					break;
+				}
+		}
+	}
+	if (now.connected && (now.lt > 0.3f))
+		now.buttons |= 1u << (GP_LT - GP_A);
+	if (now.connected && (now.rt > 0.3f))
+		now.buttons |= 1u << (GP_RT - GP_A);
+
+	if (m_pad.connected && !now.connected)
+	{
+		Msg("* Gamepad disconnected");
+		release_pad_keys();
+	}
+	// In use from its first button or a stick pushed past a third (a resting stick drifts a little)
+	if (now.connected && ((now.buttons & ~m_pad.buttons) || _abs(now.lx) > 0.33f || _abs(now.ly) > 0.33f ||
+		_abs(now.rx) > 0.33f || _abs(now.ry) > 0.33f))
+		m_pad_in_use = true;
+	m_pad = now;
+
+	if (m_pad_vibrating && dwCurTime >= m_pad_vibration_until)
+	{
+		m_pad_vibrating = false;
+		xinput::vibrate(m_pad_slot, 0.f, 0.f);
+	}
 }
 
 BOOL CInput::iGetAsyncBtnState(int btn)
@@ -505,6 +542,8 @@ void CInput::MouseUpdate()
 	offs[0] = offs[1] = offs[2] = 0;
 	for (u32 i = 0; i < dwElements; i++)
 	{
+		if (od[i].dwOfs >= DIMOFS_BUTTON0 && od[i].dwOfs <= DIMOFS_BUTTON7)
+			m_pad_in_use = false;
 		switch (od[i].dwOfs)
 		{
 		case DIMOFS_X:
@@ -677,6 +716,9 @@ void CInput::MouseUpdate()
 		filter_rest[0] = filter_rest[1] = 0.f;
 	}
 	if (move[0] || move[1]) cbStack.back()->IR_OnMouseMove(move[0], move[1]);
+	// A real mouse: buttons or more than a nudge (a few counts also come from the cursor the gamepad moves in menus)
+	if ((_abs(offs[0]) + _abs(offs[1]) > 6 && dwCurTime - m_pad_cursor_time > 200) || offs[2])
+		m_pad_in_use = false;
 
 	if (dwElements)
 	{
@@ -751,6 +793,7 @@ void CInput::OnAppActivate(void)
 
 void CInput::OnAppDeactivate(void)
 {
+	release_pad_keys();
 	if (CurrentIR())
 		CurrentIR()->IR_OnDeactivate();
 
@@ -784,6 +827,21 @@ void CInput::OnFrame(void)
 	const u64 t_kb = CPU::QPC();
 	g_input_mouse_read_ms = 0.f;
 	if (pMouse) MouseUpdate();
+	{
+		PROF_EVENT("gamepad");
+		PadUpdate();
+		const float dt = Device.fTimeDelta;
+#ifndef _EDITOR
+		if (Device.dwPrecacheFrame == 0)
+#endif
+		{
+			if (pad_handler)
+				pad_handler(dt);
+			for (int i = 0; i < GP_KEY_COUNT; ++i)
+				if (padKeyState[i] && !cbStack.empty())
+					cbStack.back()->IR_OnKeyboardHold(GP_FIRST + i);
+		}
+	}
 	const double to_ms = 1000.0 / double(CPU::qpc_freq);
 	g_input_kb_ms = float(double(t_kb - t_start) * to_ms);
 	g_input_mouse_ms = float(double(CPU::QPC() - t_kb) * to_ms); // stat_frame_pacing
@@ -839,8 +897,9 @@ bool CInput::get_exclusive_mode()
 
 void CInput::feedback(u16 s1, u16 s2, float time)
 {
-	stop_vibration_time = RDEVICE.fTimeGlobal + time;
-#ifndef _EDITOR
-	//. set_vibration (s1, s2);
-#endif
+	if (!m_pad.connected || m_pad_sim_on || psGamepadVibration <= 0.f)
+		return;
+	xinput::vibrate(m_pad_slot, psGamepadVibration * float(s1) / 65535.f, psGamepadVibration * float(s2) / 65535.f);
+	m_pad_vibrating = true;
+	m_pad_vibration_until = dwCurTime + u32(iFloor(time * 1000.f));
 }

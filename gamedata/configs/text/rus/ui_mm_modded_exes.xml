@@ -631,6 +631,359 @@
 		<text>Отдельная кнопка для подствола (use_separate_ubgl_keybind)</text>
 	</string>
 	
+	<!-- Gamepad -->
+	<string id="ui_mm_menu_gamepad">
+		<text>Геймпад</text>
+	</string>
+	<string id="ui_mm_gamepad_modded_exes">
+		<text>Геймпад</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_enabled">
+		<text>Геймпад (gp_enabled)</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_look_sens_x">
+		<text>Чувствительность обзора по горизонтали (gp_look_sens_x)</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_look_sens_y">
+		<text>Чувствительность обзора по вертикали (gp_look_sens_y)</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_aim_sens">
+		<text>Чувствительность при прицеливании (gp_aim_sens)</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_invert_y">
+		<text>Инверсия обзора вверх/вниз (gp_invert_y)</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_look_curve">
+		<text>Кривая отклика обзора (gp_look_curve)</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_look_boost">
+		<text>Ускорение поворота при полном отклонении (gp_look_boost)</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_deadzone_left">
+		<text>Мёртвая зона левого стика (gp_deadzone_left)</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_deadzone_right">
+		<text>Мёртвая зона правого стика (gp_deadzone_right)</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_walk_threshold">
+		<text>Шаг при отклонении стика меньше (gp_walk_threshold)</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_cursor_speed">
+		<text>Скорость курсора в меню (gp_cursor_speed)</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_hold_time">
+		<text>Время удержания, секунды (gp_hold_time)</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_vibration">
+		<text>Вибрация (gp_vibration)</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_default_layout">
+		<text>Раскладка по умолчанию (как в S.T.A.L.K.E.R. 2)</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpA">
+		<text>A</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpB">
+		<text>B</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpX">
+		<text>X</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpY">
+		<text>Y</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpLB">
+		<text>LB</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpRB">
+		<text>RB</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpLT">
+		<text>LT</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpRT">
+		<text>RT</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpBACK">
+		<text>View</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpSTART">
+		<text>Menu</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpLS">
+		<text>L3 (нажатие левого стика)</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpRS">
+		<text>R3 (нажатие правого стика)</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpDPAD_UP">
+		<text>Крестовина вверх</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpDPAD_DOWN">
+		<text>Крестовина вниз</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpDPAD_LEFT">
+		<text>Крестовина влево</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpDPAD_RIGHT">
+		<text>Крестовина вправо</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpA_hold">
+		<text>A, удержание</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpB_hold">
+		<text>B, удержание</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpX_hold">
+		<text>X, удержание</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpY_hold">
+		<text>Y, удержание</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpLB_hold">
+		<text>LB, удержание</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpRB_hold">
+		<text>RB, удержание</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpLT_hold">
+		<text>LT, удержание</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpRT_hold">
+		<text>RT, удержание</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpBACK_hold">
+		<text>View, удержание</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpSTART_hold">
+		<text>Menu, удержание</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpLS_hold">
+		<text>L3 (нажатие левого стика), удержание</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpRS_hold">
+		<text>R3 (нажатие правого стика), удержание</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpDPAD_UP_hold">
+		<text>Крестовина вверх, удержание</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpDPAD_DOWN_hold">
+		<text>Крестовина вниз, удержание</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpDPAD_LEFT_hold">
+		<text>Крестовина влево, удержание</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpDPAD_RIGHT_hold">
+		<text>Крестовина вправо, удержание</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpA_aim">
+		<text>LT + A</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpB_aim">
+		<text>LT + B</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpX_aim">
+		<text>LT + X</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpY_aim">
+		<text>LT + Y</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpLB_aim">
+		<text>LT + LB</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpRB_aim">
+		<text>LT + RB</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpRT_aim">
+		<text>LT + RT</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpBACK_aim">
+		<text>LT + View</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpSTART_aim">
+		<text>LT + Menu</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpLS_aim">
+		<text>LT + L3 (нажатие левого стика)</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpRS_aim">
+		<text>LT + R3 (нажатие правого стика)</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpDPAD_UP_aim">
+		<text>LT + Крестовина вверх</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpDPAD_DOWN_aim">
+		<text>LT + Крестовина вниз</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpDPAD_LEFT_aim">
+		<text>LT + Крестовина влево</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpDPAD_RIGHT_aim">
+		<text>LT + Крестовина вправо</text>
+	</string>
+	<string id="st_gp_act_none">
+		<text>-</text>
+	</string>
+	<string id="st_gp_act_jump">
+		<text>Прыжок</text>
+	</string>
+	<string id="st_gp_act_crouch">
+		<text>Присесть</text>
+	</string>
+	<string id="st_gp_act_accel">
+		<text>Шаг</text>
+	</string>
+	<string id="st_gp_act_sprint_toggle">
+		<text>Бег</text>
+	</string>
+	<string id="st_gp_act_llookout">
+		<text>Выглянуть влево</text>
+	</string>
+	<string id="st_gp_act_rlookout">
+		<text>Выглянуть вправо</text>
+	</string>
+	<string id="st_gp_act_freelook">
+		<text>Свободный обзор</text>
+	</string>
+	<string id="st_gp_act_wpn_fire">
+		<text>Огонь</text>
+	</string>
+	<string id="st_gp_act_wpn_zoom">
+		<text>Прицелиться</text>
+	</string>
+	<string id="st_gp_act_wpn_reload">
+		<text>Перезарядка</text>
+	</string>
+	<string id="st_gp_act_use">
+		<text>Использовать</text>
+	</string>
+	<string id="st_gp_act_use_or_reload">
+		<text>Использовать или перезарядить</text>
+	</string>
+	<string id="st_gp_act_wpn_next">
+		<text>Следующий тип патронов</text>
+	</string>
+	<string id="st_gp_act_wpn_func">
+		<text>Функция оружия (подствол)</text>
+	</string>
+	<string id="st_gp_act_wpn_firemode_next">
+		<text>Следующий режим огня</text>
+	</string>
+	<string id="st_gp_act_wpn_firemode_prev">
+		<text>Предыдущий режим огня</text>
+	</string>
+	<string id="st_gp_act_wpn_swap">
+		<text>Сменить оружие</text>
+	</string>
+	<string id="st_gp_act_wpn_holster">
+		<text>Убрать / достать оружие</text>
+	</string>
+	<string id="st_gp_act_next_slot">
+		<text>Следующий слот</text>
+	</string>
+	<string id="st_gp_act_prev_slot">
+		<text>Предыдущий слот</text>
+	</string>
+	<string id="st_gp_act_wpn_1">
+		<text>Нож</text>
+	</string>
+	<string id="st_gp_act_wpn_2">
+		<text>Слот пистолета</text>
+	</string>
+	<string id="st_gp_act_wpn_3">
+		<text>Слот винтовки</text>
+	</string>
+	<string id="st_gp_act_wpn_4">
+		<text>Граната</text>
+	</string>
+	<string id="st_gp_act_wpn_5">
+		<text>Бинокль</text>
+	</string>
+	<string id="st_gp_act_wpn_6">
+		<text>Болт</text>
+	</string>
+	<string id="st_gp_act_radial_menu">
+		<text>Радиальное меню</text>
+	</string>
+	<string id="st_gp_act_show_detector">
+		<text>Детектор</text>
+	</string>
+	<string id="st_gp_act_torch">
+		<text>Фонарик</text>
+	</string>
+	<string id="st_gp_act_night_vision">
+		<text>Ночное видение</text>
+	</string>
+	<string id="st_gp_act_drop">
+		<text>Выбросить предмет</text>
+	</string>
+	<string id="st_gp_act_safemode">
+		<text>Опустить оружие</text>
+	</string>
+	<string id="st_gp_act_inventory">
+		<text>Инвентарь</text>
+	</string>
+	<string id="st_gp_act_active_jobs">
+		<text>ПДА</text>
+	</string>
+	<string id="st_gp_act_quick_use_1">
+		<text>Быстрый слот 1</text>
+	</string>
+	<string id="st_gp_act_quick_use_2">
+		<text>Быстрый слот 2</text>
+	</string>
+	<string id="st_gp_act_quick_use_3">
+		<text>Быстрый слот 3</text>
+	</string>
+	<string id="st_gp_act_quick_use_4">
+		<text>Быстрый слот 4</text>
+	</string>
+	<string id="st_gp_act_quick_save">
+		<text>Быстрое сохранение</text>
+	</string>
+	<string id="st_gp_act_quick_load">
+		<text>Быстрая загрузка</text>
+	</string>
+	<string id="st_gp_act_quit">
+		<text>Главное меню</text>
+	</string>
+	<string id="st_gp_act_forward">
+		<text>Вперёд</text>
+	</string>
+	<string id="st_gp_act_back">
+		<text>Назад</text>
+	</string>
+	<string id="st_gp_act_lstrafe">
+		<text>Влево</text>
+	</string>
+	<string id="st_gp_act_rstrafe">
+		<text>Вправо</text>
+	</string>
+	<string id="st_gp_radial_rifle">
+		<text>Винтовка</text>
+	</string>
+	<string id="st_gp_radial_pistol">
+		<text>Пистолет</text>
+	</string>
+	<string id="st_gp_radial_grenade">
+		<text>Граната</text>
+	</string>
+	<string id="st_gp_radial_bolt">
+		<text>Болт</text>
+	</string>
+	<string id="st_gp_radial_detector">
+		<text>Детектор</text>
+	</string>
+	<string id="st_gp_radial_binoculars">
+		<text>Бинокль</text>
+	</string>
+	<string id="st_gp_radial_knife">
+		<text>Нож</text>
+	</string>
+	<string id="st_gp_radial_night_vision">
+		<text>Ночное видение</text>
+	</string>
+
 	<!-- Mouse -->
 	<string id="ui_mm_menu_mouse">
 		<text>Мышь</text>

@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include "gamepad.h"
 
 #include "WeaponMagazined.h"
 #include "actor.h"
@@ -897,6 +898,8 @@ void CWeaponMagazined::OnShot()
 
 	// Camera
 	AddShotEffector();
+	if (ParentIsActor())
+		gamepad_rumble(0.12f, 0.35f, 0.07f);
 
 	// Animation
 	PlayAnimShoot();
@@ -971,7 +974,7 @@ void CWeaponMagazined::OnAnimationEnd(u32 state)
                 ReloadMagazine();
 
             // demonized: If wpn fire button is held, initiate auto firing when reload is done
-            if (Actor() && H_Parent() == Actor() && pInput->iGetAsyncKeyState(get_action_dik(kWPN_FIRE)))
+            if (Actor() && H_Parent() == Actor() && is_action_key_held(kWPN_FIRE))
                 m_pendingShot = true;
             SwitchState(eIdle);
         }

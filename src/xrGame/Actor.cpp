@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include "gamepad.h"
 #include "Actor_Flags.h"
 #include "hudmanager.h"
 #ifdef DEBUG
@@ -574,6 +575,12 @@ void CActor::Hit(SHit* pHDS)
 	bool bPlaySound = true;
 	if (!g_Alive()) bPlaySound = false;
 
+	if (g_Alive() && this == Level().CurrentControlEntity() && HDS.damage() > 0.f)
+	{
+		const float power = _min(1.f, HDS.damage());
+		gamepad_rumble(0.3f + 0.7f * power, 0.2f + 0.6f * power, 0.15f + 0.25f * power);
+	}
+
 	if (!IsGameTypeSingle() && !g_dedicated_server)
 	{
 		game_PlayerState* ps = Game().GetPlayerByGameID(ID());
@@ -1132,12 +1139,7 @@ void CActor::UpdateCL()
 		{
 			const bool allowed = psActorFlags.test(AF_MULTI_ITEM_PICKUP);
 
-			auto dik = get_action_dik(kUSE, 0);
-			if (dik && pInput->iGetAsyncKeyState(dik) && allowed)
-				m_bPickupMode = true;
-
-			dik = get_action_dik(kUSE, 1);
-			if (dik && pInput->iGetAsyncKeyState(dik) && allowed)
+			if (allowed && is_action_key_held(kUSE))
 				m_bPickupMode = true;
 		}
 		else
@@ -1891,7 +1893,7 @@ void CActor::shedule_Update(u32 DT)
 				}
 				else
 				{
-					if (!CanUseFreelook() || !pInput->iGetAsyncKeyState(get_action_dik(kFREELOOK)))
+					if (!CanUseFreelook() || !is_action_key_held(kFREELOOK))
 						cam_UnsetFreelook();
 				}
 			}

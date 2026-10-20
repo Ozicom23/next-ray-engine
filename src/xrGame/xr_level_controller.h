@@ -112,6 +112,13 @@ enum EGameActions
 	kCAM_AUTOAIM,
 	kEDITOR,
 
+	// Gamepad actions (gamepad.cpp), decided when pressed: use what's looked at or reload, the other of the two weapon
+	// slots, hide or take out the weapon, the radial menu
+	kUSE_OR_RELOAD,
+	kWPN_SWAP,
+	kWPN_HOLSTER,
+	kRADIAL_MENU,
+
 	kLASTACTION,
 	kNOTBINDED,
 	kFORCEDWORD = u32(-1)
@@ -191,6 +198,16 @@ public:
 void GetActionAllBinding(LPCSTR action, char* dst_buff, int dst_buff_sz);
 
 extern ConsoleBindCmds bindConsoleCmds;
+
+// Gamepad layout (gp_bind): the action of each gamepad key (GP_ codes), kNOTBINDED for none. A key pressed for an
+// action decided at the press (kUSE_OR_RELOAD...) has that action until released (gamepad_resolve)
+EGameActions gamepad_binding(int gp_key);
+// Key names in texts ($$ACTION_...$$) are the gamepad's while it is the device in use (gamepad.cpp)
+extern bool g_gamepad_prompts;
+// A key of the action is down: its keyboard or mouse keys (primary, secondary) or a gamepad key bound to it
+bool is_action_key_held(EGameActions action);
+void gamepad_resolve(int gp_key, EGameActions action);
+void gamepad_default_layout();
 
 // 0xED - max vavue in DIK* enum
 #define MOUSE_1		(0xED + 100)
