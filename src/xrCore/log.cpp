@@ -24,6 +24,8 @@ xr_string FormatString(LPCSTR fmt, ...)
 
 // Timestamp flag and helpers
 BOOL logTimestamps = FALSE;
+// appdata\stat_startup: every line timed until the main menu shows, whatever user.ltx sets (x_ray.cpp)
+BOOL logTimestampsStartup = FALSE;
 enum Console_mark;
 extern bool is_console_mark(Console_mark type);
 
@@ -183,7 +185,7 @@ void xrLogger::SimpleMessage(LPCSTR Message, u32 MessageSize /*= 0*/)
 	}
 
 	xr_string msgToLog = Message;
-	if (logTimestamps)
+	if (logTimestamps || logTimestampsStartup)
 	{
 		xr_string t = msgToLog;
 		xr_string c = "";

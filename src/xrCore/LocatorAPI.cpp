@@ -470,6 +470,7 @@ void CLocatorAPI::archive::close()
 
 void CLocatorAPI::ProcessArchive(LPCSTR _path)
 {
+	PROF_EVENT("FS index: archive");
 	// find existing archive
 	shared_str path = _path;
 
@@ -723,6 +724,7 @@ namespace fs_index
 	// Lists the folder; its subfolders (as ProcessOne names them) are queued when recursive
 	static void list_folder(const std::string& path, std::shared_ptr<listing> L, bool recursive)
 	{
+		PROF_EVENT("FS index: list_folder");
 		string_path scan;
 		xr_strcpy(scan, sizeof(scan), path.c_str());
 		xr_strcat(scan, ".xrignore");
@@ -846,6 +848,7 @@ namespace fs_index
 		if (L->state == 0)
 		{
 			// Not started: listed here (its subfolders queued as the workers do)
+			PROF_EVENT("FS index: not started, listed here");
 			L->state = 1;
 			g.unlock();
 			list_folder(path, L, true);
@@ -853,6 +856,7 @@ namespace fs_index
 		}
 		else if (L->state == 1)
 		{
+			PROF_EVENT("FS index: waited for a worker");
 			const u64 t0 = CPU::QPC();
 			s_cv.wait(g, [&] { return L->state >= 2; });
 			g_fs_index_wait += CPU::QPC() - t0;
@@ -883,19 +887,28 @@ void CLocatorAPI::prefetch_listing(LPCSTR path_alias)
 
 bool CLocatorAPI::Recurse(const char* path)
 {
+	PROF_EVENT("FS index: folder");
 	string_path scanPath;
 	xr_strcpy(scanPath, sizeof(scanPath), path);
 	xr_strcat(scanPath, ".xrignore");
-	struct stat buffer;
-	if (!stat(scanPath, &buffer))
-		return true;
+	{
+		PROF_EVENT("FS index: .xrignore check");
+		struct stat buffer;
+		if (!stat(scanPath, &buffer))
+			return true;
+	}
 	const bool timed = m_Flags.test(flNeedCheck);
 	const u64 t_begin = timed ? CPU::QPC() : 0;
 	xr_vector<_finddata_t> prefetched;
-	const int indexed = fs_index::take(path, prefetched);
-	if (indexed == 2)
-		return false; // _findfirst failed for it
-	const bool use_prefetched = indexed == 1 || fs_prefetch::take(path, prefetched);
+	int indexed;
+	bool use_prefetched;
+	{
+		PROF_EVENT("FS index: listing taken");
+		indexed = fs_index::take(path, prefetched);
+		if (indexed == 2)
+			return false; // _findfirst failed for it
+		use_prefetched = indexed == 1 || fs_prefetch::take(path, prefetched);
+	}
 	_finddata_t findData;
 	intptr_t handle = -1;
 	size_t prefetched_pos = 0;
@@ -909,6 +922,7 @@ bool CLocatorAPI::Recurse(const char* path)
 	}
 	else
 	{
+		PROF_EVENT("FS index: listed here");
 		xr_strcpy(scanPath, sizeof(scanPath), path);
 		xr_strcat(scanPath, "*.*");
 		handle = _findfirst(scanPath, &findData);

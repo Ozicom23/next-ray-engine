@@ -966,11 +966,55 @@ ENGINE_API bool g_dedicated_server = false;
 
 #endif // DEDICATED_SERVER
 
+// appdata\stat_startup (a file next to bin): log lines timed from the start and the CPU passes from the file system's
+// start to the main menu as totals (xrCore.cpp)
+static bool g_stat_startup = false;
+extern BOOL logTimestampsStartup;
+
+static void stat_startup_begin()
+{
+	string_path path;
+	GetModuleFileName(NULL, path, sizeof(path));
+	if (char* slash = strrchr(path, '\\'))
+		*slash = 0;
+	xr_strcat(path, "\\..\\appdata\\stat_startup");
+	g_stat_startup = GetFileAttributes(path) != INVALID_FILE_ATTRIBUTES;
+	logTimestampsStartup = g_stat_startup;
+}
+
+static void stat_startup_core_ready()
+{
+	if (!g_stat_startup)
+		return;
+	FILETIME created, exited, kernel, user, now;
+	GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user);
+	GetSystemTimeAsFileTime(&now);
+	const u64 since = ((u64(now.dwHighDateTime) << 32 | now.dwLowDateTime) -
+		(u64(created.dwHighDateTime) << 32 | created.dwLowDateTime)) / 10000;
+	Msg("* [stat_startup] core ready %llu ms after the process started", since);
+}
+
+// Main thread, every frame until the main menu shows
+static void stat_startup_frame()
+{
+	if (!g_stat_startup || !g_pGamePersistent || !g_pGamePersistent->m_pMainMenu ||
+		!g_pGamePersistent->m_pMainMenu->IsActive())
+		return;
+	g_stat_startup = false;
+	Msg("* [stat_startup] main menu");
+#if XRCORE_PROFILER == PROFILER_NONE
+	if (xr_prof::total_capture_active())
+		xr_prof::stop_capture();
+#endif
+	logTimestampsStartup = FALSE;
+}
+
 int APIENTRY WinMain_impl(HINSTANCE hInstance,
                           HINSTANCE hPrevInstance,
                           char* lpCmdLine,
                           int nCmdShow)
 {
+	stat_startup_begin();
 #ifdef DEDICATED_SERVER
     Debug._initialize(true);
 #else // DEDICATED_SERVER
@@ -1096,6 +1140,7 @@ int APIENTRY WinMain_impl(HINSTANCE hInstance,
 
 	compute_build_id();
 	Core._initialize("xray", NULL, TRUE, fsgame[0] ? fsgame : NULL);
+	stat_startup_core_ready();
 
 	InitSettings();
 	Msg(XRAY_MONOLITH_VERSION);
@@ -1769,6 +1814,7 @@ void CApplication::LoadSwitch()
 void CApplication::OnFrame()
 {
 	PROF_EVENT();
+	stat_startup_frame();
 
 	Engine.Event.OnFrame();
 	g_SpatialSpace->update();

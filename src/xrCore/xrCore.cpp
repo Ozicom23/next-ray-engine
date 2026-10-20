@@ -137,6 +137,12 @@ void xrCore::_initialize(LPCSTR _ApplicationName, xrLogger::LogCallback cb, BOOL
 		flags &= ~CLocatorAPI::flCacheFiles;
 #endif // _EDITOR
 		flags |= CLocatorAPI::flScanAppRoot;
+#if XRCORE_PROFILER == PROFILER_NONE
+		// appdata\stat_startup (x_ray.cpp): the CPU passes from here to the main menu
+		extern BOOL logTimestampsStartup;
+		if (logTimestampsStartup)
+			xr_prof::start_total_capture("startup to the main menu");
+#endif
 		FS._initialize(flags, 0, fs_fname);
 		Msg("'%s' build %d, %s\n", "xrCore", build_id, build_date);
 
