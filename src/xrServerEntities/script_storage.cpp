@@ -825,11 +825,49 @@ bool CScriptStorage::parse_namespace(LPCSTR caNamespaceName, LPSTR b, u32 const 
 int g_script_chunk_cache = 1;
 namespace script_chunk_cache
 {
+	// A script file as it is now: in an archive, its place there; a loose file, its size and modification time on
+	// disk (asked each time, not taken from the file list, which can be a load old)
+	struct file_stamp
+	{
+		bool valid = false;
+		u32 vfs = 0, ptr = 0;
+		u64 size = 0, time = 0;
+
+		bool operator==(const file_stamp& o) const
+		{
+			return valid && o.valid && vfs == o.vfs && ptr == o.ptr && size == o.size && time == o.time;
+		}
+	};
+
+	static file_stamp current(const char* path, const CLocatorAPI::file* f)
+	{
+		file_stamp st;
+		if (!f)
+			return st;
+		st.vfs = f->vfs;
+		st.ptr = f->ptr;
+		if (f->vfs != 0xffffffff)
+		{
+			st.size = f->size_real;
+			st.time = f->modif;
+			st.valid = true;
+			return st;
+		}
+		WIN32_FILE_ATTRIBUTE_DATA data;
+		if (!GetFileAttributesEx(path, GetFileExInfoStandard, &data))
+			return st;
+		st.size = (u64(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
+		st.time = (u64(data.ftLastWriteTime.dwHighDateTime) << 32) | data.ftLastWriteTime.dwLowDateTime;
+		st.valid = true;
+		return st;
+	}
+
 	struct entry
 	{
 		size_t size = 0;
 		u64 h1 = 0, h2 = 0;
 		xr_vector<char> bytecode;
+		file_stamp stamp; // of the file it was compiled from
 	};
 	static xr_unordered_map<xr_string, entry> s_chunks;
 	static u32 s_hits = 0, s_misses = 0;
@@ -852,6 +890,43 @@ namespace script_chunk_cache
 		h2 = b;
 	}
 
+	static xr_string key_of(const char* name, const char* name_space)
+	{
+		xr_string key = name;
+		key += '|';
+		key += name_space ? name_space : "";
+		return key;
+	}
+
+	// The file's stamp when its chunk was compiled (taken before reading it): the same stamp later loads the chunk
+	// without reading the file (~500 loose script files per level load: ~0.35 s on the Steam Deck through Proton and
+	// MO2's virtual file system, ~0.15 s on macOS)
+	static void stamp(const char* name, const char* name_space, const file_stamp& st)
+	{
+		auto it = s_chunks.find(key_of(name, name_space));
+		if (it != s_chunks.end())
+			it->second.stamp = st;
+	}
+
+	static bool load_unchanged(lua_State* L, const char* name, const char* name_space, const file_stamp& st)
+	{
+		if (!g_script_chunk_cache || !st.valid)
+			return false;
+		auto it = s_chunks.find(key_of(name, name_space));
+		if (it == s_chunks.end())
+			return false;
+		const entry& e = it->second;
+		if (!(e.stamp == st))
+			return false;
+		if (luaL_loadbuffer(L, e.bytecode.data(), e.bytecode.size(), name) != 0)
+		{
+			lua_pop(L, 1);
+			return false;
+		}
+		s_hits++;
+		return true;
+	}
+
 	static int writer(lua_State*, const void* p, size_t sz, void* ud)
 	{
 		auto* v = static_cast<xr_vector<char>*>(ud);
@@ -867,9 +942,7 @@ namespace script_chunk_cache
 		hash(buf, size, h1, h2);
 		// One entry per file and namespace (_g.script runs as _G and again as the namespace _g, with its header): a
 		// file changed during the run replaces its entry
-		xr_string key = name;
-		key += '|';
-		key += name_space ? name_space : "";
+		xr_string key = key_of(name, name_space);
 		auto it = s_chunks.find(key);
 		if (it != s_chunks.end() && it->second.size == size && it->second.h1 == h1 && it->second.h2 == h2)
 		{
@@ -1136,11 +1209,19 @@ bool CScriptStorage::do_file(LPCSTR caScriptName, LPCSTR caNameSpaceName)
 	t_unlocalizers += t_opened0 - t_begin;
 	int start = lua_gettop(lua());
 	string_path l_caLuaFileName;
-	IReader* l_tpFileReader = FS.r_open(caScriptName);
+	strconcat(sizeof(l_caLuaFileName), l_caLuaFileName, "@", caScriptName);
+	// The file list has lower case names (r_open lowers the name before its lookup, exist doesn't)
+	string_path lower_name;
+	xr_strcpy(lower_name, caScriptName);
+	xr_strlwr(lower_name);
+	const script_chunk_cache::file_stamp file_stamp = g_script_chunk_cache
+		? script_chunk_cache::current(lower_name, FS.exist(lower_name)) : script_chunk_cache::file_stamp();
+	const bool unchanged = script_chunk_cache::load_unchanged(lua(), l_caLuaFileName, caNameSpaceName, file_stamp);
+	IReader* l_tpFileReader = unchanged ? nullptr : FS.r_open(caScriptName);
 	const u64 t_opened = now();
 	t_read += t_opened - t_opened0;
 
-	if (!l_tpFileReader)
+	if (!unchanged && !l_tpFileReader)
 	{
 		script_log(eLuaMessageTypeError, "Cannot open file \"%s\"", caScriptName);
 		nested.pop_back();
@@ -1148,13 +1229,13 @@ bool CScriptStorage::do_file(LPCSTR caScriptName, LPCSTR caNameSpaceName)
 	}
 
 	// Unlocalize variables in the script defined by unlocalizers map
-	auto scriptContents = static_cast<LPCSTR>(l_tpFileReader->pointer());
-	auto scriptLength = (size_t)l_tpFileReader->length();
+	auto scriptContents = unchanged ? "" : static_cast<LPCSTR>(l_tpFileReader->pointer());
+	auto scriptLength = unchanged ? 0 : (size_t)l_tpFileReader->length();
 	bool unlocalPerformed = false;
 	xr_string unlocalizerResult;
 	xr_string loweredNameSpaceName = caNameSpaceName;
 	loweredNameSpaceName = loweredNameSpaceName.ToLowerCase();
-	if (unlocalizers.find(loweredNameSpaceName) != unlocalizers.end()) {
+	if (!unchanged && unlocalizers.find(loweredNameSpaceName) != unlocalizers.end()) {
 		Msg("found script %s in unlocalizers data", caNameSpaceName);
 
 		// Get contents of the script file and split by lines
@@ -1265,15 +1346,17 @@ bool CScriptStorage::do_file(LPCSTR caScriptName, LPCSTR caNameSpaceName)
 	const u64 t_unlocalized = now();
 	t_unlocal += t_unlocalized - t_opened;
 
-	strconcat(sizeof(l_caLuaFileName), l_caLuaFileName, "@", caScriptName);
-
 	bool bufferLoaded = false;
-	if (unlocalPerformed) {
+	if (unchanged)
+		bufferLoaded = true;
+	else if (unlocalPerformed) {
 		bufferLoaded = load_buffer(lua(), scriptContents, scriptLength, l_caLuaFileName, caNameSpaceName, true);
 	} else {
 		l_tpFileReader->rewind();
 		bufferLoaded = load_buffer(lua(), static_cast<LPCSTR>(l_tpFileReader->pointer()), (size_t)l_tpFileReader->length(), l_caLuaFileName, caNameSpaceName, true);
 	}
+	if (bufferLoaded && !unchanged)
+		script_chunk_cache::stamp(l_caLuaFileName, caNameSpaceName, file_stamp);
 
 	const u64 t_compiled = now();
 	t_compile += t_compiled - t_unlocalized;
