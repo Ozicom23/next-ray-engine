@@ -509,6 +509,11 @@ void CGamePersistent::update_logo_intro()
 	}
 }
 
+namespace crash_saving {
+	extern void (*save_impl)();
+	extern void _save_impl();
+}
+
 void CGamePersistent::game_loaded()
 {
 	if (Device.dwPrecacheFrame <= 2)
@@ -561,15 +566,16 @@ void CGamePersistent::game_loaded()
 			{
 				funct();
 			}
+
+			// No "press any key" (keypress_on_start 0): the loading screen is gone already, so it is dismissed too.
+			// Scripts start their work on that callback (Interaction Dot Marks scans for its marks only after it)
+			crash_saving::save_impl = &crash_saving::_save_impl;
+			if (ai().script_engine().functor("_G.OnLoadingScreenDismissed", funct))
+				funct();
 		}
 
 		m_intro_event = 0;
 	}
-}
-
-namespace crash_saving {
-	extern void (*save_impl)();
-	extern void _save_impl();
 }
 
 void CGamePersistent::update_game_loaded()
