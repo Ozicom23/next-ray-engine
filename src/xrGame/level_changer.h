@@ -12,6 +12,10 @@
 #include "../xrEngine/feel_touch.h"
 #include "game_graph_space.h"
 
+// The travel request of a level changer (M_CHANGE_LEVEL); with fade_transitions after the screen faded to black
+void send_change_level(GameGraph::_GRAPH_ID game_vertex_id, u32 level_vertex_id, const Fvector& position,
+                       const Fvector& angles);
+
 class CLevelChanger : public CGameObject, public Feel::Touch
 {
 private:

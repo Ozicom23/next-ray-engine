@@ -1376,6 +1376,103 @@ void _InitializeFont(CGameFont*& F, LPCSTR section, u32 flags)
 // The thread that created the application (the main thread): the only one that draws the loading screen
 static DWORD s_app_thread = 0;
 
+ENGINE_API int g_fade_transitions = 1;
+ENGINE_API CScreenFade g_screen_fade;
+extern ENGINE_API BOOL g_appLoaded;
+
+float CScreenFade::elapsed_ms() const
+{
+	return float(CPU::QPC() - m_start) * 1000.f / float(CPU::qpc_freq);
+}
+
+void CScreenFade::fade_out(u32 ms, std::function<void()> on_black)
+{
+	m_state = sOut;
+	m_start = CPU::QPC();
+	m_ms = ms;
+	m_on_black = std::move(on_black);
+	m_black_reached = false;
+}
+
+void CScreenFade::hold_for_load()
+{
+	m_state = sLoad;
+	m_on_black = nullptr;
+	m_load_started = false;
+	m_precache_seen = false;
+}
+
+void CScreenFade::cancel()
+{
+	m_state = sNone;
+	m_on_black = nullptr;
+	m_black_reached = false;
+}
+
+void CScreenFade::OnFrame()
+{
+	if (!m_black_reached)
+		return;
+	m_black_reached = false;
+	// Moved out first: it may start the load (hold_for_load)
+	std::function<void()> f = std::move(m_on_black);
+	m_on_black = nullptr;
+	if (f)
+		f();
+}
+
+void CScreenFade::OnRender()
+{
+	float alpha = 0.f;
+	switch (m_state)
+	{
+	case sNone:
+		return;
+	case sOut:
+		alpha = elapsed_ms() / float(m_ms);
+		if (alpha >= 1.f)
+		{
+			alpha = 1.f;
+			m_state = sBlack;
+			m_start = CPU::QPC();
+			m_black_reached = true;
+		}
+		break;
+	case sBlack:
+		alpha = 1.f;
+		// The travel request didn't start a load (refused): back to the game
+		if (elapsed_ms() > 5000.f)
+		{
+			m_state = sIn;
+			m_start = CPU::QPC();
+			m_ms = 500;
+		}
+		break;
+	case sLoad:
+		alpha = 1.f;
+		if (m_load_started && Device.dwPrecacheFrame)
+			m_precache_seen = true;
+		// The new level's load and its precache frames are over (the loading screen, black, is gone with them): it
+		// fades in
+		if (m_precache_seen && g_appLoaded && !Device.dwPrecacheFrame && !load_screen_renderer.b_registered)
+		{
+			m_state = sIn;
+			m_start = CPU::QPC();
+			m_ms = 1200;
+		}
+		break;
+	case sIn:
+		alpha = 1.f - elapsed_ms() / float(m_ms);
+		if (alpha <= 0.f)
+		{
+			m_state = sNone;
+			return;
+		}
+		break;
+	}
+	pApp->m_pRender->draw_screen_fade(alpha);
+}
+
 CApplication::CApplication()
 {
 	s_app_thread = GetCurrentThreadId();
@@ -1400,6 +1497,9 @@ CApplication::CApplication()
 
 	// Register us
 	Device.seqFrame.Add(this, REG_PRIORITY_HIGH + 1000);
+	// Over the game and its HUD, under the cursor (2) and the console (1)
+	Device.seqRender.Add(&g_screen_fade, 3);
+	Device.seqFrame.Add(&g_screen_fade, REG_PRIORITY_LOW);
 
 	if (psDeviceFlags.test(mtSound)) Device.seqFrameMT.Add(&SoundProcessor);
 	else Device.seqFrame.Add(&SoundProcessor);
@@ -1416,6 +1516,8 @@ CApplication::CApplication()
 CApplication::~CApplication()
 {
 	Console->Hide();
+	Device.seqRender.Remove(&g_screen_fade);
+	Device.seqFrame.Remove(&g_screen_fade);
 
 	// font
 	xr_delete(pFontSystem);
@@ -1560,6 +1662,7 @@ void CApplication::LoadBegin()
 	if (1 == ll_dwReference)
 	{
 		g_appLoaded = FALSE;
+		g_screen_fade.on_load_begin();
 
 		//AVO:
 		g_bootComplete = FALSE;

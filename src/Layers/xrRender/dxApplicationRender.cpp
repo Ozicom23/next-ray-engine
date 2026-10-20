@@ -54,6 +54,34 @@ void dxApplicationRender::KillHW()
 	ZeroMemory(&HW, sizeof(CHW));
 }
 
+// hud\crosshair: the shader of the console's background, its vertex colour with alpha blending
+void dxApplicationRender::draw_screen_fade(float alpha)
+{
+#if defined(USE_DX10) || defined(USE_DX11)
+	if (!m_fade_shader)
+	{
+		m_fade_shader.create("hud\\crosshair");
+		m_fade_geom.create(FVF::F_TL, RCache.Vertex.Buffer(), RCache.QuadIB);
+	}
+	const u32 C = color_rgba(0, 0, 0, iFloor(clampr(alpha, 0.f, 1.f) * 255.f + 0.5f));
+	const float w = float(Device.dwRenderWidth), h = float(Device.dwRenderHeight);
+	u32 vOffset = 0;
+	FVF::TL* verts = (FVF::TL*)RCache.Vertex.Lock(4, m_fade_geom->vb_stride, vOffset);
+	verts->set(0.f, h, C, 0, 0);
+	verts++;
+	verts->set(0.f, 0.f, C, 0, 0);
+	verts++;
+	verts->set(w, h, C, 0, 0);
+	verts++;
+	verts->set(w, 0.f, C, 0, 0);
+	verts++;
+	RCache.Vertex.Unlock(4, m_fade_geom->vb_stride);
+	RCache.set_Element(m_fade_shader->E[0]);
+	RCache.set_Geometry(m_fade_geom);
+	RCache.Render(D3DPT_TRIANGLELIST, vOffset, 0, 4, 0, 2);
+#endif
+}
+
 u32 calc_progress_color(u32, u32, int, int);
 extern bool use_reshade;
 extern void render_reshade_effects();
@@ -73,6 +101,10 @@ void dxApplicationRender::load_draw_internal(CApplication& owner)
 #else	//	USE_DX10
 	CHK_DX(HW.pDevice->Clear(0,0,D3DCLEAR_TARGET,D3DCOLOR_ARGB(0,0,0,0),1,0));
 #endif	//	USE_DX10
+
+	// A level change behind a black screen (fade_transitions): no loading screen
+	if (g_screen_fade.loading_black())
+		return;
 
 	if (use_reshade)
 		render_reshade_effects();

@@ -6,6 +6,7 @@ class ENGINE_API CGameFont;
 
 #include "../Include/xrRender/FactoryPtr.h"
 #include "../Include/xrRender/ApplicationRender.h"
+#include <functional>
 
 // definition
 class ENGINE_API CApplication :
@@ -13,6 +14,7 @@ class ENGINE_API CApplication :
 	public IEventReceiver
 {
 	friend class dxApplicationRender;
+	friend class CScreenFade;
 
 	// levels
 	struct sLevelInfo
@@ -74,6 +76,39 @@ public:
 };
 
 extern ENGINE_API CApplication* pApp;
+
+// Level changes behind a black screen (fade_transitions): the screen fades to black before a level changer travels,
+// the load and its precache frames show black instead of the loading screen, no "press any key" (its script callbacks
+// still run), then the new level fades in. Loads of saved games keep the loading screen
+extern ENGINE_API int g_fade_transitions;
+class ENGINE_API CScreenFade : public pureRender, public pureFrame
+{
+public:
+	// Fades to black over ms, then calls on_black once (a level changer sends its travel request) and stays black
+	void fade_out(u32 ms, std::function<void()> on_black);
+	// A level change starts loading: black until the precache frames end, then the new level fades in
+	void hold_for_load();
+	// A load of a saved game: back to normal
+	void cancel();
+	// CApplication::LoadBegin: the load of the level change has started
+	void on_load_begin() { if (m_state == sLoad) m_load_started = true; }
+	bool loading_black() const { return m_state == sLoad; }
+	bool busy() const { return m_state != sNone; }
+	virtual void OnRender();
+	virtual void OnFrame(); // on_black runs here, not while rendering
+
+private:
+	enum State { sNone, sOut, sBlack, sLoad, sIn };
+	State m_state = sNone;
+	u64 m_start = 0; // CPU::QPC of the state's start
+	u32 m_ms = 0;
+	std::function<void()> m_on_black;
+	bool m_black_reached = false;
+	bool m_load_started = false; // sLoad: the old level still renders a few frames before its load begins
+	bool m_precache_seen = false; // sLoad: the new level's precache frames have started
+	float elapsed_ms() const;
+};
+extern ENGINE_API CScreenFade g_screen_fade;
 
 //Discord
 struct rpc_info

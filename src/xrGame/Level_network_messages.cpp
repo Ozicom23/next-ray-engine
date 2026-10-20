@@ -7,6 +7,7 @@
 #include "net_queue.h"
 //#include "Physics.h"
 #include "xrServer.h"
+#include "../xrEngine/x_ray.h"
 #include "Actor.h"
 #include "Artefact.h"
 #include "game_cl_base_weapon_usage_statistic.h"
@@ -325,6 +326,14 @@ void CLevel::ClientReceive()
                 Msg("Device.LuaGC clear");
                 Device.LuaGC.clear();
                 Device.LuaGCDebug.clear();
+
+				// fade_transitions: a level change loads behind a black screen, a saved game behind the loading screen.
+				// A level change also gets a load message right after its own (the autosave it travels with): that one
+				// keeps the black screen
+				if (m_type == M_CHANGE_LEVEL && g_fade_transitions)
+					g_screen_fade.hold_for_load();
+				else if (!g_screen_fade.loading_black())
+					g_screen_fade.cancel();
 
 				// The scripts folder listed while the old level is saved and unloaded: axr_main rescans it once the new
 				// level's scripts load (fs_prefetch_scripts)

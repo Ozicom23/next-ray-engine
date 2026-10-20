@@ -20,6 +20,7 @@
 #include "ui/UIPdaWnd.h"
 #include "ui/UITalkWnd.h"
 #include "ui/UIMessageBox.h"
+#include "level_changer.h"
 
 #include "Inventory.h"
 
@@ -315,14 +316,7 @@ void CChangeLevelWnd::SendMessage(CUIWindow* pWnd, s16 msg, void* pData)
 void CChangeLevelWnd::OnOk()
 {
 	HideDialog();
-	NET_Packet p;
-	p.w_begin(M_CHANGE_LEVEL);
-	p.w(&m_game_vertex_id, sizeof(m_game_vertex_id));
-	p.w(&m_level_vertex_id, sizeof(m_level_vertex_id));
-	p.w_vec3(m_position);
-	p.w_vec3(m_angles);
-
-	Level().Send(p, net_flags(TRUE));
+	send_change_level(m_game_vertex_id, m_level_vertex_id, m_position, m_angles);
 }
 
 void CChangeLevelWnd::OnCancel()

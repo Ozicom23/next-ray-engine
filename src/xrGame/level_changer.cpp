@@ -8,6 +8,7 @@
 
 #include "stdafx.h"
 #include "level_changer.h"
+#include "../xrEngine/x_ray.h"
 #include "hit.h"
 #include "actor.h"
 #include "xrserver_objects_alife.h"
@@ -118,6 +119,38 @@ void CLevelChanger::shedule_Update(u32 dt)
 #include "patrol_path.h"
 #include "patrol_path_storage.h"
 
+static void send_change_level_now(GameGraph::_GRAPH_ID game_vertex_id, u32 level_vertex_id, const Fvector& position,
+                                  const Fvector& angles)
+{
+	NET_Packet p;
+	p.w_begin(M_CHANGE_LEVEL);
+	p.w(&game_vertex_id, sizeof(game_vertex_id));
+	p.w(&level_vertex_id, sizeof(level_vertex_id));
+	p.w_vec3(position);
+	p.w_vec3(angles);
+	Level().Send(p, net_flags(TRUE));
+}
+
+void send_change_level(GameGraph::_GRAPH_ID game_vertex_id, u32 level_vertex_id, const Fvector& position,
+                       const Fvector& angles)
+{
+	if (!g_fade_transitions)
+	{
+		send_change_level_now(game_vertex_id, level_vertex_id, position, angles);
+		return;
+	}
+	// Already fading out to travel: one request
+	if (g_screen_fade.busy())
+		return;
+	IGame_Level* level = g_pGameLevel;
+	g_screen_fade.fade_out(400, [=]()
+	{
+		// Still the level that asked (no saved game loaded meanwhile)
+		if (g_pGameLevel == level && g_pGameLevel)
+			send_change_level_now(game_vertex_id, level_vertex_id, position, angles);
+	});
+}
+
 // rc_silent_level_changers: every level changer travels at once, without asking (automated runs: the remote
 // console can't answer the dialog). Never saved
 int g_rc_silent_level_changers = 0;
@@ -131,13 +164,7 @@ void CLevelChanger::feel_touch_new(CObject* tpObject)
 
 	if (m_bSilentMode || g_rc_silent_level_changers)
 	{
-		NET_Packet p;
-		p.w_begin(M_CHANGE_LEVEL);
-		p.w(&m_game_vertex_id, sizeof(m_game_vertex_id));
-		p.w(&m_level_vertex_id, sizeof(m_level_vertex_id));
-		p.w_vec3(m_position);
-		p.w_vec3(m_angles);
-		Level().Send(p, net_flags(TRUE));
+		send_change_level(m_game_vertex_id, m_level_vertex_id, m_position, m_angles);
 		return;
 	}
 	Fvector p, r;

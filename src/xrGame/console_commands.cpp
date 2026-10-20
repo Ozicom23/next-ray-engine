@@ -2777,6 +2777,8 @@ void CCC_RegisterCommands()
 	// Frames rendered behind the loading screen after a level load, the camera turning around once (textures and
 	// shaders of the surroundings get loaded). Not saved while measuring
 	CMD4(CCC_IntegerNotSaved, "precache_frames", &g_precache_frames, 2, 120);
+	// Level changes behind a black screen, no "press any key" (CScreenFade)
+	CMD4(CCC_Integer, "fade_transitions", &g_fade_transitions, 0, 1);
 	// Ini section lookups by a hash index (1) or the binary search (0); 2 both, counting differences (stat_script_load)
 	CMD4(CCC_IntegerNotSaved, "ini_index", &g_ini_index, 0, 2);
 	// The scripts folder listed on a worker thread at a level change, ahead of axr_main's rescan

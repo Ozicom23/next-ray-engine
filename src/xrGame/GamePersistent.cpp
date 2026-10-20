@@ -30,6 +30,7 @@
 #include "UI/UIGameTutorial.h"
 
 #include "../xrEngine/xr_input.h"
+#include "../xrEngine/x_ray.h"
 
 #ifndef MASTER_GOLD
 #	include "custommonster.h"
@@ -512,7 +513,19 @@ void CGamePersistent::game_loaded()
 {
 	if (Device.dwPrecacheFrame <= 2)
 	{
-		if (g_pGameLevel &&
+		// A level change behind a black screen (fade_transitions): no "press any key", its callbacks as if a key
+		// was pressed at once, then the level fades in (CScreenFade)
+		if (g_pGameLevel && g_pGameLevel->bReady && g_screen_fade.loading_black() &&
+			m_game_params.m_e_game_type == eGameIDSingle)
+		{
+			Msg("intro_start game_loaded");
+			pInput->resetMouseState();
+			::luabind::functor<void> funct;
+			if (ai().script_engine().functor("_G.OnLoadingScreenKeyPrompt", funct))
+				funct();
+			update_game_loaded();
+		}
+		else if (g_pGameLevel &&
 			g_pGameLevel->bReady &&
 			(allow_intro() && psDeviceFlags2.test(rsKeypress)) &&
 			load_screen_renderer.b_need_user_input &&
