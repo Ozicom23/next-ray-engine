@@ -30,6 +30,7 @@ protected:
 	IC float radius(const CCF_Shape::shape_def& data) const;
 	void build_border();
 	void fill_shape(const CCF_Shape::shape_def& shape);
+	void fill_bounds(const CCF_Shape::shape_def& shape, Fvector& start, Fvector& dest);
 
 public:
 	IC CSpaceRestrictionShape(CSpaceRestrictor* space_restrictor, bool default_restrictor);

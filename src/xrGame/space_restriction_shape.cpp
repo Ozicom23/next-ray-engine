@@ -16,17 +16,40 @@
 struct CBorderMergePredicate
 {
 	CSpaceRestrictionShape* m_restriction;
+	// The shape's bounds on x and z (fill_shape): iterate_vertices walks every vertex between the two corners in xz
+	// order, whole rows of the level, and the inside tests on all of them were ~1.3 ms per restrictor at a level load.
+	// A vertex more than a cell outside the bounds can't be partially inside (its corners are half a cell away, the
+	// test radius is EPS_L): skipped, the same border
+	bool m_bounded = false;
+	float m_min_x = 0.f, m_min_z = 0.f, m_max_x = 0.f, m_max_z = 0.f;
 
 	IC CBorderMergePredicate(CSpaceRestrictionShape* restriction)
 	{
 		m_restriction = restriction;
 	}
 
+	IC CBorderMergePredicate(CSpaceRestrictionShape* restriction, const Fvector& start, const Fvector& dest)
+	{
+		m_restriction = restriction;
+		const float margin = ai().level_graph().header().cell_size();
+		m_bounded = true;
+		m_min_x = start.x - margin;
+		m_min_z = start.z - margin;
+		m_max_x = dest.x + margin;
+		m_max_z = dest.z + margin;
+	}
+
 	IC void operator()(const CLevelGraph::CVertex& vertex) const
 	{
-		if (m_restriction->inside(ai().level_graph().vertex_id(&vertex), true) && !m_restriction->inside(
-			ai().level_graph().vertex_id(&vertex), false))
-			m_restriction->m_border.push_back(ai().level_graph().vertex_id(&vertex));
+		const u32 vertex_id = ai().level_graph().vertex_id(&vertex);
+		if (m_bounded)
+		{
+			const Fvector& position = ai().level_graph().vertex_position(vertex_id);
+			if (position.x < m_min_x || position.x > m_max_x || position.z < m_min_z || position.z > m_max_z)
+				return;
+		}
+		if (m_restriction->inside(vertex_id, true) && !m_restriction->inside(vertex_id, false))
+			m_restriction->m_border.push_back(vertex_id);
 	}
 
 	IC bool operator()(u32 level_vertex_id) const
@@ -54,9 +77,8 @@ struct CShapeTestPredicate {
 #endif
 
 
-void CSpaceRestrictionShape::fill_shape(const CCF_Shape::shape_def& shape)
+void CSpaceRestrictionShape::fill_bounds(const CCF_Shape::shape_def& shape, Fvector& start, Fvector& dest)
 {
-	Fvector start, dest;
 	switch (shape.type)
 	{
 	case 0:
@@ -98,7 +120,13 @@ void CSpaceRestrictionShape::fill_shape(const CCF_Shape::shape_def& shape)
 		}
 	default: NODEFAULT;
 	}
-	ai().level_graph().iterate_vertices(start, dest, CBorderMergePredicate(this));
+}
+
+void CSpaceRestrictionShape::fill_shape(const CCF_Shape::shape_def& shape)
+{
+	Fvector start, dest;
+	fill_bounds(shape, start, dest);
+	ai().level_graph().iterate_vertices(start, dest, CBorderMergePredicate(this, start, dest));
 
 #ifdef DEBUG
 	ai().level_graph().iterate_vertices(start,dest,CShapeTestPredicate(this));
