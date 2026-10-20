@@ -71,6 +71,11 @@ private:
 	void check_pathes();
 
 	files_set m_files;
+	// m_files: shared for lookups and listings, exclusive for changes. Worker threads look files up (textures, models
+	// and sounds of a level loading in the background) while the main thread rescans folders (mods list files during
+	// a level load: the scripts folder, configs), which erases and inserts entries: a lookup crashed meanwhile
+	// (CRender::texture_load). Never nested: check_pathes() (a rescan) runs before a lookup takes it
+	xrSRWLock m_files_lock;
 	// Files added to the index (registered or renamed into it): lets callers cache that a file doesn't exist
 	u32 m_files_added = 0;
 	BOOL bNoRecurse;
@@ -84,6 +89,7 @@ private:
 	bool Recurse(LPCSTR path);
 
 	files_it file_find_it(LPCSTR n);
+	files_it file_find_it_locked(LPCSTR n); // m_files_lock held, no rescan
 public:
 	enum
 	{

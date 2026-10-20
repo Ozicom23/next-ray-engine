@@ -277,7 +277,8 @@ void CLocatorAPI::Register(LPCSTR name, u32 vfs, u32 crc, u32 ptr, u32 size_real
 	{
 		_splitpath(temp, path, folder, 0, 0);
 		xr_strcat(path, folder);
-		if (!exist(path))
+		// m_files_lock held exclusive (or the start, one thread): no lookup that takes it
+		if (file_find_it_locked(path) == m_files.end())
 		{
 			desc.name = xr_strdup(path);
 			desc.vfs = vfs_id;
@@ -507,6 +508,7 @@ void CLocatorAPI::ProcessArchive(LPCSTR _path)
 
 void CLocatorAPI::unload_archive(CLocatorAPI::archive& A)
 {
+	xrSRWLockGuard guard(m_files_lock);
 	files_it I = m_files.begin();
 	for (; I != m_files.end(); ++I)
 	{
@@ -527,6 +529,7 @@ void CLocatorAPI::unload_archive(CLocatorAPI::archive& A)
 
 bool CLocatorAPI::load_all_unloaded_archives()
 {
+	xrSRWLockGuard guard(m_files_lock);
 	archives_it it = m_archives.begin();
 	archives_it it_e = m_archives.end();
 	bool res = false;
@@ -1386,6 +1389,7 @@ xr_vector<char*>* CLocatorAPI::file_list_open(const char* _path, u32 flags)
 	else
 		xr_strcpy(N, sizeof(N), _path);
 
+	xrSRWLockGuard guard(m_files_lock, true);
 	file desc;
 	desc.name = N;
 	files_it I = m_files.find(desc);
@@ -1447,6 +1451,7 @@ int CLocatorAPI::file_list(FS_FileSet& dest, LPCSTR path, u32 flags, LPCSTR mask
 	else
 		xr_strcpy(N, sizeof(N), path);
 
+	xrSRWLockGuard guard(m_files_lock, true);
 	file desc;
 	desc.name = N;
 	files_it I = m_files.find(desc);
@@ -1755,11 +1760,9 @@ void CLocatorAPI::copy_file_to_build(T*& r, LPCSTR source_name)
 	}
 }
 
+// m_files_lock held (r_open_impl, after check_pathes)
 bool CLocatorAPI::check_for_file(LPCSTR path, LPCSTR _fname, string_path& fname, const file*& desc)
 {
-	// проверить нужно ли пересканировать пути
-	check_pathes();
-
 	// correct path
 	xr_strcpy(fname, _fname);
 	xr_strlwr(fname);
@@ -1785,12 +1788,21 @@ template <typename T>
 T* CLocatorAPI::r_open_impl(LPCSTR path, LPCSTR _fname)
 {
 	PROF_EVENT("r_open_impl");
+	// проверить нужно ли пересканировать пути
+	check_pathes();
+	// Held while reading too: desc is an entry of m_files
+	xrSRWLockGuard guard(m_files_lock, true);
 	T* R = 0;
 	string_path fname;
 	const file* desc = 0;
 	LPCSTR source_name = &fname[0];
 
-	if (!check_for_file(path, _fname, fname, desc))
+	bool found;
+	{
+		PROF_EVENT("r_open_impl: find");
+		found = check_for_file(path, _fname, fname, desc);
+	}
+	if (!found)
 	{
 		if (m_Flags.test(flPrintLTX))
 			Log("Warning : Unable to find", _fname);
@@ -1799,9 +1811,15 @@ T* CLocatorAPI::r_open_impl(LPCSTR path, LPCSTR _fname)
 
 	// OK, analyse
 	if (0xffffffff == desc->vfs)
+	{
+		PROF_EVENT("r_open_impl: loose file");
 		file_from_cache(R, fname, sizeof(fname), *desc, source_name);
+	}
 	else
+	{
+		PROF_EVENT("r_open_impl: archive");
 		file_from_archive(R, fname, *desc);
+	}
 
 #ifdef DEBUG
     if (R && m_Flags.is(flBuildCopy | flReady))
@@ -1880,6 +1898,7 @@ void CLocatorAPI::w_close(IWriter*& S)
 		{
 			struct _stat st;
 			_stat(fname, &st);
+			xrSRWLockGuard guard(m_files_lock);
 			Register(fname, 0xffffffff, 0, 0, st.st_size, st.st_size, (u32)st.st_mtime);
 		}
 	}
@@ -1890,6 +1909,12 @@ CLocatorAPI::files_it CLocatorAPI::file_find_it(LPCSTR fname)
 	// проверить нужно ли пересканировать пути
 	check_pathes();
 
+	xrSRWLockGuard guard(m_files_lock, true);
+	return file_find_it_locked(fname);
+}
+
+CLocatorAPI::files_it CLocatorAPI::file_find_it_locked(LPCSTR fname)
+{
 	file desc_f;
 	string_path file_name;
 	VERIFY(xr_strlen(fname)*sizeof(char) < sizeof(file_name));
@@ -1907,10 +1932,12 @@ BOOL CLocatorAPI::dir_delete(LPCSTR path, LPCSTR nm, BOOL remove_files)
 	if (path && path[0]) update_path(fpath, path, nm);
 	else xr_strcpy(fpath, sizeof(fpath), nm);
 
+	check_pathes();
+	xrSRWLockGuard guard(m_files_lock);
 	files_set folders;
 	files_it I;
 	// remove files
-	I = file_find_it(fpath);
+	I = file_find_it_locked(fpath);
 	if (I != m_files.end())
 	{
 		size_t base_len = xr_strlen(fpath);
@@ -1955,7 +1982,9 @@ void CLocatorAPI::file_delete(LPCSTR path, LPCSTR nm)
 	if (path && path[0]) update_path(fname, path, nm);
 	else xr_strcpy(fname, sizeof(fname), nm);
 
-	const files_it I = file_find_it(fname);
+	check_pathes();
+	xrSRWLockGuard guard(m_files_lock);
+	const files_it I = file_find_it_locked(fname);
 	if (I != m_files.end())
 	{
 		// remove file
@@ -1986,10 +2015,12 @@ void CLocatorAPI::file_copy(LPCSTR src, LPCSTR dest)
 
 void CLocatorAPI::file_rename(LPCSTR src, LPCSTR dest, bool bOwerwrite)
 {
-	files_it S = file_find_it(src);
+	check_pathes();
+	xrSRWLockGuard guard(m_files_lock);
+	files_it S = file_find_it_locked(src);
 	if (S != m_files.end())
 	{
-		files_it D = file_find_it(dest);
+		files_it D = file_find_it_locked(dest);
 		if (D != m_files.end())
 		{
 			if (!bOwerwrite) return;
@@ -2032,6 +2063,7 @@ FS_Path* CLocatorAPI::append_path(LPCSTR path_alias, LPCSTR root, LPCSTR add, BO
 	VERIFY(root/**&&root[0]/**/);
 	VERIFY(false == path_exist(path_alias));
 	FS_Path* P = xr_new<FS_Path>(root, add, LPCSTR(0), LPCSTR(0), 0);
+	xrSRWLockGuard guard(m_files_lock);
 	bNoRecurse = !recursive;
 	Recurse(P->m_Path);
 	pathes.insert(mk_pair(xr_strdup(path_alias), P));
@@ -2082,7 +2114,8 @@ void CLocatorAPI::set_file_age(LPCSTR nm, u32 age)
 	else
 	{
 		// update record
-		files_it I = file_find_it(nm);
+		xrSRWLockGuard guard(m_files_lock);
+		files_it I = file_find_it_locked(nm);
 		if (I != m_files.end())
 		{
 			file& F = (file&)*I;
@@ -2120,6 +2153,7 @@ void CLocatorAPI::rescan_path(LPCSTR full_path, BOOL bRecurse)
 
 void CLocatorAPI::rescan_pathes()
 {
+	xrSRWLockGuard guard(m_files_lock);
 	m_Flags.set(flNeedRescan, FALSE);
 	for (PathPairIt p_it = pathes.begin(); p_it != pathes.end(); p_it++)
 	{
