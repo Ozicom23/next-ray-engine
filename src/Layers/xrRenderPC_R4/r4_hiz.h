@@ -20,5 +20,7 @@ namespace hiz
 	bool test_dynamic(const Fsphere& sphere);
 	// This frame's depth copy (after the scene geometry), for the sun receiver mask: false without one
 	bool depth_copy(ID3DShaderResourceView*& srv, Fmatrix& view_proj, u32& width, u32& height);
+	// r4_cull_freeze: keep the depth tiles read last (no new captures) while frozen
+	void set_frozen(bool frozen);
 	void destroy();
 }

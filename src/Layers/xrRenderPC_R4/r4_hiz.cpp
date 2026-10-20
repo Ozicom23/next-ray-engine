@@ -56,6 +56,10 @@ namespace
 	u32 s_copy_frame = u32(-1);
 	Fmatrix s_copy_view_proj;
 
+	// r4_cull_freeze: the tiles of the frozen view stay
+	bool s_frozen = false;
+	bool s_frozen_valid = false;
+
 	// Measuring
 	bool s_stats = false;
 	u32 s_end_time = 0, s_frames = 0, s_frames_with_tiles = 0;
@@ -231,8 +235,20 @@ void start_stats(float seconds)
 	Msg("* [Hi-Z] measuring for %.0f s...", seconds);
 }
 
+void set_frozen(bool frozen)
+{
+	if (frozen && !s_frozen)
+		s_frozen_valid = s_tiles_valid;
+	s_frozen = frozen;
+}
+
 void frame_begin(bool usable)
 {
+	if (s_frozen)
+	{
+		s_tiles_valid = s_frozen_valid && usable;
+		return;
+	}
 	s_tiles_valid = false;
 	if (s_stats && Device.dwTimeGlobal >= s_end_time)
 		finish_stats();
@@ -268,7 +284,7 @@ void frame_begin(bool usable)
 
 void capture(ID3DDepthStencilView* depth, const Fmatrix& view_proj)
 {
-	if (!active() || !depth || !create_shader())
+	if (s_frozen || !active() || !depth || !create_shader())
 		return;
 	ID3DBaseTexture* res = nullptr;
 	depth->GetResource(&res);

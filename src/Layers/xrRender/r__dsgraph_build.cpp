@@ -20,9 +20,12 @@ float r_ssaLOD_A, r_ssaLOD_B;
 float r_ssaGLOD_start, r_ssaGLOD_end;
 float r_ssaHZBvsTEX;
 
+// r4_cull_freeze: the frozen view's position (objects' screen size from where the culling looks), nullptr: the camera's
+const Fvector* r_cull_view_pos = nullptr;
+
 ICF float CalcSSA(float& distSQ, Fvector& C, float R)
 {
-	distSQ = Device.vCameraPosition.distance_to_sqr(C) + EPS;
+	distSQ = (r_cull_view_pos ? *r_cull_view_pos : Device.vCameraPosition).distance_to_sqr(C) + EPS;
     return (R * R / distSQ);
 }
 

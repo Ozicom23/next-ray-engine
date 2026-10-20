@@ -72,6 +72,18 @@ void CRender::render_menu()
 
 extern u32 g_r;
 
+// r4_cull_freeze 1: the main view keeps culling (frustum, sectors, occlusion, screen size) from where the camera was when
+// it was turned on, while the frame is drawn from wherever the camera is now: fly out and see what is drawn. Not saved
+int ps_r4_cull_freeze = 0;
+extern const Fvector* r_cull_view_pos;
+namespace
+{
+	bool s_freeze_have = false;
+	Fmatrix s_freeze_full;
+	Fvector s_freeze_pos;
+	CSector* s_freeze_sector = nullptr;
+}
+
 void CRender::Render()
 {
 	RCache.constants_epoch++; // per-frame constant handlers run once per render (R_constant_setup::per_frame)
@@ -123,9 +135,27 @@ void CRender::Render()
 	if (o.sunstatic) bSUN = FALSE;
 	// Msg						("sstatic: %s, sun: %s",o.sunstatic?;"true":"false", bSUN?"true":"false");
 
+	// The culling view: the camera's, or the frozen one (r4_cull_freeze)
+	const bool freeze = ps_r4_cull_freeze && !Device.m_SecondViewport.IsSVPFrame() && RImplementation.pLastSector;
+	if (freeze && !s_freeze_have)
+	{
+		s_freeze_have = true;
+		s_freeze_full.set(Device.mFullTransform);
+		s_freeze_pos.set(Device.vCameraPosition);
+		s_freeze_sector = RImplementation.pLastSector;
+	}
+	if (!ps_r4_cull_freeze)
+		s_freeze_have = false;
+	hiz::set_frozen(s_freeze_have);
+	r_cull_view_pos = freeze ? &s_freeze_pos : nullptr;
+	Fmatrix cull_full = freeze ? s_freeze_full : Device.mFullTransform;
+	Fvector cull_pos = freeze ? s_freeze_pos : Device.vCameraPosition;
+	CSector* cull_sector = freeze ? s_freeze_sector : RImplementation.pLastSector;
+
 	// HOM
-	ViewBase.CreateFromMatrix(Device.mFullTransform, FRUSTUM_P_LRTB + FRUSTUM_P_FAR);
-    HOM.MT_RENDER();
+	ViewBase.CreateFromMatrix(cull_full, FRUSTUM_P_LRTB + FRUSTUM_P_FAR);
+	if (!freeze)
+		HOM.MT_RENDER();
 
 	Target->phase_scene_prepare();
 
@@ -151,7 +181,7 @@ void CRender::Render()
     hiz::frame_begin(hiz_frame);
     if (hiz_frame)
         tex_stream::frame_begin();
-    GMBase.traverse(RImplementation.pLastSector, ViewBase, Device.vCameraPosition, Device.mFullTransform);
+    GMBase.traverse(cull_sector, ViewBase, cull_pos, cull_full);
     GMBase.r_dsgraph_capture_static();
     GMBase.r_dsgraph_capture_dynamic();
 

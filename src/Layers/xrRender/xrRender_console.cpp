@@ -654,6 +654,14 @@ public:
 
 namespace hiz { void start_stats(float seconds); }
 extern int ps_r4_hiz_cull;
+extern int ps_r4_cull_freeze;
+// An integer the config doesn't keep (debug modes that must not stay on)
+class CCC_IntegerNotSaved : public CCC_Integer
+{
+public:
+	CCC_IntegerNotSaved(LPCSTR N, int* V, int _min, int _max) : CCC_Integer(N, V, _min, _max) {}
+	virtual void Save(IWriter*) {}
+};
 namespace tex_stream { void start_stats(float seconds); }
 extern int ps_r4_sky_on_demand;
 extern int ps_r4_tex_stream;
@@ -1635,6 +1643,8 @@ void xrRender_initconsole()
 	CMD1(CCC_TreeBatchStats, "stat_tree_batches");
 	CMD1(CCC_HizStats, "stat_hiz");
 	CMD4(CCC_Integer, "r4_hiz_cull", &ps_r4_hiz_cull, 0, 1);
+	// The main view culled from where the camera was when turned on, drawn from where it is (showing culling)
+	CMD4(CCC_IntegerNotSaved, "r4_cull_freeze", &ps_r4_cull_freeze, 0, 1);
 	CMD1(CCC_SunCasterStats, "stat_sun_casters");
 	CMD4(CCC_Integer, "r4_sun_cascade_cache", &ps_r4_sun_cascade_cache, 0, 2);
 	CMD4(CCC_Float, "r4_sun_cascade_cache_drift", &ps_r4_sun_cascade_cache_drift, 0.1f, 4.f);
