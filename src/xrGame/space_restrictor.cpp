@@ -72,7 +72,11 @@ BOOL CSpaceRestrictor::net_Spawn(CSE_Abstract* data)
 
 	shape->ComputeBounds();
 
-	BOOL result = inherited::net_Spawn(data);
+	BOOL result;
+	{
+		PROF_EVENT("CSpaceRestrictor::net_Spawn: inherited");
+		result = inherited::net_Spawn(data);
+	}
 
 	if (!result)
 		return (FALSE);
@@ -90,6 +94,7 @@ BOOL CSpaceRestrictor::net_Spawn(CSE_Abstract* data)
 		RestrictionSpace::eRestrictorTypeNone))
 		return (TRUE);
 
+	PROF_EVENT("CSpaceRestrictor::net_Spawn: register");
 	Level().space_restriction_manager().register_restrictor(
 		this, RestrictionSpace::ERestrictorTypes(se_shape->m_space_restrictor_type));
 

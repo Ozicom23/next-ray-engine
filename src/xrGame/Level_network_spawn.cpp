@@ -133,6 +133,18 @@ void CLevel::g_sv_Spawn(CSE_Abstract* E)
 	bool spawned;
 	{
 		PROF_EVENT("spawn: net_Spawn");
+		// And by class (profiler rows "net_Spawn <class>"): where spawning online spends its time
+		static xr_unordered_flat_map<CLASS_ID, xr_prof::desc*> by_class;
+		xr_prof::desc*& d = by_class[E->m_tClassID];
+		if (!d)
+		{
+			string16 cls;
+			CLSID2TEXT(E->m_tClassID, cls);
+			string64 name;
+			xr_sprintf(name, "net_Spawn %s", _Trim(cls));
+			d = xr_new<xr_prof::desc>("", xr_strdup(name));
+		}
+		xr_prof::scope class_scope(*d);
 		spawned = !!O->net_Spawn(E);
 	}
 	if (!spawned)

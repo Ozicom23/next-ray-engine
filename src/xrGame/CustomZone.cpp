@@ -364,8 +364,11 @@ void CCustomZone::Load(LPCSTR section)
 
 BOOL CCustomZone::net_Spawn(CSE_Abstract* DC)
 {
-	if (!inherited::net_Spawn(DC))
-		return (FALSE);
+	{
+		PROF_EVENT("CCustomZone::net_Spawn: inherited");
+		if (!inherited::net_Spawn(DC))
+			return (FALSE);
+	}
 
 	CSE_Abstract* e = (CSE_Abstract*)(DC);
 	CSE_ALifeCustomZone* Z = smart_cast<CSE_ALifeCustomZone*>(e);
@@ -419,7 +422,10 @@ BOOL CCustomZone::net_Spawn(CSE_Abstract* DC)
 	setEnabled(TRUE);
 
 	if (IsEnabled())
+	{
+		PROF_EVENT("CCustomZone::net_Spawn: idle particles");
 		PlayIdleParticles();
+	}
 
 	m_iPreviousStateTime = m_iStateTime = 0;
 

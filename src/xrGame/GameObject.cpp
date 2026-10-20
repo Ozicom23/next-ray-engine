@@ -275,6 +275,7 @@ BOOL CGameObject::net_Spawn(CSE_Abstract* DC)
 	const CSE_Visual* visual = smart_cast<const CSE_Visual*>(E);
 	if (visual)
 	{
+		PROF_EVENT("CGameObject::net_Spawn: visual");
 		auto visualName = visual_name(E);
 
 		// If model doesn't exist, and object config has "visual" field, try to update the model
@@ -381,13 +382,19 @@ BOOL CGameObject::net_Spawn(CSE_Abstract* DC)
 			SpatialComponent->spatial.type = (SpatialComponent->spatial.type | STYPE_VISIBLEFORAI) ^ STYPE_VISIBLEFORAI;
 	}
 
-	reload(*cNameSect());
-	if (!g_dedicated_server)
-		CScriptBinder::reload(*cNameSect());
+	{
+		PROF_EVENT("CGameObject::net_Spawn: reload");
+		reload(*cNameSect());
+		if (!g_dedicated_server)
+			CScriptBinder::reload(*cNameSect());
+	}
 
-	reinit();
-	if (!g_dedicated_server)
-		CScriptBinder::reinit();
+	{
+		PROF_EVENT("CGameObject::net_Spawn: reinit");
+		reinit();
+		if (!g_dedicated_server)
+			CScriptBinder::reinit();
+	}
 #ifdef DEBUG
 	if(ph_dbg_draw_mask1.test(ph_m1_DbgTrackObject)&&stricmp(PH_DBG_ObjectTrackName(),*cName())==0)
 	{
@@ -448,11 +455,17 @@ BOOL CGameObject::net_Spawn(CSE_Abstract* DC)
 			}
 		}
 	}
-	inherited::net_Spawn(DC);
+	{
+		PROF_EVENT("CGameObject::net_Spawn: CObject");
+		inherited::net_Spawn(DC);
+	}
 
 	m_bObjectRemoved = false;
 
-	spawn_supplies();
+	{
+		PROF_EVENT("CGameObject::net_Spawn: supplies");
+		spawn_supplies();
+	}
 #ifdef DEBUG
 	if(ph_dbg_draw_mask1.test(ph_m1_DbgTrackObject)&&stricmp(PH_DBG_ObjectTrackName(),*cName())==0)
 	{
@@ -460,10 +473,13 @@ BOOL CGameObject::net_Spawn(CSE_Abstract* DC)
 	}
 	BOOL ret =CScriptBinder::net_Spawn(DC);
 #else
-	::luabind::functor<void> funct;
-	if (ai().script_engine().functor("_G.CGameObject_NetSpawn", funct))
 	{
-		funct(this->lua_game_object());
+		PROF_EVENT("CGameObject::net_Spawn: CGameObject_NetSpawn");
+		::luabind::functor<void> funct;
+		if (ai().script_engine().functor("_G.CGameObject_NetSpawn", funct))
+		{
+			funct(this->lua_game_object());
+		}
 	}
 	return (CScriptBinder::net_Spawn(DC));
 #endif
