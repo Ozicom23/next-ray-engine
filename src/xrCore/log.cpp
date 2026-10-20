@@ -196,12 +196,18 @@ void xrLogger::SimpleMessage(LPCSTR Message, u32 MessageSize /*= 0*/)
 		msgToLog = c + "[" + timeInHMSMMM() + "] " + t;
 	}
 
-	xrCriticalSectionGuard guard(&logDataGuard);
-	if (bIsAlive)
+	bool queued = false;
 	{
-		logData->emplace(LogRecord(msgToLog.c_str(), (u32)msgToLog.size()));
-		UnpauseLogging();
+		xrCriticalSectionGuard guard(&logDataGuard);
+		if (bIsAlive)
+		{
+			logData->emplace(LogRecord(msgToLog.c_str(), (u32)msgToLog.size()));
+			queued = true;
+		}
 	}
+	// Not under logDataGuard: printing (immediate mode) takes logFlushGuard, then logDataGuard
+	if (queued)
+		UnpauseLogging();
 	
 }
 
@@ -343,12 +349,14 @@ void xrLogger::InternalOpenLogFile()
 	CHECK_OR_EXIT(logFile, "Can't create log file");
 }
 
-void xrLogger::InternalPrintRecord()
+bool xrLogger::InternalPrintRecord()
 {
 	LogRecord theRecord;
 
 	{
 		xrCriticalSectionGuard g(&logDataGuard);
+		if (logData->empty())
+			return false;
 		theRecord = logData->front();
 		logData->pop();
 	}
@@ -404,18 +412,17 @@ void xrLogger::InternalPrintRecord()
 			FnCallback(finalLine);
 		}
 	}
+	return true;
 }
 
 void xrLogger::InternalPrintAllRecords()
 {
-	while (true)
+	// One printer at a time: the log thread, and the main thread when closing the log (or in immediate mode). Both
+	// printing took the last record between one's empty check and its pop: pop on an empty queue, and the game hung at
+	// its exit writing the log forever. The empty check is in InternalPrintRecord, with the pop
+	xrCriticalSectionGuard g(logFlushGuard);
+	while (InternalPrintRecord())
 	{
-		{
-			xrCriticalSectionGuard g(&logDataGuard);
-			if (logData->empty())
-				break;
-		}
-		InternalPrintRecord();
 	}
 }
 
