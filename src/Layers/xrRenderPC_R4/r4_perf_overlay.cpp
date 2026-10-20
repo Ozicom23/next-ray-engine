@@ -85,7 +85,7 @@ void CPerfOverlay::CollectGpuTimes()
 void CPerfOverlay::GpuFrameBegin()
 {
 	// Per-pass timing costs a few hundred queries per frame, only in detailed mode
-	gpu_profiler::frame_begin(ps_perf_overlay >= 2);
+	gpu_profiler::frame_begin(ps_perf_overlay >= 3);
 
 	m_query_active = false;
 	if (!ps_perf_overlay || !CreateQueries())
@@ -185,7 +185,7 @@ void CPerfOverlay::DumpPasses() const
 {
 	if (m_passes.empty())
 	{
-		Msg("* [GPU passes] no data: turn on the detailed overlay (perf_overlay 2) and wait a moment");
+		Msg("* [GPU passes] no data: turn on the detailed overlay (perf_overlay detailed) and wait a moment");
 		return;
 	}
 	Msg("* [GPU passes] average per frame over the last %.0f ms, GPU frame %.2f ms:", 250.f, m_show_gpu_ms);
@@ -361,11 +361,16 @@ void CPerfOverlay::Draw()
 		else
 			ImGui::Text("GPU   n/a     CPU %5.2f ms", m_show_cpu_ms);
 
-		// Budget is what the OS/driver lets the game use before evicting, below the card's total
+		// RAM: the game's own, without its GPU memory; then all programs' in use (total minus available; where the GPU
+		// shares the RAM, its memory too)
+		if (m_ram_total_gb > 0.f)
+			ImGui::Text("RAM  %.2f GB   system %.1f / %.1f GB", m_ram_used_gb,
+			            _max(0.f, m_ram_total_gb - m_ram_avail_gb), m_ram_total_gb);
+		// The game's GPU memory; budget is what the OS/driver lets it use before evicting, below the card's total
 		if (m_vram_budget_gb > 0.f && m_vram_total_gb > 0.f)
-			ImGui::Text("VRAM %.2f GB used, budget %.1f / %.1f GB", m_vram_used_gb, m_vram_budget_gb, m_vram_total_gb);
+			ImGui::Text("VRAM %.2f GB   budget %.1f / %.1f GB", m_vram_used_gb, m_vram_budget_gb, m_vram_total_gb);
 		else if (m_vram_budget_gb > 0.f)
-			ImGui::Text("VRAM %.2f GB used, budget %.1f GB", m_vram_used_gb, m_vram_budget_gb);
+			ImGui::Text("VRAM %.2f GB   budget %.1f GB", m_vram_used_gb, m_vram_budget_gb);
 		// What the VRAM is made of: "other" is everything the engine doesn't count itself (driver, DXVK,
 		// upscaler, shaders, small buffers)
 		{
@@ -378,7 +383,7 @@ void CPerfOverlay::Draw()
 			else
 				ImGui::Text("  Tex %.2f  Geo %.2f  RT %.2f GB", tex, geo, rt);
 
-			if (ps_perf_overlay >= 2)
+			if (ps_perf_overlay >= 3)
 			{
 				const u64* b = m_gpu.bytes;
 				ImGui::Text("  Tex: BC %.2f  uncompressed %.2f  no mips %.2f GB",
@@ -391,9 +396,6 @@ void CPerfOverlay::Draw()
 					ImGui::Text("  Texture copies in RAM %.2f GB", float(double(b[gpu_memory::tex_staging]) / gb));
 			}
 		}
-
-		if (m_ram_total_gb > 0.f)
-			ImGui::Text("RAM  %.2f GB used, %.1f / %.1f GB free", m_ram_used_gb, m_ram_avail_gb, m_ram_total_gb);
 
 		CRenderTarget* target = RImplementation.Target;
 		CUpscaler* upscaler = GetUpscaler(RImplementation.o.upscaler);
@@ -411,7 +413,7 @@ void CPerfOverlay::Draw()
 		else
 			ImGui::Text("%s   Native   %ux%u", s_api, Device.dwWidth, Device.dwHeight);
 
-		if (ps_perf_overlay >= 2)
+		if (ps_perf_overlay >= 3)
 		{
 			ImGui::Separator();
 			const float* t = m_show_timers;
@@ -419,7 +421,11 @@ void CPerfOverlay::Draw()
 			ImGui::Text("Physics %5.2f   AI %5.2f   Animation %5.2f", t[3], t[4], t[5]);
 			ImGui::Text("Render %5.2f   Calc %5.2f   HOM %5.2f", t[6], t[7], t[8]);
 			ImGui::Text("Draw calls %u   Triangles %.2f M", m_draw_calls, float(m_polys) / 1000000.f);
+		}
 
+		// Frame time graph: compact + graph and detailed
+		if (ps_perf_overlay >= 2)
+		{
 			float graph_max = 0.f;
 			for (u32 i = 0; i < kGraphSamples; ++i)
 				graph_max = _max(graph_max, m_graph[i]);
@@ -429,7 +435,10 @@ void CPerfOverlay::Draw()
 			xr_sprintf(label, "frame time (max %.1f ms)", graph_max);
 			ImGui::PlotLines("##frametime", m_graph, int(kGraphSamples), int(m_graph_pos), label, 0.f, graph_max,
 			                 ImVec2(320.f * _max(1.f, io.DisplaySize.y / 1080.f), 60.f * _max(1.f, io.DisplaySize.y / 1080.f)));
+		}
 
+		if (ps_perf_overlay >= 3)
+		{
 			// GPU time per render pass, nested like the PIX_EVENT scopes; small passes are left out to keep it short
 			if (!m_passes.empty())
 			{

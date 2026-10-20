@@ -365,11 +365,12 @@ int   ps_r4_upscaler_lens_patch = 1;      // r4-only, the stock 3DSS lens shader
 int   ps_r4_upscaler_late_overlays = 1;     // r4-only, gas mask, night/heat vision and shader scopes after the upscaler
 
 // Performance overlay (r4-only)
-u32 ps_perf_overlay = 0; // 0 off, 1 compact, 2 detailed
+u32 ps_perf_overlay = 0; // 0 off, 1 compact, 2 compact with the frame time graph, 3 detailed (saved by name)
 xr_token perf_overlay_token[] = {
 	{ "off", 0 },
 	{ "compact", 1 },
-	{ "detailed", 2 },
+	{ "graph", 2 },
+	{ "detailed", 3 },
 	{ 0, 0 }
 };
 u32 ps_perf_overlay_pos = 1; // screen corner
@@ -613,12 +614,12 @@ float r_rain_k = 99.0f;
 #include	"../../xrEngine/xr_ioconsole.h"
 #include	"../../xrEngine/xr_ioc_cmd.h"
 
-// Cycles the performance overlay: off -> compact -> detailed (bindable with bind_console)
+// Cycles the performance overlay: off -> compact -> compact + graph -> detailed (bindable with bind_console)
 class CCC_PerfOverlayToggle : public IConsole_Command
 {
 public:
 	CCC_PerfOverlayToggle(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; }
-	virtual void Execute(LPCSTR args) { ps_perf_overlay = (ps_perf_overlay + 1) % 3; }
+	virtual void Execute(LPCSTR args) { ps_perf_overlay = (ps_perf_overlay + 1) % 4; }
 };
 
 // Read-only list of the upscalers this GPU supports ("dlss,fsr", "fsr" or ""), for the options menu.
@@ -849,7 +850,7 @@ public:
 	}
 	virtual void Info(TInfo& I)
 	{
-		xr_strcpy(I, "GPU time per render pass to the log: the last 250 ms (needs perf_overlay 2), or averaged over [seconds]");
+		xr_strcpy(I, "GPU time per render pass to the log: the last 250 ms (needs perf_overlay detailed), or averaged over [seconds]");
 	}
 };
 

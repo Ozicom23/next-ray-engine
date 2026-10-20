@@ -302,7 +302,7 @@ function on_xml_read()
 						type         = "list",
 						val          = 0,
 						cmd          = "perf_overlay",
-						content      = {{"off", "perf_overlay_off"}, {"compact", "perf_overlay_compact"}, {"detailed", "perf_overlay_detailed"}},
+						content      = {{"off", "perf_overlay_off"}, {"compact", "perf_overlay_compact"}, {"graph", "perf_overlay_graph"}, {"detailed", "perf_overlay_detailed"}},
 						precondition = for_r4,
 					},
 					{

@@ -105,7 +105,7 @@
 		<text>Performance Overlay</text>
 	</string>
 	<string id="ui_mm_video_advanced_perf_overlay_desc">
-		<text>On-screen FPS, frame time, 1% low, GPU and CPU time, VRAM and render resolution. Detailed adds the engine CPU breakdown, draw calls and a frame-time graph. Bind a key with: bind_console perf_overlay_toggle kF10 (perf_overlay)</text>
+		<text>On-screen FPS, frame time, 1% low, GPU and CPU time, RAM, VRAM and render resolution. Compact + Graph adds a frame-time graph, Detailed also the engine CPU breakdown, draw calls and GPU time per render pass. Bind a key with: bind_console perf_overlay_toggle kF10 (perf_overlay)</text>
 	</string>
 	<string id="ui_mm_video_advanced_perf_overlay_pos">
 		<text>Overlay Position</text>
@@ -124,6 +124,9 @@
 	</string>
 	<string id="ui_mm_lst_perf_overlay_compact">
 		<text>Compact</text>
+	</string>
+	<string id="ui_mm_lst_perf_overlay_graph">
+		<text>Compact + Graph</text>
 	</string>
 	<string id="ui_mm_lst_perf_overlay_detailed">
 		<text>Detailed</text>
