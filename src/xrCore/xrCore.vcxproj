@@ -632,6 +632,9 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release-AVX|x64'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="xrDebugNew.cpp" />
+    <ClCompile Include="mod_origin.cpp" />
+    <ClCompile Include="crash_report.cpp" />
+    <ClCompile Include="level_preload.cpp" />
     <ClCompile Include="xrMemory.cpp" />
     <ClCompile Include="xrMemory_align.cpp" />
     <ClCompile Include="xrMemory_debug.cpp" />
@@ -733,6 +736,9 @@
     <ClInclude Include="xrCore.h" />
     <ClInclude Include="xrCore_platform.h" />
     <ClInclude Include="xrDebug.h" />
+    <ClInclude Include="mod_origin.h" />
+    <ClInclude Include="crash_report.h" />
+    <ClInclude Include="level_preload.h" />
     <ClInclude Include="xrDebug_macros.h" />
     <ClInclude Include="xrMemory.h" />
     <ClInclude Include="xrMemory_align.h" />

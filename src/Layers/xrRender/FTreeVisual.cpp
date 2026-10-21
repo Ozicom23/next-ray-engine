@@ -440,6 +440,54 @@ void FTreeVisual_ST::Render(float LOD)
 	RCache.stat.r.s_flora.add(vCount);
 }
 
+#ifdef USE_DX11
+static void write_rows(Fvector4* rows, const Fmatrix& m)
+{
+	// As R_constant sets a 3x4 matrix
+	rows[0].set(m._11, m._21, m._31, m._41);
+	rows[1].set(m._12, m._22, m._32, m._42);
+	rows[2].set(m._13, m._23, m._33, m._43);
+}
+
+void FTreeVisual::write_instance(Fvector4* rows) const
+{
+	// The values Render sets for a tree
+	Fmatrix xform_v;
+	xform_v.mul_43(RCache.get_xform_view(), xform);
+	write_rows(rows, xform);
+	write_rows(rows + 3, xform_v);
+	const float s = ps_r__Tree_SBC * 1.3333f;
+	rows[6].set(s * c_scale.rgb.x, s * c_scale.rgb.y, s * c_scale.rgb.z, s * c_scale.hemi);
+	rows[7].set(s * c_bias.rgb.x, s * c_bias.rgb.y, s * c_bias.rgb.z, s * c_bias.hemi);
+	rows[8].set(s * c_scale.sun, s * c_bias.sun, 0, 0);
+}
+
+static u64 tree_instance_key(const void* geom, u32 vbase, u32 ibase, u32 prims)
+{
+	return ((u64(size_t(geom)) * 0x9E3779B97F4A7C15ull) ^ (u64(vbase) << 40) ^ (u64(ibase) << 20) ^ u64(prims)) | 1;
+}
+
+static int tree_pm_lod_id(FSlideWindowItem* pSWI, float LOD, u32 last_lod)
+{
+	return LOD >= 0.f ? iFloor((1.f - LOD) * float(pSWI->count - 1) + 0.5f) : int(last_lod);
+}
+
+u64 FTreeVisual_ST::instance_key(float LOD)
+{
+	if (!m_inst_key)
+		m_inst_key = tree_instance_key(&*rm_geom, vBase, iBase, dwPrimitives);
+	return m_inst_key;
+}
+
+void FTreeVisual_ST::render_instances(float LOD, u32 count)
+{
+	FTreeVisual::Render(LOD);
+	RCache.set_Geometry(rm_geom);
+	RCache.RenderInstanced(D3DPT_TRIANGLELIST, vBase, 0, vCount, iBase, dwPrimitives, count);
+	RCache.stat.r.s_flora.add(vCount * count);
+}
+#endif
+
 void FTreeVisual_ST::Copy(dxRender_Visual* pSrc)
 {
 	inherited::Copy(pSrc);
@@ -491,6 +539,31 @@ void FTreeVisual_PM::Render(float LOD)
 	RCache.Render(D3DPT_TRIANGLELIST, vBase, 0, SW.num_verts, iBase + SW.offset, SW.num_tris);
 	RCache.stat.r.s_flora.add(SW.num_verts);
 }
+
+#ifdef USE_DX11
+u64 FTreeVisual_PM::instance_key(float LOD)
+{
+	// The geometry's key, the LOD in the top bits (the LOD picks the slide window as render_instances does)
+	if (!m_inst_key)
+	{
+		m_inst_key = tree_instance_key(&*rm_geom, vBase, iBase, 0) & 0x0000FFFFFFFFFFFFull;
+		m_inst_lods = pSWI->count;
+	}
+	const int lod_id = LOD >= 0.f ? iFloor((1.f - LOD) * float(m_inst_lods - 1) + 0.5f) : int(last_lod);
+	return m_inst_key | (u64(lod_id + 1) << 48);
+}
+
+void FTreeVisual_PM::render_instances(float LOD, u32 count)
+{
+	FTreeVisual::Render(LOD);
+	const int lod_id = tree_pm_lod_id(pSWI, LOD, last_lod);
+	last_lod = lod_id;
+	FSlideWindow& SW = pSWI->sw[lod_id];
+	RCache.set_Geometry(rm_geom);
+	RCache.RenderInstanced(D3DPT_TRIANGLELIST, vBase, 0, SW.num_verts, iBase + SW.offset, SW.num_tris, count);
+	RCache.stat.r.s_flora.add(SW.num_verts * count);
+}
+#endif
 
 void FTreeVisual_PM::Copy(dxRender_Visual* pSrc)
 {

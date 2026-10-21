@@ -5,6 +5,7 @@
 #include "r4_frame_pacing.h"
 #include "../../xrEngine/Stats.h"
 #include "../../xrEngine/IGame_Persistent.h"
+#include "../../xrEngine/mod_cost.h"
 
 #include <dxgi1_4.h>
 #include <psapi.h>
@@ -497,6 +498,41 @@ namespace shader_progress
 	static std::atomic<u32> s_live_count{ 0 };
 	static std::atomic<u64> s_live_last_ms{ 0 };
 
+	struct stall_sum
+	{
+		std::atomic<u32> count{ 0 };
+		std::atomic<u32> us{ 0 };
+		std::atomic<u32> max_us{ 0 };
+		void add(float ms)
+		{
+			const u32 v = u32(ms * 1000.f);
+			++count;
+			us += v;
+			for (u32 m = max_us; v > m && !max_us.compare_exchange_weak(m, v);)
+				;
+		}
+		void report(const char* what)
+		{
+			Msg("* [Shader stalls] %-44s %5u, %8.1f ms in all, longest %6.1f ms", what, u32(count), float(us) / 1000.f,
+				float(max_us) / 1000.f);
+			count = 0;
+			us = 0;
+			max_us = 0;
+		}
+	};
+	static stall_sum s_stall_compile, s_stall_wait, s_stall_pipeline;
+
+	void stall_compile(float ms) { s_stall_compile.add(ms); }
+	void stall_wait(float ms) { s_stall_wait.add(ms); }
+	void stall_pipeline(float ms) { s_stall_pipeline.add(ms); }
+
+	void stall_report()
+	{
+		s_stall_compile.report("shaders compiled on the main thread:");
+		s_stall_wait.report("waits for pre-compiled shaders:");
+		s_stall_pipeline.report("D3D12 pipelines created at a draw:");
+	}
+
 	void compiled()
 	{
 		const u64 now = GetTickCount64();
@@ -506,6 +542,94 @@ namespace shader_progress
 			++s_live_count;
 		s_live_last_ms = now;
 	}
+}
+
+void CPerfOverlay::DrawModCost()
+{
+	if (!mod_cost::enabled)
+		return;
+	const ImGuiContext* imgui = ImGui::GetCurrentContext();
+	if (!imgui || !imgui->WithinFrameScope)
+		return;
+	const ImGuiIO& io = ImGui::GetIO();
+	// The other side from the performance overlay
+	const u32 corner = (ps_perf_overlay_pos & 3) ^ 1;
+	const float pad = 10.f;
+	ImGui::SetNextWindowPos(ImVec2((corner & 1) ? io.DisplaySize.x - pad : pad, (corner & 2) ? io.DisplaySize.y - pad : pad),
+	                        ImGuiCond_Always, ImVec2((corner & 1) ? 1.f : 0.f, (corner & 2) ? 1.f : 0.f));
+	ImGui::SetNextWindowBgAlpha(0.6f);
+	const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+		ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
+		ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoMove;
+	if (!ImGui::Begin("##mod_cost", nullptr, flags))
+	{
+		ImGui::End();
+		return;
+	}
+	ImGui::SetWindowFontScale(_max(1.f, io.DisplaySize.y / 1080.f));
+	// Over 1 ms a frame orange, over 2 red (a 60 FPS frame is 16.7 ms)
+	auto cost_color = [](float ms)
+	{
+		return ms >= 2.f ? ImVec4(1.f, 0.4f, 0.35f, 1.f) : (ms >= 1.f ? ImVec4(1.f, 0.7f, 0.3f, 1.f) : ImVec4(0.9f, 0.9f, 0.9f, 1.f));
+	};
+	const ImGuiTableFlags table_flags = ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoHostExtendX;
+	const xr_vector<mod_cost::row>& rows = mod_cost::frame_rows();
+	if (!g_pGameLevel)
+		ImGui::TextUnformatted("Mods' Lua time per frame: in a level");
+	else if (rows.empty())
+		ImGui::TextUnformatted("Mods' Lua time per frame: measuring...");
+	else
+	{
+		ImGui::Text("Mods' Lua time per frame (callbacks, time events): %.2f ms", mod_cost::frame_total_ms());
+		if (ImGui::BeginTable("##mods", 4, table_flags))
+		{
+			ImGui::TableSetupColumn("Mod");
+			ImGui::TableSetupColumn("ms");
+			ImGui::TableSetupColumn("peak");
+			ImGui::TableSetupColumn("calls");
+			ImGui::TableHeadersRow();
+			for (const mod_cost::row& r : rows)
+			{
+				ImGui::TableNextRow();
+				ImGui::TableNextColumn();
+				ImGui::TextColored(cost_color(r.avg_ms), "%.48s", r.name.c_str());
+				ImGui::TableNextColumn();
+				ImGui::TextColored(cost_color(r.avg_ms), "%6.2f", r.avg_ms);
+				ImGui::TableNextColumn();
+				ImGui::TextColored(cost_color(r.peak_ms * 0.5f), "%6.2f", r.peak_ms);
+				ImGui::TableNextColumn();
+				ImGui::Text("%5.1f", r.calls);
+			}
+			ImGui::EndTable();
+		}
+	}
+	// Script loading of the last load (the script engine runs every script again at a level load)
+	static xr_vector<mod_cost::row> load;
+	static float load_total = 0.f;
+	static u32 load_frame = 0;
+	if (Device.dwFrame - load_frame > 30)
+	{
+		load_frame = Device.dwFrame;
+		mod_cost::load_rows(load, load_total);
+	}
+	if (!load.empty())
+	{
+		ImGui::Separator();
+		ImGui::Text("Script loading at the last load: %.2f s", load_total / 1000.f);
+		if (ImGui::BeginTable("##load", 2, table_flags))
+		{
+			for (size_t i = 0; i < load.size() && i < 8; ++i)
+			{
+				ImGui::TableNextRow();
+				ImGui::TableNextColumn();
+				ImGui::TextUnformatted(load[i].name.c_str());
+				ImGui::TableNextColumn();
+				ImGui::Text("%6.0f ms", load[i].avg_ms);
+			}
+			ImGui::EndTable();
+		}
+	}
+	ImGui::End();
 }
 
 // "Compiling shaders: N" while shaders are compiled during the game (the frames stall meanwhile, so it mostly shows

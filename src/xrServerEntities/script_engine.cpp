@@ -268,6 +268,9 @@ void CScriptEngine::lua_error_not_crash(lua_State* L)
 
 void printLuaStack()
 {
+	// Not before the scripts exist: ai() would make them (an error at the engine's start)
+	if (!g_ai_space)
+		return;
 	ai().script_engine().print_stack();
 }
 

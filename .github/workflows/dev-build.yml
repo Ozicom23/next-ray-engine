@@ -78,6 +78,16 @@ jobs:
       # /m: independent projects build at the same time (files within a project already compile in parallel)
       run: msbuild /m /p:Configuration=${{ env.BUILD_CONF }} ${{ env.SOLUTION_FILE_PATH }}
 
+    - name: Crash report symbols
+      # Each exe writes its function names from its PDB next to itself (<exe>.sym, read by the crash reports)
+      run: |
+        $env:PATH = "$pwd\sdk\binaries;$pwd\src\3rd party\Intel-XeSS\bin;$env:PATH"
+        get-childitem "./_build/_game/bin_dbg/*.exe" | foreach-object {
+          $sym = [IO.Path]::ChangeExtension($_.FullName, ".sym")
+          $p = start-process -filepath $_.FullName -argumentlist "-dump_symbols `"$sym`"" -wait -passthru -nonewwindow
+          if ($p.ExitCode -ne 0) { write-host "no symbols for $($_.Name)" }
+        }
+
     - name: Pack gamedata
       run: |
         new-item -path "./compressor/gamedata" -itemtype directory -force
@@ -91,6 +101,7 @@ jobs:
         new-item -path "./package/bin" -itemtype directory -force
         new-item -path "./package/db/mods" -itemtype directory -force
         copy-item -path "./_build/_game/bin_dbg/*.exe" -destination "./package/bin"
+        copy-item -path "./_build/_game/bin_dbg/*.sym" -destination "./package/bin" -erroraction silentlycontinue
         new-item -path "./package_pdb/bin" -itemtype directory -force
         copy-item -path "./_build/_game/bin_dbg/*.pdb" -destination "./package_pdb/bin"
         copy-item -path "./compressor/${{ env.PACK_GAMEDATA_NAME }}" -destination "./package/db/mods"

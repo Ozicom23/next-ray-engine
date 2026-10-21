@@ -7,6 +7,7 @@
 //-----------------------------------------------------------------------------
 #include "stdafx.h"
 #include "igame_level.h"
+#include "../xrCore/crash_report.h"
 #include "igame_persistent.h"
 
 #include "dedicated_server_only.h"
@@ -1313,6 +1314,19 @@ int APIENTRY WinMain(HINSTANCE hInstance,
 {
   // Initialize LuaJIT low-memory pool FIRST, before any DLLs load and fragment
 	// the lower 2GB address space.
+	// Build step: the function names for crash reports from the PDB, then out (crash_report.h)
+	if (LPCSTR dump = strstr(lpCmdLine, "-dump_symbols "))
+	{
+		string_path out;
+		xr_strcpy(out, dump + 14);
+		LPSTR path = out;
+		if (*path == '"')
+			++path;
+		if (LPSTR quote = strchr(path, '"'))
+			*quote = 0;
+		return crash_report::dump_symbols(path) ? 0 : 1;
+	}
+
 	XR_EARLY_INIT();
   
 	// Enable per-monitor DPI awareness so GetMonitorInfo returns real pixel sizes.

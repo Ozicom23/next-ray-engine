@@ -198,6 +198,12 @@
     <ClInclude Include="xr_input_xinput.h">
       <Filter>Interfaces\Input</Filter>
     </ClInclude>
+    <ClInclude Include="xr_input_hid.h">
+      <Filter>Interfaces\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="mod_cost.h">
+      <Filter>Interfaces\Input</Filter>
+    </ClInclude>
     <ClInclude Include="ISheduled.h">
       <Filter>Interfaces\Sheduler</Filter>
     </ClInclude>
@@ -514,6 +520,12 @@
       <Filter>Interfaces\Input</Filter>
     </ClCompile>
     <ClCompile Include="xr_input_xinput.cpp">
+      <Filter>Interfaces\Input</Filter>
+    </ClCompile>
+    <ClCompile Include="xr_input_hid.cpp">
+      <Filter>Interfaces\Input</Filter>
+    </ClCompile>
+    <ClCompile Include="mod_cost.cpp">
       <Filter>Interfaces\Input</Filter>
     </ClCompile>
     <ClCompile Include="ISheduled.cpp">

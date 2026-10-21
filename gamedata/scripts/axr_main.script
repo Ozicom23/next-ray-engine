@@ -440,6 +440,171 @@ function sampler_report(sampler, title)
 	top(sampler.lines, "by line")
 end
 
+-----------------------------------------------------------
+-- Mod cost overlay (perf_overlay_mods 1): while it is on, the time of every function the callbacks and the time events
+-- call, by the Mod Organizer 2 mod its script comes from (mod_of_script), sent to the overlay once a second: average
+-- per frame, the slowest frame, calls per frame. A nested callback's time counts for its own functions only; time
+-- events made while it is on are timed for the function they run (not the time event script's update)
+-----------------------------------------------------------
+local mc = nil
+local mc_mods = {} -- script -> the name shown
+local mc_wrapped = {} -- module -> its CreateTimeEvent before
+
+local function mc_script(f)
+	local s = mc.scripts[f]
+	if not s then
+		local info = debug and debug.getinfo and debug.getinfo(f, "S")
+		local src = info and tostring(info.short_src) or "?"
+		s = string.match(src, "([^\\/]+)%.script") or src
+		mc.scripts[f] = s
+	end
+	return s
+end
+
+-- The engine's microsecond clock, a plain C function (cheap: it runs twice per callback function)
+local mc_clock = profile_clock_us or function() return time_global_async() * 1000 end
+
+-- The clock goes to the script running (nil: the dispatch); returns the one before
+local function mc_switch(owner)
+	local t = mc_clock()
+	local prev = mc.owner
+	if prev then
+		mc.frame[prev] = (mc.frame[prev] or 0) + (t - mc.last)
+	end
+	mc.last = t
+	mc.owner = owner
+	return prev
+end
+
+local function mc_enter(f)
+	local s = mc_script(f)
+	mc.calls[s] = (mc.calls[s] or 0) + 1
+	return mc_switch(s)
+end
+
+local function mc_leave(prev, ...)
+	if mc then
+		mc_switch(prev)
+	end
+	return ...
+end
+
+local function mc_wrap_time_events(module)
+	if not (module and module.CreateTimeEvent) or mc_wrapped[module] then
+		return
+	end
+	local create = module.CreateTimeEvent
+	mc_wrapped[module] = create
+	module.CreateTimeEvent = function(ev_id, act_id, timer, f, ...)
+		if not (mc and type(f) == "function") then
+			return create(ev_id, act_id, timer, f, ...)
+		end
+		local function timed(...)
+			if not mc then
+				return f(...)
+			end
+			return mc_leave(mc_enter(f), f(...))
+		end
+		mc.scripts[timed] = mc_script(f)
+		return create(ev_id, act_id, timer, timed, ...)
+	end
+end
+
+local function mc_name(script)
+	local name = mc_mods[script]
+	if not name then
+		name = mod_of_script and mod_of_script(script) or ""
+		if name == "" then
+			name = script .. ".script"
+		end
+		mc_mods[script] = name
+	end
+	return name
+end
+
+local function mc_publish()
+	local frames = math.max(1, mc.frames)
+	local list, total = {}, 0
+	for name, us in pairs(mc.sum) do
+		list[#list + 1] = { name = name, us = us }
+		total = total + us
+	end
+	table.sort(list, function(a, b) return a.us > b.us end)
+	local lines = {}
+	for i = 1, math.min(#list, 12) do
+		local e = list[i]
+		lines[i] = string.format("%s\t%.3f\t%.3f\t%.1f", e.name, e.us / 1000 / frames, (mc.peak[e.name] or 0) / 1000,
+			(mc.mod_calls[e.name] or 0) / frames)
+	end
+	perf_mod_cost(table.concat(lines, "\n"), total / 1000 / frames, frames)
+	mc.sum, mc.peak, mc.mod_calls, mc.frames = {}, {}, {}, 0
+end
+
+-- Once a frame (actor_on_update): on or off as the overlay is, the frame's times added up by mod
+local function mc_frame()
+	local on = get_console():get_integer("perf_overlay_mods") ~= 0
+	if on and not mc then
+		mc = { last = mc_clock(), owner = nil, scripts = {}, calls = {}, frame = {}, sum = {}, peak = {},
+			mod_calls = {}, frames = 0, publish_at = time_global_async() + 1000 }
+		mc_wrap_time_events(_G)
+		mc_wrap_time_events(demonized_time_events)
+	elseif not on and mc then
+		perf_mod_cost("", 0, 0)
+		mc = nil
+	end
+	if not mc then
+		return
+	end
+	mc_switch(nil)
+	local by_mod = {}
+	for script, us in pairs(mc.frame) do
+		if us > 0 then
+			local name = mc_name(script)
+			by_mod[name] = (by_mod[name] or 0) + us
+			mc.frame[script] = 0
+		end
+	end
+	for script, n in pairs(mc.calls) do
+		local name = mc_name(script)
+		mc.mod_calls[name] = (mc.mod_calls[name] or 0) + n
+	end
+	mc.calls = {}
+	for name, us in pairs(by_mod) do
+		mc.sum[name] = (mc.sum[name] or 0) + us
+		if us > (mc.peak[name] or 0) then
+			mc.peak[name] = us
+		end
+	end
+	mc.frames = mc.frames + 1
+	local now = time_global_async()
+	if now >= mc.publish_at then
+		mc.publish_at = now + 1000
+		mc_publish()
+	end
+end
+
+local function make_callback_measured(name, ...)
+	local list = ordered_callbacks(name)
+	for i = 1, #list do
+		local func_or_userdata = list[i]
+		local f = func_or_userdata
+		if (type(func_or_userdata) ~= "function") then
+			f = func_or_userdata[name]
+		end
+		if f then
+			local prev = mc_enter(f)
+			if (f == func_or_userdata) then
+				f(...)
+			else
+				f(func_or_userdata, ...)
+			end
+			if mc then
+				mc_switch(prev)
+			end
+		end
+	end
+end
+
 function make_callback(name,...)
 	if (sample_first_update and name == "actor_on_first_update") then
 		sample_first_update = nil
@@ -448,8 +613,14 @@ function make_callback(name,...)
 		sampler_report(sampler, "actor_on_first_update profile")
 		return
 	end
+	if (name == "actor_on_update") then
+		mc_frame()
+	end
 	if (prof and intercepts[name]) then
 		return make_callback_profiled(name, ...)
+	end
+	if (mc and intercepts[name]) then
+		return make_callback_measured(name, ...)
 	end
 	if (intercepts[name]) then
 		-- The list, not the table: a function set or unset meanwhile doesn't change this call's list (as spairs)

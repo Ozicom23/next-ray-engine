@@ -25,6 +25,20 @@ public:
 	virtual void Copy(dxRender_Visual* pFrom);
 	virtual void Release();
 
+#ifdef USE_DX11
+	// Tree instancing (r4_tree_instancing, r__dsgraph_render.cpp): trees with the same instance_key draw the same
+	// geometry and share one draw, each with its own constants (instance_rows float4: m_xform, m_xform_v, c_scale,
+	// c_bias, c_sun as the shader reads them)
+	static const u32 instance_rows = 9;
+	virtual u64 instance_key(float LOD) { return 0; } // 0: not instanced
+	void write_instance(Fvector4* rows) const;
+	virtual void render_instances(float LOD, u32 count) {} // the shared constants (this tree's), then count instances
+protected:
+	u64 m_inst_key = 0; // instance_key's geometry part, made on first use
+	u32 m_inst_lods = 0; // FTreeVisual_PM: its LODs
+public:
+#endif
+
 	FTreeVisual(void);
 	virtual ~FTreeVisual(void);
 };
@@ -37,6 +51,10 @@ public:
 	virtual ~FTreeVisual_ST(void);
 
 	virtual void Render(float LOD); // LOD - Level Of Detail  [0.0f - min, 1.0f - max], Ignored
+#ifdef USE_DX11
+	virtual u64 instance_key(float LOD);
+	virtual void render_instances(float LOD, u32 count);
+#endif
 	virtual void Load(LPCSTR N, IReader* data, u32 dwFlags);
 	virtual void Copy(dxRender_Visual* pFrom);
 	virtual void Release();
@@ -56,6 +74,10 @@ public:
 	virtual ~FTreeVisual_PM(void);
 
 	virtual void Render(float LOD); // LOD - Level Of Detail  [0.0f - min, 1.0f - max], Ignored
+#ifdef USE_DX11
+	virtual u64 instance_key(float LOD);
+	virtual void render_instances(float LOD, u32 count);
+#endif
 	virtual void Load(LPCSTR N, IReader* data, u32 dwFlags);
 	virtual void Copy(dxRender_Visual* pFrom);
 	virtual void Release();

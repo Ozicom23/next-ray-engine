@@ -10,6 +10,7 @@
 #include "script_storage.h"
 #include "script_thread.h"
 #include "../xrCore/mezz_stringbuffer.h"
+#include "../xrEngine/mod_cost.h"
 #include <stdarg.h>
 #include <unordered_map>
 #include <set>
@@ -491,8 +492,19 @@ BOOL lua_debug = FALSE;
 BOOL lua_use_functor_cache = FALSE;
 #endif
 
+// The mod cost overlay's clock (axr_main): microseconds, as a plain C function (a luabind call costs several times
+// more, and the overlay reads it twice per callback function)
+static int profile_clock_us(lua_State* L)
+{
+	lua_pushnumber(L, double(CPU::QPC()) * 1e6 / double(CPU::qpc_freq));
+	return 1;
+}
+
 void CScriptStorage::reinit()
 {
+#ifdef XRGAME_EXPORTS
+	mod_cost::load_reset();
+#endif
 	if (m_virtual_machine)
 		lua_close(m_virtual_machine);
 	
@@ -548,6 +560,7 @@ void CScriptStorage::reinit()
 #endif //!USE_LUAJIT_ONE
 	bool isDebugEnabled = lua_debug;
 	luaopen_lua_extensions(lua(), isDebugEnabled);
+	lua_register(lua(), "profile_clock_us", profile_clock_us);
 	lua_register(lua(), "trim_native", native_strings::trim_native);
 	lua_register(lua(), "str_explode_native", native_strings::str_explode_native);
 	lua_register(lua(), "str_explode_lim_native", native_strings::str_explode_lim_native);
@@ -1398,6 +1411,9 @@ bool CScriptStorage::do_file(LPCSTR caScriptName, LPCSTR caNameSpaceName)
 		t_run += run;
 		files++;
 		per_file.push_back({ xr_string(caNameSpaceName ? caNameSpaceName : caScriptName), t_end - t_begin - inner, t_unlocalized - t_opened, run });
+#ifdef XRGAME_EXPORTS
+		mod_cost::load_add(caNameSpaceName ? caNameSpaceName : caScriptName, float(ms(t_end - t_begin - inner)));
+#endif
 	}
 	//	luaJIT_setmode	(lua(),0,LUAJIT_MODE_ENGINE|LUAJIT_MODE_ON);						// Oles
 

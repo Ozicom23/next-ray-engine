@@ -11,11 +11,25 @@
 #include "ai_space.h"
 #include "script_debugger.h"
 #include "new_sds.h"
+#include "../xrCore/mod_origin.h"
+#include "../xrEngine/mod_cost.h"
 
 using namespace luabind;
 
 void AddScope(LPCSTR key, float val) {
     listScopeRadii[key] = val;
+}
+
+// The mod cost overlay (axr_main): the Mod Organizer 2 mod a script comes from ("" none), the rows of the last second
+LPCSTR mod_of_script(LPCSTR script)
+{
+	LPCSTR mod = mod_origin::of_script(script);
+	return mod ? mod : "";
+}
+
+void perf_mod_cost(LPCSTR rows, float total_ms, int frames)
+{
+	mod_cost::set_frame_rows(rows, total_ms, u32(frames));
 }
 
 void LuaLog1(LPCSTR caMessage)
@@ -232,6 +246,8 @@ void CScriptEngine::script_register(lua_State* L)
 	[
 		//def("log1", (void(*) (LPCSTR msg)) &Log), // AVO: fixed log func
 		def("log", &LuaLog1),
+		def("mod_of_script", &mod_of_script),
+		def("perf_mod_cost", &perf_mod_cost),
 		def("print_stack", &PrintStack),
 		def("error_log", &ErrorLog),
 		def("flush", &FlushLogs),

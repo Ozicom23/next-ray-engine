@@ -651,6 +651,22 @@ public:
 #ifdef USE_DX11
 #include "../xrRenderPC_R4/r4_gpu_memory.h"
 #include "../xrRenderPC_R4/r4_perf_overlay.h"
+#include "../../xrEngine/mod_cost.h"
+
+extern int ps_r4_shader_precompile;
+// r4_tree_instancing: the trees of the same geometry in one draw (main view and shadow maps, r__dsgraph_render.cpp).
+// Mac DX12, Cordon: 5131 draws -> 3548, the static geometry's CPU time 1.88 -> 1.82 ms, the same image; Deck (GPU-bound):
+// the same GPU time
+int ps_r4_tree_instancing = 1;
+// stat_shader_stalls: the main thread's time waiting for shaders since the last call (to the log)
+class CCC_ShaderStalls : public IConsole_Command
+{
+public:
+	CCC_ShaderStalls(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; }
+	virtual void Execute(LPCSTR) { shader_progress::stall_report(); }
+	virtual void Info(TInfo& I) { xr_strcpy(I, "shader compiles and D3D12 pipeline creations the main thread waited for, to the log"); }
+	virtual void Save(IWriter*) {}
+};
 
 namespace hiz { void start_stats(float seconds); }
 extern int ps_r4_hiz_cull;
@@ -1635,6 +1651,10 @@ void xrRender_initconsole()
 	CMD3(CCC_Token,   "perf_overlay",             &ps_perf_overlay,                  perf_overlay_token);
 	CMD3(CCC_Token,   "perf_overlay_pos",         &ps_perf_overlay_pos,              perf_overlay_pos_token);
 	CMD1(CCC_PerfOverlayToggle, "perf_overlay_toggle");
+	CMD4(CCC_Integer, "perf_overlay_mods", &mod_cost::enabled, 0, 1);
+	CMD4(CCC_Integer, "r4_shader_precompile", &ps_r4_shader_precompile, 0, 1);
+	CMD4(CCC_Integer, "r4_tree_instancing", &ps_r4_tree_instancing, 0, 1);
+	CMD1(CCC_ShaderStalls, "stat_shader_stalls");
 	CMD1(CCC_UpscalerAvailable, "r4_upscaler_available");
 	CMD1(CCC_GpuMemoryStats,    "stat_gpu_memory");
 	CMD1(CCC_GpuPassStats,      "stat_gpu_passes");

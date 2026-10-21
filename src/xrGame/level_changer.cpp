@@ -8,6 +8,7 @@
 
 #include "stdafx.h"
 #include "level_changer.h"
+#include "../xrCore/level_preload.h"
 #include "../xrEngine/x_ray.h"
 #include "hit.h"
 #include "actor.h"
@@ -114,6 +115,18 @@ void CLevelChanger::shedule_Update(u32 dt)
 	feel_touch_update(P, s.R);
 
 	update_actor_invitation();
+
+	// Its level read ahead while the actor is within 80 m (level_preload.h)
+	CActor* actor = Actor();
+	if (level_preload::enabled && m_b_enabled && actor && actor->g_Alive() && actor->Position().distance_to_sqr(P) < 80.f * 80.f)
+		level_preload::start(target_level());
+}
+
+LPCSTR CLevelChanger::target_level() const
+{
+	if (!ai().get_game_graph() || !ai().game_graph().valid_vertex_id(m_game_vertex_id))
+		return nullptr;
+	return *ai().game_graph().header().level(ai().game_graph().vertex(m_game_vertex_id)->level_id()).name();
 }
 
 #include "patrol_path.h"

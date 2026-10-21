@@ -198,6 +198,15 @@
     <ClCompile Include="xrDebugNew.cpp">
       <Filter>Debug core</Filter>
     </ClCompile>
+    <ClCompile Include="mod_origin.cpp">
+      <Filter>Debug core</Filter>
+    </ClCompile>
+    <ClCompile Include="crash_report.cpp">
+      <Filter>Debug core</Filter>
+    </ClCompile>
+    <ClCompile Include="level_preload.cpp">
+      <Filter>Debug core</Filter>
+    </ClCompile>
     <ClCompile Include="blackbox\BlackBoxUI.cpp">
       <Filter>Debug core\BlackBox</Filter>
     </ClCompile>
@@ -481,6 +490,15 @@
       <Filter>Memory manager</Filter>
     </ClInclude>
     <ClInclude Include="xrDebug.h">
+      <Filter>Debug core</Filter>
+    </ClInclude>
+    <ClInclude Include="mod_origin.h">
+      <Filter>Debug core</Filter>
+    </ClInclude>
+    <ClInclude Include="crash_report.h">
+      <Filter>Debug core</Filter>
+    </ClInclude>
+    <ClInclude Include="level_preload.h">
       <Filter>Debug core</Filter>
     </ClInclude>
     <ClInclude Include="xrDebug_macros.h">

@@ -113,6 +113,15 @@
 	<string id="ui_mm_video_advanced_perf_overlay_pos_desc">
 		<text>Screen corner of the performance overlay. (perf_overlay_pos)</text>
 	</string>
+	<string id="ui_mm_video_advanced_perf_overlay_mods">
+		<text>Mod Cost Overlay</text>
+	</string>
+	<string id="ui_mm_video_advanced_perf_overlay_mods_desc">
+		<text>Which mods' scripts cost the most time per frame: Lua time of each Mod Organizer 2 mod in the callbacks and time events, its slowest frame and calls per frame, and the mods whose scripts took the longest at the last load. Measuring costs a little itself while it is on. (perf_overlay_mods)</text>
+	</string>
+	<string id="ui_mm_lst_perf_overlay_mods_on">
+		<text>On</text>
+	</string>
 	<string id="ui_mm_video_advanced_deck_preset">
 		<text>Steam Deck Preset</text>
 	</string>
@@ -821,6 +830,30 @@
 	</string>
 	<string id="ui_mm_modded_exes_control_gamepad_gp_vibration">
 		<text>Vibration (gp_vibration)</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_gyro">
+		<text>Gyro Aiming, DualSense and DualShock 4 (gp_gyro)</text>
+	</string>
+	<string id="st_gp_gyro_off">
+		<text>Off</text>
+	</string>
+	<string id="st_gp_gyro_aim">
+		<text>While Aiming</text>
+	</string>
+	<string id="st_gp_gyro_always">
+		<text>Always</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_gyro_sens">
+		<text>Gyro Sensitivity (gp_gyro_sens)</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_gyro_invert_y">
+		<text>Gyro Invert Y (gp_gyro_invert_y)</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_adaptive_triggers">
+		<text>DualSense Trigger Resistance (gp_adaptive_triggers)</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_sony">
+		<text>Read PlayStation Controllers Directly (gp_sony)</text>
 	</string>
 	<string id="ui_mm_modded_exes_control_gamepad_gp_default_layout">
 		<text>Default Layout (like S.T.A.L.K.E.R. 2)</text>

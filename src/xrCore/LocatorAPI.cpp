@@ -4,6 +4,7 @@
 
 #include "stdafx.h"
 #pragma hdrstop
+#include "level_preload.h"
 
 #pragma warning(disable:4995)
 #include <direct.h>
@@ -1821,6 +1822,13 @@ T* CLocatorAPI::r_open_impl(LPCSTR path, LPCSTR _fname)
 		if (m_Flags.test(flPrintLTX))
 			Log("Warning : Unable to find", _fname);
 		return (0);
+	}
+
+	// The next level's files read ahead near its level changer (level_preload.h)
+	if constexpr (std::is_same<T, IReader>::value)
+	{
+		if (IReader* ahead = level_preload::take(fname))
+			return ahead;
 	}
 
 	// OK, analyse

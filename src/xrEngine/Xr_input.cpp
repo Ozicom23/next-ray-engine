@@ -6,6 +6,7 @@
 //#include "../include/editor/ide.hpp"
 
 #include "xr_input_xinput.h"
+#include "xr_input_hid.h"
 CInput* pInput = NULL;
 IInputReceiver dummyController;
 
@@ -19,6 +20,8 @@ ENGINE_API int psMouseFilter = 0;
 ENGINE_API Flags32 psMouseInvert = {FALSE};
 // gp_vibration: the gamepad's motors 0..1 of what the game asks
 ENGINE_API float psGamepadVibration = 1.f;
+// gp_sony: Sony controllers (DualSense, DualShock 4) read as HID, with the gyro, before XInput
+ENGINE_API int psGamepadSony = 1;
 
 // demonized: configurable buffer sizes for mouse and kb
 int MOUSEBUFFERSIZE = 1024;
@@ -106,6 +109,7 @@ CInput::CInput(BOOL bExclusive, int deviceForInit)
 
 CInput::~CInput(void)
 {
+	sonypad::shutdown();
 #ifdef ENGINE_BUILD
 	Device.seqFrame.Remove(this);
 	Device.seqAppDeactivate.Remove(this);
@@ -454,9 +458,21 @@ void CInput::PadUpdate()
 {
 	gamepad_state now;
 	if (m_pad_sim_on)
+	{
+		// The simulated gyro is a turn rate (radians/s)
 		now = m_pad_sim;
+		now.gyro_yaw *= Device.fTimeDelta;
+		now.gyro_pitch *= Device.fTimeDelta;
+	}
+	else if (psGamepadSony && sonypad::read(now))
+	{
+		if (!m_pad_sony)
+			m_pad_slot = -1;
+		m_pad_sony = true;
+	}
 	else
 	{
+		m_pad_sony = false;
 		// A missing controller is looked for once a second: XInputGetState on an empty user index is slow
 		if (m_pad_slot >= 0 && !xinput::read(m_pad_slot, now))
 			m_pad_slot = -1;
@@ -491,7 +507,10 @@ void CInput::PadUpdate()
 	if (m_pad_vibrating && dwCurTime >= m_pad_vibration_until)
 	{
 		m_pad_vibrating = false;
-		xinput::vibrate(m_pad_slot, 0.f, 0.f);
+		if (m_pad_sony)
+			sonypad::vibrate(0.f, 0.f);
+		else
+			xinput::vibrate(m_pad_slot, 0.f, 0.f);
 	}
 }
 
@@ -899,7 +918,17 @@ void CInput::feedback(u16 s1, u16 s2, float time)
 {
 	if (!m_pad.connected || m_pad_sim_on || psGamepadVibration <= 0.f)
 		return;
-	xinput::vibrate(m_pad_slot, psGamepadVibration * float(s1) / 65535.f, psGamepadVibration * float(s2) / 65535.f);
+	const float low = psGamepadVibration * float(s1) / 65535.f, high = psGamepadVibration * float(s2) / 65535.f;
+	if (m_pad_sony)
+		sonypad::vibrate(low, high);
+	else
+		xinput::vibrate(m_pad_slot, low, high);
 	m_pad_vibrating = true;
 	m_pad_vibration_until = dwCurTime + u32(iFloor(time * 1000.f));
+}
+
+void CInput::pad_trigger_effect(int effect)
+{
+	if (m_pad_sony)
+		sonypad::trigger_effect(effect);
 }

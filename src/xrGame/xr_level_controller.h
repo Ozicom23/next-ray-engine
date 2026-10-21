@@ -204,6 +204,8 @@ extern ConsoleBindCmds bindConsoleCmds;
 EGameActions gamepad_binding(int gp_key);
 // Key names in texts ($$ACTION_...$$) are the gamepad's while it is the device in use (gamepad.cpp)
 extern bool g_gamepad_prompts;
+// ... named as a PlayStation controller's (Cross, L1...), not an Xbox one's
+extern bool g_gamepad_playstation;
 // A key of the action is down: its keyboard or mouse keys (primary, secondary) or a gamepad key bound to it
 bool is_action_key_held(EGameActions action);
 void gamepad_resolve(int gp_key, EGameActions action);

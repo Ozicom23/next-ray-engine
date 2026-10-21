@@ -50,6 +50,10 @@ private:
 	u32 m_uiBufferSize; //	Cache buffer size for debug validation
 	void* m_pBufferData;
 	bool m_bChanged;
+	// Tree instancing's xr_tree_instances is only written with AccessDirect, a few trees of its 32 at a time: Flush
+	// uploads the part the last AccessDirect wrote (the shader reads no further)
+	bool m_bDirectOnly = false;
+	u32 m_uiDirectEnd = 0;
 
 	static const u32 lineSize = sizeof(Fvector4);
 

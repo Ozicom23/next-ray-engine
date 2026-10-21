@@ -56,6 +56,10 @@ struct gamepad_state
 	u32 buttons = 0;
 	float lx = 0.f, ly = 0.f, rx = 0.f, ry = 0.f;
 	float lt = 0.f, rt = 0.f;
+	// The gyro (Sony controllers): how far the controller turned since the last read, radians, yaw right and pitch up
+	float gyro_yaw = 0.f, gyro_pitch = 0.f;
+	bool gyro = false;
+	bool playstation = false; // its buttons are Cross, Circle, Square, Triangle, L1...
 };
 
 class ENGINE_API CInput
@@ -112,6 +116,7 @@ private:
 	gamepad_state m_pad_sim;
 	bool m_pad_sim_on = false;
 	int m_pad_slot = -1; // the XInput user index read, -1 none
+	bool m_pad_sony = false; // the pad read is a Sony controller (HID), not XInput's
 	u32 m_pad_scan_time = 0; // the last look for a connected controller
 	u32 m_pad_vibration_until = 0;
 	bool m_pad_vibrating = false;
@@ -177,6 +182,8 @@ public:
 	bool pad_in_use() const { return m_pad.connected && m_pad_in_use; }
 	void pad_simulate(const gamepad_state* state); // nullptr: back to the real controller
 	void pad_cursor_moved() { m_pad_cursor_time = dwCurTime; }
+	// The DualSense's right trigger: 0 free, 1 a firearm's (resistance, then a break)
+	void pad_trigger_effect(int effect);
 	// The game's handler, called every frame after the gamepad is read (dt in seconds): turns it into key presses
 	// (inject_key with GP_ codes), mouse input and camera turns
 	void (*pad_handler)(float dt) = nullptr;

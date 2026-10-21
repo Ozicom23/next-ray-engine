@@ -1005,6 +1005,8 @@
     <ClInclude Include="xr_efflensflare.h" />
     <ClInclude Include="xr_input.h" />
     <ClInclude Include="xr_input_xinput.h" />
+    <ClInclude Include="xr_input_hid.h" />
+    <ClInclude Include="mod_cost.h" />
     <ClInclude Include="XR_IOConsole.h" />
     <ClInclude Include="xr_ioc_cmd.h" />
     <ClInclude Include="xr_object.h" />
@@ -1124,6 +1126,8 @@
     <ClCompile Include="xr_efflensflare.cpp" />
     <ClCompile Include="Xr_input.cpp" />
     <ClCompile Include="xr_input_xinput.cpp" />
+    <ClCompile Include="xr_input_hid.cpp" />
+    <ClCompile Include="mod_cost.cpp" />
     <ClCompile Include="XR_IOConsole.cpp" />
     <ClCompile Include="XR_IOConsole_callback.cpp" />
     <ClCompile Include="XR_IOConsole_control.cpp" />

@@ -173,6 +173,124 @@ static bool patch_grass_jitter_shader(LPCSTR data, xr_string& patched)
 }
 #endif
 
+#if defined(USE_DX11)
+// Tree instancing (r4_tree_instancing, r__dsgraph_render.cpp): a tree vertex shader asked for as <name>_xrinst is the
+// shader's own source with its per-tree constants (m_xform, m_xform_v, c_scale, c_bias, c_sun) made statics that main
+// sets from xr_tree_inst for its instance (9 rows each, as FTreeVisual::write_instance fills them), in memory when
+// compiled: the file is untouched. False when the source isn't one this knows (its trees are then drawn one by one)
+static bool patch_tree_instancing_shader(LPCSTR data, xr_string& patched)
+{
+	static const char* const per_tree[] = { "m_xform", "m_xform_v", "c_scale", "c_bias", "c_sun" };
+	static const int row_of[] = { 0, 3, 6, 7, 8 };
+	auto ident = [](char c) { return isalnum(u8(c)) || c == '_'; };
+	auto find_word = [&](const xr_string& text, LPCSTR word, size_t from) -> size_t
+	{
+		const size_t len = xr_strlen(word);
+		for (size_t at = text.find(word, from); at != xr_string::npos; at = text.find(word, at + 1))
+			if ((at == 0 || !ident(text[at - 1])) && (at + len >= text.size() || !ident(text[at + len])))
+				return at;
+		return xr_string::npos;
+	};
+	auto trim = [](xr_string v)
+	{
+		const size_t a = v.find_first_not_of(" \t\r\n"), b = v.find_last_not_of(" \t\r\n");
+		return a == xr_string::npos ? xr_string() : v.substr(a, b - a + 1);
+	};
+
+	xr_string src = data, assigns;
+	bool has_xform = false;
+	// Each "uniform <type> a, b;" on one line declaring a per-tree constant: those become statics
+	for (size_t at = 0; (at = find_word(src, "uniform", at)) != xr_string::npos;)
+	{
+		const size_t line_start = src.rfind('\n', at) == xr_string::npos ? 0 : src.rfind('\n', at) + 1;
+		const size_t end = src.find(';', at), line_end = src.find('\n', at);
+		if (src.substr(line_start, at - line_start).find("//") != xr_string::npos || end == xr_string::npos ||
+			(line_end != xr_string::npos && line_end < end))
+		{
+			at += 7;
+			continue;
+		}
+		const xr_string decl = trim(src.substr(at + 7, end - at - 7));
+		const size_t type_end = decl.find_first_of(" \t");
+		if (type_end == xr_string::npos)
+		{
+			at = end;
+			continue;
+		}
+		const xr_string type = decl.substr(0, type_end);
+		xr_string kept, inst;
+		for (size_t p = type_end; p < decl.size();)
+		{
+			size_t comma = decl.find(',', p);
+			if (comma == xr_string::npos)
+				comma = decl.size();
+			const xr_string name = trim(decl.substr(p, comma - p));
+			p = comma + 1;
+			int which = -1;
+			for (int i = 0; i < 5; ++i)
+				if (name == per_tree[i])
+					which = i;
+			if (which < 0)
+			{
+				kept += (kept.empty() ? "" : ", ") + name;
+				continue;
+			}
+			string256 row;
+			xr_sprintf(row, "xr_tree_inst[xr_tree_iid * 9 + %d]", row_of[which]);
+			string512 code;
+			if (type == "float3x4")
+			{
+				xr_sprintf(code, " %s = float3x4(xr_tree_inst[xr_tree_iid * 9 + %d], xr_tree_inst[xr_tree_iid * 9 + %d], "
+					"xr_tree_inst[xr_tree_iid * 9 + %d]);", name.c_str(), row_of[which], row_of[which] + 1, row_of[which] + 2);
+				has_xform = has_xform || which == 0;
+			}
+			else if (type == "float4")
+				xr_sprintf(code, " %s = %s;", name.c_str(), row);
+			else if (type == "float3")
+				xr_sprintf(code, " %s = %s.xyz;", name.c_str(), row);
+			else if (type == "float2")
+				xr_sprintf(code, " %s = %s.xy;", name.c_str(), row);
+			else
+				return false;
+			assigns += code;
+			inst += (inst.empty() ? "" : ", ") + name;
+		}
+		if (inst.empty())
+		{
+			at = end;
+			continue;
+		}
+		const xr_string replacement = (kept.empty() ? xr_string() : "uniform " + type + " " + kept + "; ") + "static " + type + " " + inst;
+		src.replace(at, end - at, replacement);
+		at += replacement.size();
+	}
+	if (!has_xform)
+		return false;
+
+	// main gets the instance's index, and sets the per-tree values first
+	size_t m = 0;
+	for (; (m = find_word(src, "main", m)) != xr_string::npos; m += 4)
+	{
+		const size_t open = src.find_first_not_of(" \t\r\n", m + 4);
+		if (open != xr_string::npos && src[open] == '(')
+		{
+			const size_t close = src.find(')', open);
+			const size_t brace = close == xr_string::npos ? close : src.find('{', close);
+			if (brace == xr_string::npos)
+				return false;
+			src.insert(brace + 1, assigns);
+			const bool empty = trim(src.substr(open + 1, close - open - 1)).empty();
+			src.insert(close, empty ? "uint xr_tree_iid : SV_InstanceID" : ", uint xr_tree_iid : SV_InstanceID");
+			break;
+		}
+	}
+	if (m == xr_string::npos)
+		return false;
+	patched = "cbuffer xr_tree_instances { float4 xr_tree_inst[32 * 9]; }\n#line 1\n" + src;
+	return true;
+}
+#endif
+
 //--------------------------------------------------------------------------------------------------------------
 SVS* CResourceManager::_CreateVS(LPCSTR _name)
 {
@@ -209,6 +327,16 @@ SVS* CResourceManager::_CreateVS(LPCSTR _name)
 			ptrdiff_t size = pchr ? pchr - _name : xr_strlen(_name);
 			strncpy(shName, _name, size);
 			shName[size] = 0;
+		}
+		// A tree shader's instanced variant (patch_tree_instancing_shader): the file without the suffix
+		bool tree_instanced = false;
+		{
+			const size_t len = xr_strlen(shName);
+			if (len > 7 && !xr_strcmp(shName + len - 7, "_xrinst"))
+			{
+				shName[len - 7] = 0;
+				tree_instanced = true;
+			}
 		}
 
 		string_path cname;
@@ -257,7 +385,39 @@ SVS* CResourceManager::_CreateVS(LPCSTR _name)
 #if defined(USE_DX11)
 		xr_string patched;
 		string_path patched_name;
-		if (patch_grass_jitter_shader(data, patched))
+		if (tree_instanced)
+		{
+			// A variant made by including another tree shader (#include "deffer_tree_bump.vs"): that one's text in
+			// place, its constants are to change too
+			xr_string expanded = data;
+			for (int depth = 0; depth < 4; ++depth)
+			{
+				size_t inc = 0, end = xr_string::npos;
+				for (; (inc = expanded.find("#include \"", inc)) != xr_string::npos; inc += 10)
+				{
+					end = expanded.find('"', inc + 10);
+					if (end != xr_string::npos && end >= inc + 14 && !expanded.compare(end - 3, 3, ".vs"))
+						break;
+				}
+				if (inc == xr_string::npos)
+					break;
+				string_path inc_name;
+				strconcat(sizeof(inc_name), inc_name, ::Render->getShaderPath(), expanded.substr(inc + 10, end - inc - 10).c_str());
+				IReader* R = FS.r_open("$game_shaders$", inc_name);
+				if (!R)
+					break;
+				expanded.replace(inc, end + 1 - inc, xr_string((LPCSTR)R->pointer(), R->length()));
+				FS.r_close(R);
+			}
+			if (!patch_tree_instancing_shader(expanded.c_str(), patched))
+			{
+				Msg("* Tree instancing: %s.vs isn't a shape it can change, its trees are drawn one by one", shName);
+				return _vs;
+			}
+			src = patched.c_str();
+			src_size = u32(patched.size());
+		}
+		else if (patch_grass_jitter_shader(data, patched))
 		{
 			Msg("* %s.vs: grass jittered over the whole blade while upscaling (r4_upscaler_grass_jitter)", shName);
 			src = patched.c_str();
@@ -269,6 +429,14 @@ SVS* CResourceManager::_CreateVS(LPCSTR _name)
 		HRESULT const _hr = ::Render->shader_compile(compile_name, (DWORD const*)src, src_size, c_entry, c_target,
 		                                             D3D10_SHADER_PACK_MATRIX_ROW_MAJOR, (void*&)_vs);
 
+#if defined(USE_DX11)
+		// An instanced variant that doesn't compile: its trees are drawn one by one
+		if (tree_instanced && FAILED(_hr))
+		{
+			Msg("! Tree instancing: %s.vs's instanced variant not compiled, its trees are drawn one by one", shName);
+			return _vs;
+		}
+#endif
 		VERIFY(SUCCEEDED(_hr));
 
 		CHECK_OR_EXIT(
@@ -289,6 +457,9 @@ void CResourceManager::_DeleteVS(const SVS* vs)
 	if (I != m_vs.end())
 	{
 		m_vs.erase(I);
+		// A shader that wasn't compiled (a tree instancing variant its source couldn't give) has no layouts
+		if (!vs->signature)
+			return;
 		xr_vector<SDeclaration*>::iterator iDecl;
 		for (iDecl = v_declarations.begin(); iDecl != v_declarations.end(); ++iDecl)
 		{

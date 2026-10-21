@@ -7,8 +7,8 @@
 #   --package        also stage the CI artifact layout (bin, db/mods, mods) on the VM
 #   --no-build       no snapshot and no build: fetch/install what the VM built last (build while the game runs,
 #                    then close it and install in seconds; another build relinks both exes, ~5 min)
-#   --fetch          copy the result back to _build/vm/ (package/ with --package, else the exes, nvngx_dlss.dll
-#                    and the XeSS DLLs)
+#   --fetch          copy the result back to _build/vm/ (package/ with --package, else the exes, their .sym files
+#                    (crash reports), nvngx_dlss.dll and the XeSS DLLs)
 #   --install-to DEST  --fetch, then install into the game folder DEST (the one with anomaly/ and gamma/), a local
 #                    path or user@host:/path over SSH: the exes and DLLs (DLSS, XeSS) to anomaly/bin (the replaced ones
 #                    kept in backup-nextray-exes-prev/), gamedata/ to anomaly/gamedata, the MO2 mod to gamma/mods.
@@ -95,6 +95,8 @@ if [ $FETCH = 1 ]; then
         scp -q -o LogLevel=ERROR -r "$VM:$DIR/package" _build/vm/
         bin=_build/vm/package/bin
     else
+        # The crash reports' symbol files, when the build wrote them
+        scp -q -o LogLevel=ERROR "$VM:$DIR/_build/_game/bin_dbg/*.sym" _build/vm/ 2>/dev/null || true
         scp -q -o LogLevel=ERROR "$VM:$DIR/_build/_game/bin_dbg/*.exe" \
             "$VM:$DIR/src/3rd party/NVIDIA-DLSS/lib/Windows_x86_64/rel/nvngx_dlss.dll" \
             "$VM:$DIR/src/3rd party/Intel-XeSS/bin/*.dll" _build/vm/
@@ -106,11 +108,11 @@ fi
 for t in ${TARGETS[@]+"${TARGETS[@]}"}; do
     if game_running "$t"; then echo "the game is running on $t: close it first, nothing installed" >&2; exit 1; fi
     echo "--- installing to $t"
-    names=$(cd "$bin" && ls *.exe *.dll | tr '\n' ' ')
+    names=$(cd "$bin" && { ls *.exe *.dll; ls *.sym 2>/dev/null || true; } | tr '\n' ' ')
     on_target "$t" "rm -rf backup-nextray-exes-prev && mkdir backup-nextray-exes-prev &&
         for f in $names; do if [ -f anomaly/bin/\$f ]; then cp -p anomaly/bin/\$f backup-nextray-exes-prev/; fi; done"
     # -c: by content, timestamps differ between checkouts; -t so later runs list only real changes
-    rsync -ct "$bin"/*.exe "$bin"/*.dll "$(at "$t" anomaly/bin/)"
+    rsync -ct "$bin"/*.exe "$bin"/*.dll $(ls "$bin"/*.sym 2>/dev/null || true) "$(at "$t" anomaly/bin/)"
     on_target "$t" "cd anomaly/bin && chmod 644 $names"
     echo "bin: $names"
     rsync -rct --itemize-changes gamedata/ "$(at "$t" anomaly/gamedata/)" | sed 's/^/gamedata: /'

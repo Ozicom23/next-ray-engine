@@ -73,6 +73,19 @@ if (-not $msbuild) { throw "MSBuild not found (Visual Studio 2022 Build Tools)" 
 $target = if ($Rebuild) { "Rebuild" } else { "Build" }
 & $msbuild /m /nologo /v:m /t:$target /p:Configuration=$Conf src\engine-vs2022.sln; Check "msbuild"
 
+Step "Crash report symbols"
+# Each exe writes its function names from its PDB next to itself (<exe>.sym, read by the crash reports)
+# (the DLLs it links with are found in sdk\binaries and the XeSS SDK)
+$env:PATH = "$root\sdk\binaries;$root\$xess\bin;$env:PATH"
+Get-ChildItem "_build\_game\bin_dbg\*.exe" | ForEach-Object {
+    $sym = [IO.Path]::ChangeExtension($_.FullName, ".sym")
+    if (!(Test-Path $sym) -or (Get-Item $sym).LastWriteTime -lt $_.LastWriteTime) {
+        $p = Start-Process -FilePath $_.FullName -ArgumentList "-dump_symbols `"$sym`"" -Wait -PassThru -NoNewWindow
+        if ($p.ExitCode -ne 0) { Write-Host "no symbols for $($_.Name) ($($p.ExitCode))" -ForegroundColor Yellow }
+        else { Write-Host "$($_.Name): $([math]::Round((Get-Item $sym).Length / 1MB, 1)) MB" }
+    } else { Write-Host "$($_.Name): up to date" }
+}
+
 if ($Package) {
     Step "Pack gamedata"
     $db = "00_modded_exes_gamedata.db0"
@@ -89,6 +102,7 @@ if ($Package) {
     Remove-Item -Recurse -Force package, package_pdb -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force -Path "package\bin\dlss_dev", "package\db\mods", "package\mods", "package_pdb\bin" | Out-Null
     Copy-Item "_build\_game\bin_dbg\*.exe" "package\bin"
+    Copy-Item "_build\_game\bin_dbg\*.sym" "package\bin" -ErrorAction SilentlyContinue
     Copy-Item "_build\_game\bin_dbg\*.pdb" "package_pdb\bin"
     Move-Item "compressor\$db" "package\db\mods"
     Copy-Item "mods\neXt-Ray performance patches" "package\mods" -Recurse

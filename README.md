@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/splash.png" width="500" alt="neXt-Ray x64 / DX12"></p>
+
 # neXt-Ray Engine
 
 A performance fork of the STALKER Anomaly engine for [G.A.M.M.A.](https://github.com/Grokitach/Stalker_GAMMA): upscaling,

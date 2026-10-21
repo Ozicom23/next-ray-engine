@@ -9,6 +9,7 @@
 #include "Actor_Flags.h"
 #include "Inventory.h"
 #include "inventory_item.h"
+#include "WeaponMagazined.h"
 #include "UIGameCustom.h"
 #include "UI/UIDialogWnd.h"
 #include "UI/UIGameTutorial.h"
@@ -27,6 +28,7 @@ extern ENGINE_API float psMouseSensScale;
 extern ENGINE_API float psMouseSensVerticalK;
 extern ENGINE_API Flags32 psMouseInvert;
 extern ENGINE_API float psGamepadVibration;
+extern ENGINE_API int psGamepadSony;
 
 // Settings (Options > Modded Exes > Controls > Gamepad)
 int g_gp_enabled = 1;
@@ -41,6 +43,10 @@ float g_gp_deadzone_right = 0.12f;
 float g_gp_walk_threshold = 0.6f; // the left stick pushed less than this walks
 float g_gp_cursor_speed = 1.f; // x 700 UI units (the screen is 1024 x 768 of them) per second
 float g_gp_hold_time = 0.3f; // a button held this long is its _hold key, if bound
+int g_gp_gyro = 1; // gyro aiming (DualSense, DualShock 4): 0 off, 1 while aiming, 2 always
+float g_gp_gyro_sens = 1.5f; // the camera's turn per the controller's
+int g_gp_gyro_invert_y = 0;
+int g_gp_adaptive_triggers = 1; // the DualSense's right trigger resists like a firearm's while one is in hands
 
 namespace
 {
@@ -341,25 +347,34 @@ void update_game(const gamepad_state& pad, float dt)
 	const Fvector2 rs = s_rebound_right.filter(dead_zone(pad.rx, pad.ry, g_gp_deadzone_right), dt);
 	const float m = rs.magnitude();
 	const float per_count = psMouseSens * psMouseSensScale / 50.f;
-	if (m < EPS || per_count < EPS || psMouseSensVerticalK < EPS)
+	const bool zoomed = Actor() && Actor()->IsZoomAimingMode();
+	// The gyro: the camera turns as the controller does (x gp_gyro_sens), always or while aiming; zoomed in by
+	// the field of view's ratio like the mouse, so the sight stays on what it points at
+	const bool gyro = pad.gyro && (g_gp_gyro == 2 || (g_gp_gyro == 1 && (aiming || zoomed)));
+	float yaw = gyro ? pad.gyro_yaw * g_gp_gyro_sens : 0.f; // radians this frame
+	float pitch = gyro ? pad.gyro_pitch * g_gp_gyro_sens * (g_gp_gyro_invert_y ? -1.f : 1.f) : 0.f;
+	if (per_count < EPS || psMouseSensVerticalK < EPS || (m < EPS && !gyro))
 	{
 		s_boost_time = 0.f;
 		s_look_rest.set(0.f, 0.f);
 		return;
 	}
-	s_boost_time = (m > 0.95f) ? s_boost_time + dt : 0.f;
-	const float boost = 1.f + (g_gp_look_boost - 1.f) * clampr((s_boost_time - 0.2f) / 0.3f, 0.f, 1.f);
-	float k = powf(m, g_gp_look_curve) / m * boost;
-	if (Actor() && Actor()->IsZoomAimingMode())
-		k *= g_gp_aim_sens;
-	const float yaw = rs.x * k * 3.f * g_gp_look_sens_x; // rad/s
-	const float pitch = rs.y * k * 2.f * g_gp_look_sens_y;
-	s_look_rest.x += yaw * dt / per_count;
+	if (m >= EPS)
+	{
+		s_boost_time = (m > 0.95f) ? s_boost_time + dt : 0.f;
+		const float boost = 1.f + (g_gp_look_boost - 1.f) * clampr((s_boost_time - 0.2f) / 0.3f, 0.f, 1.f);
+		float k = powf(m, g_gp_look_curve) / m * boost;
+		if (zoomed)
+			k *= g_gp_aim_sens;
+		yaw += rs.x * k * 3.f * g_gp_look_sens_x * dt; // 3 rad/s
+		pitch += rs.y * k * 2.f * g_gp_look_sens_y * (g_gp_invert_y ? -1.f : 1.f) * dt;
+	}
+	else
+		s_boost_time = 0.f;
+	s_look_rest.x += yaw / per_count;
 	// The actor turns the mouse's y by psMouseSensVerticalK * 3/4 and inverts it with mouse_invert
-	float dy = -pitch * dt / (per_count * psMouseSensVerticalK * 0.75f);
+	float dy = -pitch / (per_count * psMouseSensVerticalK * 0.75f);
 	if (psMouseInvert.test(1))
-		dy = -dy;
-	if (g_gp_invert_y)
 		dy = -dy;
 	s_look_rest.y += dy;
 	const int nx = int(s_look_rest.x), ny = int(s_look_rest.y);
@@ -510,9 +525,10 @@ void gamepad_frame(float dt)
 	const gamepad_state& pad = pInput->pad();
 	// Texts name the gamepad's buttons while it is the device in use, the keyboard's otherwise
 	const bool prompts = g_gp_enabled && pInput->pad_in_use();
-	if (prompts != g_gamepad_prompts)
+	if (prompts != g_gamepad_prompts || (prompts && pad.playstation != g_gamepad_playstation))
 	{
 		g_gamepad_prompts = prompts;
+		g_gamepad_playstation = pad.playstation;
 		CStringTable::ReparseKeyBindings();
 	}
 	EMode mode = mOff;
@@ -535,11 +551,21 @@ void gamepad_frame(float dt)
 		update_game(pad, dt);
 	else if (mode == mCursor)
 		update_cursor(pad, dt);
+
+	// The DualSense's right trigger resists like a firearm's while one is in hands
+	bool firearm = false;
+	if (mode == mGame && g_gp_adaptive_triggers && Actor() && Actor()->g_Alive())
+	{
+		const CWeaponMagazined* weapon = smart_cast<const CWeaponMagazined*>(Actor()->inventory().ActiveItem());
+		firearm = weapon && weapon->GetState() != CHUDState::eHidden && weapon->GetState() != CHUDState::eShowing;
+	}
+	pInput->pad_trigger_effect(firearm ? 1 : 0);
 }
 
 //------------------------------------------------------------------------------------------------------------------
 // gp_sim: a simulated gamepad for tests, e.g. "gp_sim A ly=1" (A pressed, the left stick up), "gp_sim" (connected,
-// nothing pressed), "gp_sim off". Buttons: A B X Y LB RB LT RT BACK START LS RS UP DOWN LEFT RIGHT; axes lx ly rx ry lt rt
+// nothing pressed), "gp_sim off". Buttons: A B X Y LB RB LT RT BACK START LS RS UP DOWN LEFT RIGHT; axes lx ly rx ry lt rt,
+// the gyro gx gy (turn rate right and up, radians/s), "ps" names the buttons like a PlayStation controller
 class CCC_GamepadSim : public IConsole_Command
 {
 public:
@@ -557,6 +583,7 @@ public:
 		}
 		gamepad_state st;
 		st.connected = true;
+		st.gyro = true;
 		const int count = _GetItemCount(args, ' ');
 		for (int i = 0; i < count; ++i)
 		{
@@ -568,13 +595,15 @@ public:
 			string16 axis = "";
 			if (sscanf(item, "%15[a-z]=%f", axis, &v) == 2)
 			{
-				float* axes[] = {&st.lx, &st.ly, &st.rx, &st.ry, &st.lt, &st.rt};
-				LPCSTR axis_names[] = {"lx", "ly", "rx", "ry", "lt", "rt"};
-				for (int a = 0; a < 6; ++a)
+				float* axes[] = {&st.lx, &st.ly, &st.rx, &st.ry, &st.lt, &st.rt, &st.gyro_yaw, &st.gyro_pitch};
+				LPCSTR axis_names[] = {"lx", "ly", "rx", "ry", "lt", "rt", "gx", "gy"};
+				for (int a = 0; a < 8; ++a)
 					if (!xr_strcmp(axis, axis_names[a]))
 						*axes[a] = v;
 				continue;
 			}
+			if (!xr_strcmp(item, "ps"))
+				st.playstation = true;
 			for (int b = 0; b < GP_BUTTON_COUNT; ++b)
 				if (!stricmp(item, names[b]))
 				{
@@ -607,6 +636,11 @@ void gamepad_register_commands()
 	CMD4(CCC_Float, "gp_cursor_speed", &g_gp_cursor_speed, 0.2f, 4.f);
 	CMD4(CCC_Float, "gp_hold_time", &g_gp_hold_time, 0.15f, 1.f);
 	CMD4(CCC_Float, "gp_vibration", &psGamepadVibration, 0.f, 1.f);
+	CMD4(CCC_Integer, "gp_sony", &psGamepadSony, 0, 1);
+	CMD4(CCC_Integer, "gp_gyro", &g_gp_gyro, 0, 2);
+	CMD4(CCC_Float, "gp_gyro_sens", &g_gp_gyro_sens, 0.1f, 5.f);
+	CMD4(CCC_Integer, "gp_gyro_invert_y", &g_gp_gyro_invert_y, 0, 1);
+	CMD4(CCC_Integer, "gp_adaptive_triggers", &g_gp_adaptive_triggers, 0, 1);
 	CMD1(CCC_GamepadSim, "gp_sim");
 }
 

@@ -75,6 +75,11 @@ local rows = {
 	track { id = "gp_cursor_speed", step = 0.1 },
 	track { id = "gp_hold_time", step = 0.05 },
 	track { id = "gp_vibration", step = 0.05 },
+	list_enum { id = "gp_gyro", content = { "st_gp_gyro_off", "st_gp_gyro_aim", "st_gp_gyro_always" } },
+	track { id = "gp_gyro_sens", step = 0.05 },
+	list_bool { id = "gp_gyro_invert_y" },
+	list_bool { id = "gp_adaptive_triggers" },
+	list_bool { id = "gp_sony" },
 	button { id = "gp_default_layout", functor_ui = default_layout },
 	line {},
 }

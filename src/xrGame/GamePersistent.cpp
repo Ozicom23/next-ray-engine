@@ -1,5 +1,7 @@
 #include "pch_script.h"
 #include "gamepersistent.h"
+#include "../xrCore/crash_report.h"
+#include "../xrCore/level_preload.h"
 #include "../xrEngine/fmesh.h"
 #include "../xrEngine/xr_ioconsole.h"
 #include "../xrEngine/gamemtllib.h"
@@ -54,8 +56,28 @@ extern BOOL mt_Scheduler;
 //	static	void	ode_free	(void *ptr, size_t size)					{ return xr_free(ptr);				}
 //#endif // DEBUG_MEMORY_MANAGER
 
+// Crash reports (crash_report.h): where the game was
+static void crash_game_context(char* out, u32 size)
+{
+	if (!g_pGameLevel)
+	{
+		xr_strcpy(out, size, "Where: the main menu or a load");
+		return;
+	}
+	CActor* actor = Actor();
+	LPCSTR level = g_pGameLevel->name().c_str();
+	if (!level)
+		level = "(being changed)";
+	if (actor)
+		xr_sprintf(out, size, "Where: level %s, the actor at %.1f %.1f %.1f, frame %u", level, actor->Position().x,
+			actor->Position().y, actor->Position().z, Device.dwFrame);
+	else
+		xr_sprintf(out, size, "Where: level %s, no actor, frame %u", level, Device.dwFrame);
+}
+
 CGamePersistent::CGamePersistent(void)
 {
+	crash_report::game_context = &crash_game_context;
 	m_bPickableDOF = false;
 	m_game_params.m_e_game_type = eGameIDNoGame;
 	ambient_effect_next_time = 0;
@@ -171,6 +193,7 @@ void CGamePersistent::OnAppStart()
 void CGamePersistent::OnAppEnd()
 {
 	gamepad_stop();
+	level_preload::shutdown(); // its thread reads through the file system, which goes before the statics
 	if (m_pMainMenu->IsActive())
 		m_pMainMenu->Activate(false);
 
@@ -640,6 +663,16 @@ extern CUISequencer* g_tutorial2;
 void CGamePersistent::OnFrame()
 {
 	PROF_EVENT("CGamePersistent OnFrame");
+	// The next level read ahead (level_changer.cpp): freed once it's loaded, or 2 minutes after the actor left
+	// (a level being changed has no name yet)
+	LPCSTR level_name = g_pGameLevel ? g_pGameLevel->name().c_str() : nullptr;
+	if (level_preload::pending()[0] && level_name && !Device.dwPrecacheFrame)
+	{
+		if (!xr_strcmp(level_preload::pending(), level_name))
+			level_preload::loaded(level_name);
+		else
+			level_preload::expire(level_preload::enabled ? 120000 : 0);
+	}
 	if (Device.dwPrecacheFrame == 5 && m_intro_event.empty())
 	{
 		m_intro_event.bind(this, &CGamePersistent::game_loaded);

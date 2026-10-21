@@ -45,6 +45,7 @@ extern int ps_r4_dbg_main_skip;
 // 2 also orders the trees front to back from the light (depth in 16 steps of the map's range), 3 orders every
 // caster finely (more texture switches on the CPU). 0 keeps the shader order only.
 extern int ps_r4_smap_order;
+extern int ps_r4_tree_instancing;
 namespace hiz { bool test_static(const Fbox& box, bool tree); }
 namespace sun_receivers { bool test_caster(const Fbox& box, u32 cascade); }
 #endif
@@ -411,6 +412,15 @@ void CDSGraphManager::r_dsgraph_insert_static(dxRender_Visual *pVisual, bool pre
 	}
 #endif
 
+#ifdef USE_DX11
+	// Tree instancing (r__dsgraph_render.cpp): the tree's geometry at its LOD (as r_dsgraph_render_graph's calcLOD), here
+	// while the visual is in the cache
+	u64 inst_key = 0;
+	if (ps_r4_tree_instancing && (pVisual->Type == MT_TREE_ST || pVisual->Type == MT_TREE_PM))
+		inst_key = static_cast<FTreeVisual*>(pVisual)->instance_key(
+			_sqrt(clampr((SSA - r_ssaGLOD_end) / (r_ssaGLOD_start - r_ssaGLOD_end), 0.f, 1.f)));
+#endif
+
 	for (u32 iPass = 0; iPass < sh->passes.size(); ++iPass)
 	{
 		// the most common node
@@ -420,6 +430,9 @@ void CDSGraphManager::r_dsgraph_insert_static(dxRender_Visual *pVisual, bool pre
 		SPass& pass	= *sh->passes[iPass];
 
 		AddToRenderQueue(RGraph.mapStaticPasses[shader_priority][iPass], { order, SSA, nullptr, pVisual, nullptr, nullptr, false }, pass);
+#ifdef USE_DX11
+		RGraph.mapStaticPasses[shader_priority][iPass].back().instKey = inst_key;
+#endif
 	}
 }
 

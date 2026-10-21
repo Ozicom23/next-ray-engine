@@ -19,8 +19,10 @@ public:
 	// Builds the ImGui window in the render pass, just before the engine renders ImGui (seqRender priority
 	// -4, ImGui is -5). Recording earlier in the frame is unsafe: a vid_restart later in the same frame
 	// recreates ImGui's font texture and the recorded commands would point to the released one.
-	void OnRender() override { Draw(); }
+	void OnRender() override { Draw(); DrawModCost(); }
 	void Draw();
+	// perf_overlay_mods: Lua time per frame by MO2 mod and the last load's script loading by mod (mod_cost.h)
+	void DrawModCost();
 
 	void Destroy();
 
@@ -122,6 +124,14 @@ namespace shader_progress
 	// Any thread: a shader compiled from source (no cached variant) or a D3D12 pipeline created when first drawn,
 	// while the game runs. Shown as "Compiling shaders: N" while they keep coming and for a moment after
 	void compiled();
+
+	// stat_shader_stalls: the main thread's waits for shaders, any thread may report. A shader compiled from source,
+	// a wait for one a pre-compilation thread was compiling, a D3D12 pipeline created at its first draw (ms each)
+	void stall_compile(float ms);
+	void stall_wait(float ms);
+	void stall_pipeline(float ms);
+	// To the log, then counted anew
+	void stall_report();
 }
 
 class CShaderProgressOverlay : public pureRender

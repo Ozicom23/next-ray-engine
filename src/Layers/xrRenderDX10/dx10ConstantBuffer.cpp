@@ -23,6 +23,8 @@ dx10ConstantBuffer::dx10ConstantBuffer(ID3DShaderReflectionConstantBuffer* pTabl
 	m_strBufferName._set(Desc.Name);
 	m_eBufferType = Desc.Type;
 	m_uiBufferSize = Desc.Size;
+	m_bDirectOnly = !xr_strcmp(Desc.Name, "xr_tree_instances");
+	m_uiDirectEnd = m_uiBufferSize;
 
 	//	Fill member list with variable descriptions
 	m_MembersList.resize(Desc.Variables);
@@ -95,7 +97,7 @@ void dx10ConstantBuffer::Flush()
 #endif
         VERIFY(pData);
         VERIFY(m_pBufferData);
-        CopyMemory(pData, m_pBufferData, m_uiBufferSize);
+        CopyMemory(pData, m_pBufferData, m_bDirectOnly ? m_uiDirectEnd : m_uiBufferSize);
 #ifdef USE_DX11
         HW.pContext->Unmap(m_pBuffer, 0);
 #else

@@ -68,6 +68,14 @@
       <DelayLoadDLLs>libxess.dll;libxess_fg.dll;libxell.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
     </Link>
   </ItemDefinitionGroup>
+  <!-- d3dx9_43.dll and d3dx11_43.dll (the DirectX runtime) delay-loaded: the exes start without them, so the build machine (no DirectX
+       runtime) can run them for the crash report symbols (-dump_symbols) -->
+  <ItemDefinitionGroup Condition="'$(MSBuildProjectName)'=='xrEngine' Or '$(MSBuildProjectName)'=='xrEngineDX12'">
+    <Link>
+      <AdditionalDependencies>delayimp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <DelayLoadDLLs>d3dx9_43.dll;d3dx11_43.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+    </Link>
+  </ItemDefinitionGroup>
   <ItemGroup>
     <BuildMacro Include="xrBinRootDir">
       <Value>$(xrBinRootDir)</Value>

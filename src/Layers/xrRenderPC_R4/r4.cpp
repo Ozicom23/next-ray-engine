@@ -23,6 +23,8 @@
 #include "r4_frame_pacing.h"
 #include <thread>
 #include <atomic>
+#include <mutex>
+#include <condition_variable>
 
 CRender RImplementation;
 
@@ -564,10 +566,14 @@ namespace sun_cache { void destroy(); }
 namespace tex_streaming { void update(); void clear(); } // dx10SH_Texture.cpp
 
 namespace shader_warmup { void stop(); }
+namespace shader_precompile { void stop(); }
+extern void tree_instancing_reset();
 
 void CRender::destroy()
 {
+	tree_instancing_reset();
 	shader_warmup::stop(); // before the device goes
+	shader_precompile::stop();
 	tex_streaming::clear();
 	hiz::destroy();
 	light_smap_keep::destroy();
@@ -593,6 +599,7 @@ void CRender::destroy()
 
 void CRender::reset_begin()
 {
+	tree_instancing_reset();
 	//AVO: let's reload details while changed details options on vid_restart
 	if (b_loaded && ((dm_current_size != dm_size) || (ps_r__Detail_density != ps_current_detail_density) || (
 		ps_r__Detail_height != ps_current_detail_height)))
@@ -819,10 +826,289 @@ namespace shader_warmup
 	}
 }
 
+// Shader pre-compilation (r4_shader_precompile): the compiled shader cache holds one variant per settings and shader
+// sources; after a settings change or a shader mod update every shader the game draws is compiled again on the main
+// thread, at the level's load and in the frame that first draws it (hitches of 0.1-1 s each, DX11 and DX12 alike).
+// From the first frame with new settings (the main menu, or after a vid_restart), background threads compile ahead
+// every shader earlier runs compiled (the cache's folders, each skinning mode they had) for the current settings, so
+// those find compiled code. The main thread, needing one a thread is compiling, waits for it instead of compiling it
+// again. Shaders patched in memory or with per-material options (tessellation) are left to the main thread
+int ps_r4_shader_precompile = 1;
+namespace shader_precompile
+{
+	thread_local int t_skinning = INT_MIN; // a skinning mode to compile for, INT_MIN the engine's
+	thread_local bool t_ahead = false; // shader_compile writes the cache file only, no shader object
+	thread_local bool t_variant_only = false; // shader_compile only names the variant (t_variant)
+	thread_local string_path t_variant = "";
+
+	static std::mutex s_lock;
+	static std::condition_variable s_done;
+	static xr_set<xr_string> s_busy; // cache files a thread is compiling
+	static std::vector<std::thread> s_threads;
+	static std::atomic<bool> s_stop{ false };
+	static std::atomic<u32> s_next{ 0 }, s_compiled{ 0 }, s_failed{ 0 };
+	static string_path s_started_variant = "";
+	static CTimer s_timer;
+
+	struct Job
+	{
+		xr_string name; // as shader_compile gets it ("deffer_model_bump_2" for skinning mode 2)
+		xr_string source; // the file under the shaders' folder
+		char type; // v p g h d c
+		int skinning;
+	};
+	static xr_vector<Job> s_jobs;
+
+	// The thread compiling file waits until it's written (a main-thread compile waits rather than compiling twice)
+	bool begin(LPCSTR file)
+	{
+		std::lock_guard<std::mutex> lock(s_lock);
+		return s_busy.insert(file).second;
+	}
+
+	void finish(LPCSTR file)
+	{
+		{
+			std::lock_guard<std::mutex> lock(s_lock);
+			s_busy.erase(file);
+		}
+		s_done.notify_all();
+	}
+
+	// Main thread: true when a thread was compiling it (then it's in the cache, unless it failed)
+	bool wait_for(LPCSTR file)
+	{
+		std::unique_lock<std::mutex> lock(s_lock);
+		if (!s_busy.count(file))
+			return false;
+		const u64 start = GetTickCount64();
+		s_done.wait_for(lock, std::chrono::seconds(30), [file] { return !s_busy.count(file); });
+		Msg("* Shader pre-compilation: waited %u ms for %s", u32(GetTickCount64() - start), file);
+		return true;
+	}
+
+	static void worker()
+	{
+		SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+		t_ahead = true;
+		for (u32 i; !s_stop && (i = s_next++) < s_jobs.size();)
+		{
+			struct Step { ~Step() { shader_progress::step(); } } counted;
+			const Job& job = s_jobs[i];
+			string_path cname;
+			strconcat(sizeof(cname), cname, ::Render->getShaderPath(), job.source.c_str());
+			IReader* file = FS.r_open("$game_shaders$", cname);
+			if (!file)
+				continue;
+			const u32 size = file->length();
+			xr_vector<char> data(size + 1);
+			CopyMemory(data.data(), file->pointer(), size);
+			data[size] = 0;
+			FS.r_close(file);
+			// The target and entry the renderer's _Create* would use
+			LPCSTR target = "vs_2_0", entry = "main";
+			switch (job.type)
+			{
+			case 'v':
+				if (strstr(data.data(), "main_vs_1_1")) target = "vs_1_1", entry = "main_vs_1_1";
+				if (strstr(data.data(), "main_vs_2_0")) target = "vs_2_0", entry = "main_vs_2_0";
+				break;
+			case 'p':
+				target = "ps_2_0";
+				for (LPCSTR v : { "ps_1_1", "ps_1_2", "ps_1_3", "ps_1_4", "ps_2_0" })
+				{
+					static const struct { LPCSTR target, entry; } entries[] = { { "ps_1_1", "main_ps_1_1" },
+						{ "ps_1_2", "main_ps_1_2" }, { "ps_1_3", "main_ps_1_3" }, { "ps_1_4", "main_ps_1_4" },
+						{ "ps_2_0", "main_ps_2_0" } };
+					for (const auto& e : entries)
+						if (!xr_strcmp(e.target, v) && strstr(data.data(), e.entry))
+							target = e.target, entry = e.entry;
+				}
+				break;
+			case 'g': target = "gs_4_0"; break;
+			case 'h': target = "hs_5_0"; break;
+			case 'd': target = "ds_5_0"; break;
+			case 'c': target = "cs_5_0"; break;
+			}
+			t_skinning = job.skinning;
+			void* unused = nullptr;
+			const HRESULT hr = RImplementation.shader_compile(job.name.c_str(), (DWORD const*)data.data(), size, entry,
+				target, D3D10_SHADER_PACK_MATRIX_ROW_MAJOR, unused);
+			if (hr == S_FALSE)
+				s_compiled++;
+			else if (FAILED(hr))
+				s_failed++;
+		}
+	}
+
+	// The variant (settings digits and the sources' fingerprint) shader_compile names for a skinning mode
+	static xr_string variant_of(int skinning)
+	{
+		t_variant_only = true;
+		t_skinning = skinning;
+		void* unused = nullptr;
+		RImplementation.shader_compile("", nullptr, 0, "main", "vs_2_0", 0, unused);
+		t_variant_only = false;
+		t_skinning = INT_MIN;
+		return t_variant;
+	}
+
+	// The jobs: each cache folder's skinning modes without a file of the current variant
+	static void collect()
+	{
+		s_jobs.clear();
+		const int modes[] = { -1, 0, 1, 2, 3, 4 };
+		xr_string variants[6];
+		for (int m = 0; m < 6; ++m)
+			variants[m] = variant_of(modes[m]);
+		// The digits telling the skinning modes apart
+		xr_vector<size_t> skin_digits;
+		for (size_t c = 0; c < variants[0].size(); ++c)
+			for (int m = 1; m < 6; ++m)
+				if (c < variants[m].size() && variants[m][c] != variants[0][c])
+				{
+					skin_digits.push_back(c);
+					break;
+				}
+		const size_t digits = variants[0].find('_') == xr_string::npos ? variants[0].size() : variants[0].find('_');
+
+		string_path root;
+		FS.update_path(root, "$app_data_root$", "shaders_cache\\r4\\");
+		WIN32_FIND_DATAA fd;
+		HANDLE find = FindFirstFileA((xr_string(root) + "*").c_str(), &fd);
+		if (find == INVALID_HANDLE_VALUE)
+			return;
+		do
+		{
+			if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || fd.cFileName[0] == '.')
+				continue;
+			const xr_string folder = fd.cFileName;
+			const size_t dot = folder.rfind('.');
+			if (dot == xr_string::npos || folder.size() - dot != 3)
+				continue;
+			// Shaders patched in memory or with a material's options: their source isn't the file alone
+			if (folder.find('(') != xr_string::npos || folder.find("_nxjit") != xr_string::npos ||
+				folder.find("_nxlens") != xr_string::npos)
+				continue;
+			const char type = folder[dot + 1];
+			const xr_string base = folder.substr(0, dot), ext = folder.substr(dot);
+			// The skinning modes it was compiled with: its files' variants
+			bool used[6] = {};
+			WIN32_FIND_DATAA ff;
+			HANDLE files = FindFirstFileA((xr_string(root) + folder + "\\*").c_str(), &ff);
+			if (files == INVALID_HANDLE_VALUE)
+				continue;
+			do
+			{
+				if (ff.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+					continue;
+				const xr_string name = ff.cFileName;
+				if (name.size() < digits)
+					continue;
+				for (int m = 0; m < 6; ++m)
+				{
+					bool match = true;
+					for (size_t c : skin_digits)
+						match = match && name[c] == variants[m][c];
+					used[m] = used[m] || match;
+				}
+			} while (FindNextFileA(files, &ff));
+			FindClose(files);
+			for (int m = 0; m < 6; ++m)
+			{
+				if (!used[m])
+					continue;
+				Job job;
+				job.type = type;
+				job.skinning = modes[m];
+				job.name = base;
+				job.source = base + ext;
+				// The vertex shaders of skinning modes 1..4 are named name_<mode>
+				if (type == 'v' && modes[m] > 0)
+				{
+					string16 suffix;
+					xr_sprintf(suffix, "_%d", modes[m]);
+					if (base.size() > 2 && base.compare(base.size() - 2, 2, suffix) == 0)
+						job.source = base.substr(0, base.size() - 2) + ext;
+					else
+						continue; // not this mode's name
+				}
+				else if (type == 'v' && base.size() > 2 && base[base.size() - 2] == '_' && isdigit(u8(base.back())) &&
+					!FS.exist("$game_shaders$", (xr_string(::Render->getShaderPath()) + base + ext).c_str()))
+					continue;
+				string_path cached;
+				xr_sprintf(cached, "%s%s\\%s", root, folder.c_str(), variants[m].c_str());
+				if (GetFileAttributesA(cached) != INVALID_FILE_ATTRIBUTES)
+					continue;
+				s_jobs.push_back(job);
+			}
+		} while (FindNextFileA(find, &fd));
+		FindClose(find);
+	}
+
+	static void join()
+	{
+		s_stop = true;
+		for (std::thread& t : s_threads)
+			if (t.joinable())
+				t.join();
+		s_threads.clear();
+	}
+
+	// Each frame: done, or new settings to compile for (variant: the last compiled shader's, its skinning mode's)
+	void update(LPCSTR last_compiled)
+	{
+		static string_path s_last_seen = "";
+		if (!last_compiled[0] || !xr_strcmp(s_last_seen, last_compiled))
+		{
+			if (s_threads.empty() || s_next < s_jobs.size())
+				return;
+		}
+		xr_strcpy(s_last_seen, last_compiled);
+		string_path variant = "";
+		if (last_compiled[0])
+			xr_strcpy(variant, variant_of(-1).c_str());
+		if (!s_threads.empty() && s_next >= s_jobs.size())
+		{
+			join();
+			shader_progress::end(true);
+			Msg("* Shader pre-compilation: %u shaders compiled ahead in %.1f s (%u failed, %u already there)", u32(s_compiled),
+				s_timer.GetElapsed_sec(), u32(s_failed), u32(s_jobs.size()) - s_compiled - s_failed);
+		}
+		if (!ps_r4_shader_precompile || !variant[0] || !s_threads.empty() || !xr_strcmp(s_started_variant, variant))
+			return;
+		xr_strcpy(s_started_variant, variant);
+		s_timer.Start();
+		collect();
+		if (s_jobs.empty())
+			return;
+		s_stop = false;
+		s_next = 0;
+		s_compiled = s_failed = 0;
+		const u32 cores = std::thread::hardware_concurrency();
+		const u32 count = _min(u32(s_jobs.size()), cores > 3 ? cores - 2 : 1u);
+		Msg("* Shader pre-compilation: %u shaders to compile for these settings (variant %s), %u threads", u32(s_jobs.size()),
+			variant, count);
+		shader_progress::begin("Compiling shaders for these settings", u32(s_jobs.size()));
+		for (u32 i = 0; i < count; ++i)
+			s_threads.emplace_back(worker);
+	}
+
+	void stop()
+	{
+		if (s_threads.empty())
+			return;
+		join();
+		shader_progress::end(false);
+		s_started_variant[0] = 0; // again after the device's restart
+	}
+}
+
 void CRender::OnFrame()
 {
 	PROF_EVENT("CRender::OnFrame()");
 	shader_warmup::start_once();
+	shader_precompile::update(shader_warmup::s_variant);
 	tex_streaming::update();
 	
 	Models->DeleteQueue();
@@ -1544,7 +1830,8 @@ HRESULT CRender::shader_compile(
 
 	u32 len = xr_strlen(sh_name);
 	// options
-	const int m_skinning = Engine.External.GetSkinningMode();
+	const int m_skinning = shader_precompile::t_skinning != INT_MIN ? shader_precompile::t_skinning :
+		Engine.External.GetSkinningMode();
 	{
 		xr_sprintf(c_smapsize, "%04d", u32(o.smapsize));
 		defines[def_it].Name = "SMAP_size";
@@ -2218,7 +2505,13 @@ HRESULT CRender::shader_compile(
 		string_path cached;
 		xr_strcpy(cached, sh_name);
 		xr_strcat(cached, shader_cache_suffix());
-		shader_warmup::note_variant(cached);
+		if (shader_precompile::t_variant_only)
+		{
+			xr_strcpy(shader_precompile::t_variant, cached);
+			return S_OK;
+		}
+		if (shader_precompile::t_skinning == INT_MIN)
+			shader_warmup::note_variant(cached);
 	}
 
 	// finish
@@ -2277,11 +2570,11 @@ HRESULT CRender::shader_compile(
 	FS.update_path(folder_name, "$game_shaders$", folder);
 	xr_strcat(folder_name, "\\");
 
-	m_file_set.clear();
-	FS.file_list(m_file_set, folder_name, FS_ListFiles | FS_RootOnly, "*");
+	FS_FileSet file_set; // not the member: the pre-compilation threads compile too
+	FS.file_list(file_set, folder_name, FS_ListFiles | FS_RootOnly, "*");
 
 	string_path temp_file_name, file_name;
-	if (psDeviceFlags2.test(rsPrecompiledShaders) || !match_shader_id(name, sh_name, m_file_set, temp_file_name))
+	if (psDeviceFlags2.test(rsPrecompiledShaders) || !match_shader_id(name, sh_name, file_set, temp_file_name))
 	{
 		string_path file;
 		xr_strcpy(file, "shaders_cache\\r4\\");
@@ -2297,6 +2590,38 @@ HRESULT CRender::shader_compile(
 	{
 		xr_strcpy(file_name, folder_name);
 		xr_strcat(file_name, temp_file_name);
+	}
+
+	// Pre-compilation: the cache file only, S_FALSE when compiled
+	if (shader_precompile::t_ahead)
+	{
+		if (FS.exist(file_name) || !shader_precompile::begin(file_name))
+			return S_OK;
+		includer Includer;
+		LPD3DBLOB code = nullptr, errors = nullptr;
+		_result = D3DCompile(pSrcData, SrcDataLen, "", defines, &Includer, pFunctionName, pTarget, Flags, 0, &code, &errors);
+		if (SUCCEEDED(_result))
+		{
+			IWriter* file = FS.w_open(file_name);
+			file->w_u32(crc32(code->GetBufferPointer(), code->GetBufferSize()));
+			file->w(code->GetBufferPointer(), (u32)code->GetBufferSize());
+			FS.w_close(file);
+			_result = S_FALSE;
+		}
+		else
+			Msg("! Shader pre-compilation: %s: %s", file_name, errors ? (LPCSTR)errors->GetBufferPointer() : "failed");
+		_RELEASE(code);
+		_RELEASE(errors);
+		shader_precompile::finish(file_name);
+		return _result;
+	}
+	// A pre-compilation thread compiling this one: its result instead of a second compile
+	if (!FS.exist(file_name))
+	{
+		CTimer wait;
+		wait.Start();
+		if (shader_precompile::wait_for(file_name))
+			shader_progress::stall_wait(wait.GetElapsed_sec() * 1000.f);
 	}
 
 	if (FS.exist(file_name))
@@ -2324,6 +2649,8 @@ HRESULT CRender::shader_compile(
 		LPD3DBLOB pShaderBuf = NULL;
 		LPD3DBLOB pErrorBuf = NULL;
 		PROF_EVENT("shader_compile: D3DCompile");
+		CTimer compile_time;
+		compile_time.Start();
 		_result =
 			D3DCompile(
 				pSrcData,
@@ -2336,6 +2663,7 @@ HRESULT CRender::shader_compile(
 				&pErrorBuf
 			);
 
+		shader_progress::stall_compile(compile_time.GetElapsed_sec() * 1000.f);
 		if (SUCCEEDED(_result))
 		{
 			shader_progress::compiled();

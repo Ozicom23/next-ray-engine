@@ -102,6 +102,8 @@ IC void* dx10ConstantBuffer::AccessDirect(R_constant_load& L, u32 DataSize)
 	if ((u32)L.index + DataSize <= m_uiBufferSize)
 	{
 		m_bChanged = true;
+		if (m_bDirectOnly)
+			m_uiDirectEnd = L.index + DataSize;
 		return res;
 	}
 	else return 0;

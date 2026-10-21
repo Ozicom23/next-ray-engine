@@ -44,6 +44,7 @@ static BOOL bException = FALSE;
 #endif
 
 #include <dbghelp.h> // MiniDump flags
+#include "crash_report.h"
 
 #ifdef USE_BUG_TRAP
 # include <BugTrap/source/BugTrap.h> // for BugTrap functionality
@@ -245,6 +246,9 @@ void xrDebug::do_exit(const std::string& message)
 
 #ifdef NO_BUG_TRAP
 //AVO: simplified function
+// The fatal error being reported (xrDebug::backend's text), for an exception while it's reported: the report names it
+static const char* s_fatal_in_progress = nullptr;
+
 void xrDebug::backend(const char* expression, const char* description, const char* argument0, const char* argument1,
                       const char* file, int line, const char* function, bool& ignore_always)
 {
@@ -260,6 +264,8 @@ void xrDebug::backend(const char* expression, const char* description, const cha
 	CS.Enter();
 
 	string4096 assertion_info;
+	assertion_info[0] = 0;
+	s_fatal_in_progress = assertion_info;
 
 	gather_info(expression, description, argument0, argument1, file, line, function, assertion_info,
 	            sizeof(assertion_info));
@@ -273,6 +279,15 @@ void xrDebug::backend(const char* expression, const char* description, const cha
 		handler();
 
 	xrLogger::FlushLog();
+
+	// The report: the cause, both stacks, the log's end (the log itself is overwritten at the next start)
+	if (shared_str_initialized)
+	{
+		LPCSTR report = crash_report::write(assertion_info, nullptr);
+		if (report[0])
+			buffer += xr_sprintf(buffer, sizeof(assertion_info) - u32(buffer - &assertion_info[0]),
+			                     "%sCrash report: %s%s", endline, report, endline);
+	}
 
     if (IsDebuggerPresent())
         DebugBreak();
@@ -852,6 +867,28 @@ LONG WINAPI UnhandledFilter(_EXCEPTION_POINTERS* pExceptionInfo)
 
     xrLogger::FlushLog();
 
+	string_path report = "";
+	if (shared_str_initialized)
+	{
+		string4096 what;
+		const EXCEPTION_RECORD* er = pExceptionInfo->ExceptionRecord;
+		if (er && er->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && er->NumberParameters >= 2)
+			xr_sprintf(what, "Unhandled exception 0x%08X (access violation %s 0x%p) at 0x%p\n%s", er->ExceptionCode,
+			           er->ExceptionInformation[0] == 1 ? "writing" : (er->ExceptionInformation[0] == 8 ? "executing" : "reading"),
+			           (void*)er->ExceptionInformation[1], er->ExceptionAddress, error_message);
+		else
+			xr_sprintf(what, "Unhandled exception 0x%08X at 0x%p\n%s", er ? er->ExceptionCode : 0,
+			           er ? er->ExceptionAddress : nullptr, error_message);
+		// Inside a fatal error's reporting: that error is the cause
+		if (s_fatal_in_progress && s_fatal_in_progress[0])
+		{
+			string4096 exception;
+			xr_strcpy(exception, what);
+			xr_sprintf(what, "%s\nthen, while it was being reported: %s", s_fatal_in_progress, exception);
+		}
+		xr_strcpy(report, crash_report::write(what, pExceptionInfo->ContextRecord));
+	}
+
 # ifdef USE_OWN_MINI_DUMP
 	save_mini_dump(pExceptionInfo);
 # endif // USE_OWN_MINI_DUMP
@@ -861,9 +898,11 @@ LONG WINAPI UnhandledFilter(_EXCEPTION_POINTERS* pExceptionInfo)
 
 	ShowCursor(true);
 	ShowWindow(GetActiveWindow(), SW_FORCEMINIMIZE);
+	string1024 box;
+	xr_sprintf(box, "Unhandled exception occured. See log for details%s%s", report[0] ? "\n\nCrash report: " : "", report);
 	MessageBox(
 		GetTopWindow(NULL),
-		"Unhandled exception occured. See log for details",
+		box,
 		"Fatal Error",
 		MB_OK | MB_ICONERROR | MB_SYSTEMMODAL
 	);

@@ -1,4 +1,6 @@
 #include "pch_script.h"
+#include "../xrCore/level_preload.h"
+#include "level_changer.h"
 #include "../xrEngine/xr_ioconsole.h"
 #include "../xrEngine/xr_ioc_cmd.h"
 #include "../xrEngine/customhud.h"
@@ -2661,6 +2663,56 @@ public:
     }
 };
 
+// level_changers: this level's level changers, where they are and the level each leads to (tests: transition)
+class CCC_LevelChangers : public IConsole_Command
+{
+public:
+	CCC_LevelChangers(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; };
+	virtual void Execute(LPCSTR)
+	{
+		if (!g_pGameLevel)
+			return;
+		for (u32 i = 0; i < Level().Objects.o_count(); ++i)
+			if (CLevelChanger* lc = smart_cast<CLevelChanger*>(Level().Objects.o_get_by_iterator(i)))
+				Msg("* level changer %s at %.1f %.1f %.1f -> %s%s", lc->cName().c_str(), lc->Position().x, lc->Position().y,
+				    lc->Position().z, lc->target_level() ? lc->target_level() : "?", lc->IsLevelChangerEnabled() ? "" : " (off)");
+	}
+	virtual void Save(IWriter*) {}
+};
+
+// crash_test fatal|access: a crash on purpose, to try the crash report (crash_report.h)
+class CCC_CrashTest : public IConsole_Command
+{
+public:
+	CCC_CrashTest(LPCSTR N) : IConsole_Command(N) {};
+	virtual void Execute(LPCSTR args)
+	{
+		if (!xr_strcmp(args, "fatal"))
+			FATAL("crash_test: a test crash, not a bug");
+		else if (!xr_strcmp(args, "access"))
+		{
+			volatile int* pointer = nullptr;
+			*pointer = 0;
+		}
+		else if (!xr_strcmp(args, "null"))
+		{
+			// A call through a null function pointer
+			void (*volatile function)() = nullptr;
+			function();
+		}
+		else if (!xr_strcmp(args, "nested"))
+		{
+			// A fatal error, then a crash while it is reported (the crash handler runs during the report)
+			Debug.set_crashhandler([]() { volatile int* pointer = nullptr; *pointer = 0; });
+			FATAL("crash_test: a test crash, not a bug");
+		}
+		else
+			Msg("crash_test fatal|access|null|nested");
+	}
+	virtual void Info(TInfo& I) { xr_strcpy(I, "fatal|access|null|nested: crash on purpose (crash report test)"); }
+	virtual void Save(IWriter*) {}
+};
+
 void CCC_RegisterCommands()
 {
 	//Not needed for a singleplayer-only mod
@@ -3153,6 +3205,10 @@ void CCC_RegisterCommands()
 #endif // MASTER_GOLD
 
 	CMD1(CCC_GSCheckForUpdates, "check_for_updates");
+	CMD1(CCC_CrashTest, "crash_test");
+	CMD1(CCC_LevelChangers, "level_changers");
+	CMD4(CCC_Integer, "level_preload", &level_preload::enabled, 0, 1);
+	CMD4(CCC_Integer, "level_preload_budget", &level_preload::budget_mb, 0, 4096);
 #ifdef DEBUG
 	CMD1(CCC_Crash, "crash");
 	CMD1(CCC_DumpObjects, "dump_all_objects");

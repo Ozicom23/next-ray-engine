@@ -22,7 +22,7 @@
 #include <deque>
 #include <thread>
 
-namespace shader_progress { void compiled(); } // r4_perf_overlay.cpp
+namespace shader_progress { void compiled(); void stall_pipeline(float ms); } // r4_perf_overlay.cpp
 
 namespace dx12
 {
@@ -704,7 +704,10 @@ struct Context::Impl : public Context::NativeRecorder
 			if (it != dev->graphics_pipelines.end())
 				return it->second;
 		}
+		CTimer create_time;
+		create_time.Start();
 		ID3D12PipelineState* pso = CreateGraphicsPipeline(device, k, gfx_root, shaders, layout, bs->m_desc, rs->m_desc, ds->m_desc);
+		shader_progress::stall_pipeline(create_time.GetElapsed_sec() * 1000.f);
 		shader_progress::compiled(); // first drawn with this combination: the driver compiles it now
 		{
 			std::lock_guard<std::mutex> lock(dev->pipeline_lock);

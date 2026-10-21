@@ -32,6 +32,113 @@ ICF float calcLOD(float ssa/*fDistSq*/, float R)
 	return _sqrt(clampr((ssa - r_ssaGLOD_end) / (r_ssaGLOD_start - r_ssaGLOD_end), 0.f, 1.f));
 }
 
+#ifdef USE_DX11
+#include "FTreeVisual.h"
+#include "dxRenderDeviceRender.h"
+
+extern int ps_r4_tree_instancing;
+
+// Tree instancing (r4_tree_instancing): in the main view's G-buffer and the shadow maps, the trees of a run of packets
+// with the same state and geometry are drawn with one DrawIndexedInstanced. Their pass gets a variant whose vertex
+// shader is the tree shader's own source with its per-tree constants read per instance (<name>_xrinst, made in memory
+// when compiled: dx10ResourceManager_Resources.cpp); the trees' constants go to xr_tree_inst. A shader that can't be
+// changed that way keeps drawing its trees one by one
+namespace tree_instancing
+{
+	constexpr u32 instances_max = 32; // xr_tree_inst's size in the patched shader
+
+	struct variant
+	{
+		const SVS* orig_vs = nullptr;
+		const R_constant_table* orig_constants = nullptr;
+		ref_vs vs;
+		ref_ctable constants;
+		bool valid = false;
+	};
+	static xr_unordered_map<u64, variant> s_variants; // by the original pass
+	static shared_str s_instances_name;
+
+	static variant* get(SPass& pass)
+	{
+		variant& v = s_variants[u64(size_t(&pass))];
+		if (v.orig_vs == &*pass.vs && v.orig_constants == &*pass.constants)
+			return v.valid ? &v : nullptr;
+
+		// A new pass, or another one at the same address
+		v = variant();
+		v.orig_vs = &*pass.vs;
+		v.orig_constants = &*pass.constants;
+		if (!pass.vs || !pass.constants || !pass.vs->vs)
+			return nullptr;
+		LPCSTR orig = pass.vs->cName.c_str();
+		if (strncmp(orig, "deffer_tree", 11) && strncmp(orig, "shadow_direct_tree", 18))
+			return nullptr;
+		string256 name;
+		xr_sprintf(name, "%s_xrinst", orig);
+		v.vs = DEV->_CreateVS(name);
+		if (!v.vs || !v.vs->vs)
+			return nullptr;
+
+		// The pass's constants with this vertex shader, bound as in the original pass
+		R_constant_table table;
+		table.merge(&pass.ps->constants);
+		table.merge(&v.vs->constants);
+		table.merge(&pass.gs->constants);
+		table.merge(&pass.hs->constants);
+		table.merge(&pass.ds->constants);
+		for (ref_constant& c : table.table)
+		{
+			if (R_constant* o = pass.constants->get(c->name))
+				c->handler = o->handler;
+		}
+		if (!s_instances_name.size())
+			s_instances_name = "xr_tree_inst";
+		if (!table.get(s_instances_name))
+			return nullptr;
+		v.constants = DEV->_CreateConstantTable(table);
+		v.valid = true;
+		static xr_vector<shared_str> logged;
+		if (std::find(logged.begin(), logged.end(), v.vs->cName) == logged.end())
+		{
+			logged.push_back(v.vs->cName);
+			Msg("* Tree instancing: %s", name);
+		}
+		return &v;
+	}
+
+	static FTreeVisual* tree_of(const RenderPacket& packet)
+	{
+		dxRender_Visual* V = packet.item.pVisual;
+		if (V->Type != MT_TREE_ST && V->Type != MT_TREE_PM)
+			return nullptr;
+		return static_cast<FTreeVisual*>(V);
+	}
+
+	// The packet's pass: the one of the visual's shader with its shaders
+	static SPass* pass_of(const RenderPacket& packet, u32 iPass)
+	{
+		Shader* sh = &*packet.item.pVisual->shader;
+		if (!sh)
+			return nullptr;
+		for (u32 e = 0; e < 6; ++e)
+		{
+			ShaderElement* E = sh->E[e]._get();
+			if (!E || iPass >= E->passes.size())
+				continue;
+			SPass* pass = &*E->passes[iPass];
+			if (&*pass->vs == packet.pVS && pass->ps->ps == packet.pPS && &*pass->constants == packet.pCS)
+				return pass;
+		}
+		return nullptr;
+	}
+}
+
+void tree_instancing_reset()
+{
+	tree_instancing::s_variants.clear();
+}
+#endif
+
 template<typename T, bool Reverse>
 void CDSGraphManager::r_dsgraph_render_graph_sorted(R_dsgraph::mapDSGraphItems<T, Reverse>& graph, bool _clear)
 {
@@ -77,6 +184,43 @@ void CDSGraphManager::r_dsgraph_render_graph(RenderQueueArray& queues, u32 _prio
 		else
             xr_parallel_sort(queue.begin(), queue.end());
 
+#ifdef USE_DX11
+		// Trees of the same geometry next to each other in each run of the same state (instKey, set when captured), the
+		// ones that share a draw first and the single ones after them (instKey 0), so the run switches shaders once
+		const bool instancing = ps_r4_tree_instancing && static_geometry &&
+			(RImplementation.phase == CRender::PHASE_NORMAL || RImplementation.phase == CRender::PHASE_SMAP);
+		if (instancing)
+		{
+			for (size_t begin = 0, end; begin < queue.size(); begin = end)
+			{
+				end = begin + 1;
+				while (end < queue.size() && queue[end].sortKey == queue[begin].sortKey)
+					end++;
+				if (!queue[begin].instKey)
+					continue;
+				if (end - begin < 2)
+				{
+					queue[begin].instKey = 0;
+					continue;
+				}
+				PROF_EVENT("tree instancing: order");
+				std::sort(queue.begin() + begin, queue.begin() + end,
+					[](const RenderPacket& a, const RenderPacket& b) { return a.instKey < b.instKey; });
+				for (size_t i = begin, run_end; i < end; i = run_end)
+				{
+					run_end = i + 1;
+					while (run_end < end && queue[run_end].instKey == queue[i].instKey)
+						run_end++;
+					if (run_end - i == 1)
+						queue[i].instKey = 0;
+				}
+				// 0 - 1 wraps to the largest: the single ones last
+				std::sort(queue.begin() + begin, queue.begin() + end,
+					[](const RenderPacket& a, const RenderPacket& b) { return a.instKey - 1 < b.instKey - 1; });
+			}
+		}
+#endif
+
 		// 2. Render
 		vs_type pVS = nullptr;
 
@@ -93,12 +237,18 @@ void CDSGraphManager::r_dsgraph_render_graph(RenderQueueArray& queues, u32 _prio
 		
 		R_constant_table* pCS = nullptr;
 		ID3DState* pState = nullptr;
+#ifdef USE_DX11
+		vs_type inst_for_vs = nullptr;
+		R_constant_table* inst_for_cs = nullptr;
+		tree_instancing::variant* inst_cached = nullptr;
+#endif
 		STextureList* pTextures = nullptr;
 
         u64 high = 0;
 
-        for (auto& packet : queue)
+        for (size_t packet_index = 0; packet_index < queue.size(); ++packet_index)
         {
+            auto& packet = queue[packet_index];
             auto& currentKey = packet.sortKey;
             if (currentKey.high != high)
             {
@@ -132,10 +282,36 @@ void CDSGraphManager::r_dsgraph_render_graph(RenderQueueArray& queues, u32 _prio
 #endif
             }
 
+#ifdef USE_DX11
+			// Tree instancing: a run of two or more packets with the same state and geometry, drawn with the pass's
+			// instanced variant (a single tree is drawn as before: its constants cost less than an instance's)
+			tree_instancing::variant* inst = nullptr;
+			size_t run_end = packet_index + 1;
+			if (instancing && packet.instKey)
+			{
+				while (run_end < queue.size() && queue[run_end].instKey == packet.instKey && queue[run_end].sortKey == packet.sortKey)
+					run_end++;
+				// One pass for a state's trees: looked up once
+				if (packet.pVS != inst_for_vs || packet.pCS != inst_for_cs)
+				{
+					inst_for_vs = packet.pVS;
+					inst_for_cs = packet.pCS;
+					SPass* pass = tree_instancing::pass_of(packet, iPass);
+					inst_cached = pass ? tree_instancing::get(*pass) : nullptr;
+				}
+				inst = inst_cached;
+			}
+			vs_type packet_vs = inst ? &*inst->vs : packet.pVS;
+			R_constant_table* packet_cs = inst ? &*inst->constants : packet.pCS;
+#else
+			vs_type packet_vs = packet.pVS;
+			R_constant_table* packet_cs = packet.pCS;
+#endif
+
             // Compare low key stuff regardless, too high collision probability
-            if (packet.pVS != pVS)
+            if (packet_vs != pVS)
             {
-                pVS = packet.pVS;
+                pVS = packet_vs;
                 RCache.set_VS(pVS);
             }
 
@@ -145,9 +321,9 @@ void CDSGraphManager::r_dsgraph_render_graph(RenderQueueArray& queues, u32 _prio
                 RCache.set_PS(pPS);
             }
 
-            if (packet.pCS != pCS)
+            if (packet_cs != pCS)
             {
-                pCS = packet.pCS;
+                pCS = packet_cs;
                 RCache.set_Constants(pCS);
             }
 
@@ -166,6 +342,32 @@ void CDSGraphManager::r_dsgraph_render_graph(RenderQueueArray& queues, u32 _prio
 				RImplementation.apply_lmaterial();
 			}
 
+#ifdef USE_DX11
+			if (inst)
+			{
+				PROF_EVENT("tree instancing: draw");
+				const u32 count = u32(run_end - packet_index);
+				FTreeVisual* first = static_cast<FTreeVisual*>(item.pVisual);
+				const float run_LOD = calcLOD(item.ssa, item.pVisual->vis.sphere.R);
+				RCache.LOD.set_LOD(run_LOD);
+				for (u32 done = 0; done < count; done += tree_instancing::instances_max)
+				{
+					const u32 n = _min(count - done, tree_instancing::instances_max);
+					void* data = nullptr;
+					RCache.get_ConstantDirect(tree_instancing::s_instances_name, n * FTreeVisual::instance_rows * sizeof(Fvector4),
+						&data, nullptr, nullptr);
+					if (!data)
+						break;
+					Fvector4* rows = (Fvector4*)data;
+					for (u32 i = 0; i < n; i++)
+						static_cast<FTreeVisual*>(queue[packet_index + done + i].item.pVisual)->write_instance(
+							rows + i * FTreeVisual::instance_rows);
+					first->render_instances(run_LOD, n);
+				}
+				packet_index = run_end - 1;
+				continue;
+			}
+#endif
 			float LOD = calcLOD(item.ssa, item.pVisual->vis.sphere.R);
 #ifdef USE_DX11
 			RCache.LOD.set_LOD(LOD);

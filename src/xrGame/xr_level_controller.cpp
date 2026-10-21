@@ -377,20 +377,31 @@ void initialize_bindings()
 		g_key_bindings[idx].m_action = &actions[idx];
 }
 
+bool g_gamepad_playstation = false;
+
+// A gamepad button's name, an Xbox controller's or a PlayStation one's
+static LPCSTR gamepad_button_name(int b)
+{
+	static LPCSTR xbox[GP_BUTTON_COUNT] = {"A", "B", "X", "Y", "LB", "RB", "LT", "RT", "View", "Menu", "L3", "R3",
+		"D-pad Up", "D-pad Down", "D-pad Left", "D-pad Right"};
+	static LPCSTR playstation[GP_BUTTON_COUNT] = {"Cross", "Circle", "Square", "Triangle", "L1", "R1", "L2", "R2",
+		"Create", "Options", "L3", "R3", "D-pad Up", "D-pad Down", "D-pad Left", "D-pad Right"};
+	return (g_gamepad_playstation ? playstation : xbox)[b];
+}
+
 // "Pad A", "Pad A (hold)", "Pad LT + A", "Pad left stick up"
 static bool gamepad_key_name(int dik, LPSTR dest, int dest_sz)
 {
-	static LPCSTR names[GP_BUTTON_COUNT] = {"A", "B", "X", "Y", "LB", "RB", "LT", "RT", "View", "Menu", "L3", "R3",
-		"D-pad up", "D-pad down", "D-pad left", "D-pad right"};
 	static LPCSTR stick[4] = {"up", "down", "left", "right"};
+	auto names = [](int b) { return gamepad_button_name(b); };
 	if (dik >= GP_LS_UP && dik <= GP_LS_RIGHT)
 		xr_sprintf(dest, dest_sz, "Pad left stick %s", stick[dik - GP_LS_UP]);
 	else if (dik >= GP_A + GP_AIM && dik < GP_A + GP_AIM + GP_BUTTON_COUNT)
-		xr_sprintf(dest, dest_sz, "Pad LT + %s", names[dik - GP_A - GP_AIM]);
+		xr_sprintf(dest, dest_sz, "Pad %s + %s", names(GP_LT - GP_A), names(dik - GP_A - GP_AIM));
 	else if (dik >= GP_A + GP_HOLD && dik < GP_A + GP_HOLD + GP_BUTTON_COUNT)
-		xr_sprintf(dest, dest_sz, "Pad %s (hold)", names[dik - GP_A - GP_HOLD]);
+		xr_sprintf(dest, dest_sz, "Pad %s (hold)", names(dik - GP_A - GP_HOLD));
 	else if (dik >= GP_A && dik < GP_A + GP_BUTTON_COUNT)
-		xr_sprintf(dest, dest_sz, "Pad %s", names[dik - GP_A]);
+		xr_sprintf(dest, dest_sz, "Pad %s", names(dik - GP_A));
 	else
 		return false;
 	return true;
@@ -573,8 +584,7 @@ bool g_gamepad_prompts = false;
 // reload)
 static bool gamepad_action_prompt(EGameActions action, LPSTR dest, int dest_sz)
 {
-	static LPCSTR names[GP_BUTTON_COUNT] = {"A", "B", "X", "Y", "LB", "RB", "LT", "RT", "View", "Menu", "L3", "R3",
-		"D-pad Up", "D-pad Down", "D-pad Left", "D-pad Right"};
+	auto names = [](int b) { return gamepad_button_name(b); };
 	auto does = [action](EGameActions bound)
 	{
 		return bound == action ||
@@ -582,13 +592,13 @@ static bool gamepad_action_prompt(EGameActions action, LPSTR dest, int dest_sz)
 	};
 	for (int b = 0; b < GP_BUTTON_COUNT; ++b)
 		if (does(gamepad_binding(GP_A + b)))
-			return xr_sprintf(dest, dest_sz, "%s", names[b]), true;
+			return xr_sprintf(dest, dest_sz, "%s", names(b)), true;
 	for (int b = 0; b < GP_BUTTON_COUNT; ++b)
 		if (does(gamepad_binding(GP_A + GP_AIM + b)))
-			return xr_sprintf(dest, dest_sz, "LT + %s", names[b]), true;
+			return xr_sprintf(dest, dest_sz, "%s + %s", names(GP_LT - GP_A), names(b)), true;
 	for (int b = 0; b < GP_BUTTON_COUNT; ++b)
 		if (does(gamepad_binding(GP_A + GP_HOLD + b)))
-			return xr_sprintf(dest, dest_sz, "Hold %s", names[b]), true;
+			return xr_sprintf(dest, dest_sz, "Hold %s", names(b)), true;
 	for (int key = GP_LS_UP; key <= GP_LS_RIGHT; ++key)
 		if (does(gamepad_binding(key)))
 			return xr_sprintf(dest, dest_sz, "Left Stick"), true;

@@ -319,6 +319,14 @@ function on_xml_read()
 						precondition = for_r4,
 					},
 					{
+						id           = "perf_overlay_mods",
+						type         = "list",
+						val          = 0,
+						cmd          = "perf_overlay_mods",
+						content      = {{"0", "perf_overlay_off"}, {"1", "perf_overlay_mods_on"}},
+						precondition = for_r4,
+					},
+					{
 						id           = "deck_preset",
 						type         = "check",
 						val          = 1,
