@@ -2,6 +2,7 @@
 #include "r4_frame_pacing.h"
 #include "../xrRender/HW.h"
 #include "../../xrEngine/Stats.h"
+#include "../../xrEngine/xr_ioconsole.h"
 #include <algorithm>
 #include <atomic>
 #include <thread>
@@ -40,6 +41,7 @@ namespace frame_pacing
 		float kb_ms, mouse_ms, mouse_read_ms; // the input step: keyboard read, mouse update, its DirectInput read
 		float stage[kStages]; // the engine's stage timers of the frame (kStageNames), from the next frame's start
 		bool jit;       // went through the just-in-time path
+		u8 part;        // the recording's part when the frame started (stat_frame_pacing mark)
 	};
 	static frame_info s_frames[kRing];
 	static u64 s_id = 1;
@@ -112,8 +114,16 @@ namespace frame_pacing
 		u32 msgs, mouse;
 		float kb_ms, mouse_ms, mouse_read_ms;
 		float stage[kStages];
+		u8 part;
 	};
 	static xr_vector<sample> s_samples;
+	// Named parts of a recording (stat_frame_pacing mark <name>): part 0 is before the first mark
+	static const u32 kParts = 32;
+	static xr_vector<shared_str> s_parts;
+	static u8 s_part = 0;
+	// A benchmark's result file (stat_frame_pacing result <name>): its name and the lines the benchmark adds
+	static shared_str s_result_name;
+	static xr_vector<xr_string> s_result_notes;
 	static bool s_recording = false;
 	static bool s_rec_open = false;   // frames still being added
 	static u64 s_rec_first = 0, s_rec_last = 0;
@@ -435,6 +445,7 @@ namespace frame_pacing
 		s.mouse_ms = f.mouse_ms;
 		s.mouse_read_ms = f.mouse_read_ms;
 		memcpy(s.stage, f.stage, sizeof(s.stage));
+		s.part = f.part;
 		s_samples.push_back(s);
 		s_prev_present1 = f.present1;
 		s_prev_gpu_end = f.gpu_end;
@@ -479,6 +490,87 @@ namespace frame_pacing
 		}
 		st.deviation = float(_sqrt(var / double(st.n)));
 		return st;
+	}
+
+	// Each named part's frames (and the whole recording): fps, frame times, CPU and GPU per frame; to the log, and with a
+	// result name to logs/bench_<time>_<name>.txt with the settings and the benchmark's notes
+	static void parts_summary(const stats& all, float seconds)
+	{
+		if (s_parts.size() < 2 && !s_result_name.size())
+			return;
+		xr_vector<xr_string> lines;
+		char line[512];
+		auto add = [&](LPCSTR name, u32 part)
+		{
+			xr_vector<float> iv;
+			double cpu = 0, gpu = 0;
+			u32 n = 0, gpu_n = 0;
+			for (const sample& s : s_samples)
+			{
+				if (part != u32(-1) && s.part != part)
+					continue;
+				n++;
+				cpu += s.cpu;
+				if (s.gpu > 0.f)
+				{
+					gpu += s.gpu;
+					gpu_n++;
+				}
+				if (s.interval > 0.f)
+					iv.push_back(s.interval);
+			}
+			const stats st = compute(iv);
+			if (!st.n)
+				return;
+			xr_sprintf(line, "%-16s %6u frames  %6.1f fps  median %6.2f ms  1%% low %6.1f fps  longest %6.1f ms  stutters %4u  CPU %6.2f ms  GPU %6.2f ms",
+				name, st.n, 1000.f / st.mean, st.median, 1000.f / st.low1, st.longest, st.over2, float(cpu / n),
+				gpu_n ? float(gpu / gpu_n) : 0.f);
+			lines.push_back(line);
+		};
+		for (u32 p = 0; p < s_parts.size(); ++p)
+			add(s_parts[p].size() ? s_parts[p].c_str() : "(start)", p);
+		add("all", u32(-1));
+		Msg("* [Frame pacing] parts (stutters: frames over twice the median):");
+		for (const xr_string& l : lines)
+			Msg("*   %s", l.c_str());
+
+		if (!s_result_name.size())
+			return;
+		string64 stamp;
+		string_path name, path;
+		xr_sprintf(name, sizeof(name), "bench_%s_%s.txt", timestamp(stamp), s_result_name.c_str());
+		FS.update_path(path, "$logs$", name);
+		IWriter* w = FS.w_open(path);
+		if (!w)
+		{
+			Msg("! [Frame pacing] cannot write %s", path);
+			return;
+		}
+		char exe[MAX_PATH];
+		GetModuleFileNameA(nullptr, exe, sizeof(exe));
+		w->w_printf("neXt-Ray benchmark: %s\r\n", s_result_name.c_str());
+		w->w_printf("exe %s, built %s\r\n", strrchr(exe, '\\') ? strrchr(exe, '\\') + 1 : exe, __DATE__);
+		static const char* settings[] = { "vid_mode", "r4_upscaler", "r4_upscaler_quality", "r4_upscaler_scale", "r4_framegen",
+			"r__framelimit", "rs_v_sync", "texture_lod", "r4_sun_smap_scale", "r2_ls_squality", "ssfx_ao", "ssfx_ssr",
+			"ssfx_sss_quality", "ssfx_shadow_cascades", "r__detail_density", "r__detail_radius", "r__geometry_lod",
+			"r4_tree_instancing", "r4_tex_stream" };
+		w->w_printf("settings:");
+		for (const char* cmd : settings)
+			if (LPCSTR v = Console->GetString(cmd))
+				w->w_printf(" %s=%s;", cmd, v);
+		w->w_printf("\r\n");
+		for (const xr_string& n : s_result_notes)
+			w->w_printf("%s\r\n", n.c_str());
+		w->w_printf("recorded %.1f s, %u frames%s\r\n\r\n", seconds, all.n, s_rec_presents_ok ? "" : ", no present count");
+		if (s_rec_presents_ok && s_rec_presents_ms > 0.f)
+			w->w_printf("on the screen: %.1f fps (frame generation included)\r\n",
+				float(s_rec_presents) * 1000.f / s_rec_presents_ms);
+		for (const xr_string& l : lines)
+			w->w_printf("%s\r\n", l.c_str());
+		FS.w_close(w);
+		Msg("* [Frame pacing] benchmark result: %s", path);
+		s_result_name = nullptr;
+		s_result_notes.clear();
 	}
 
 	static void finish()
@@ -588,7 +680,7 @@ namespace frame_pacing
 			Msg("! [Frame pacing] cannot write %s", path);
 			return;
 		}
-		w->w_printf("frame,t_ms,interval_ms,wait_ms,sleep_ms,cpu_ms,present_ms,gpu_ms,gpu_interval_ms,gpu_idle_ms,queued_ms,latency_ms,step_ms,msg_ms,msgs,mouse_events,input_kb_ms,input_mouse_ms,input_mouse_read_ms,%s\r\n", kStageNames);
+		w->w_printf("frame,t_ms,interval_ms,wait_ms,sleep_ms,cpu_ms,present_ms,gpu_ms,gpu_interval_ms,gpu_idle_ms,queued_ms,latency_ms,step_ms,msg_ms,msgs,mouse_events,input_kb_ms,input_mouse_ms,input_mouse_read_ms,%s,part\r\n", kStageNames);
 		for (u32 i = 0; i < n; i++)
 		{
 			const sample& s = s_samples[i];
@@ -596,18 +688,55 @@ namespace frame_pacing
 				s.present, s.gpu, s.gpu_interval, s.gpu_idle, s.queue, s.latency, s.step, s.msg_ms, s.msgs, s.mouse, s.kb_ms, s.mouse_ms, s.mouse_read_ms);
 			for (u32 k = 0; k < kStages; ++k)
 				w->w_printf(",%.3f", s.stage[k]);
-			w->w_printf("\r\n");
+			w->w_printf(",%s\r\n", s.part < s_parts.size() ? s_parts[s.part].c_str() : "");
 		}
 		FS.w_close(w);
 		Msg("*   written to %s", path);
+		parts_summary(c, seconds);
 		xrLogger::FlushLog();
 	}
 
 	// ------------------------------------------------------------------------------------------------------------
 
+	void mark(LPCSTR name)
+	{
+		if (!s_recording)
+			return;
+		for (u32 i = 0; i < s_parts.size(); ++i)
+			if (!xr_strcmp(s_parts[i].c_str(), name))
+			{
+				s_part = u8(i);
+				return;
+			}
+		if (s_parts.size() >= kParts)
+			return;
+		s_parts.push_back(shared_str(name));
+		s_part = u8(s_parts.size() - 1);
+	}
+
+	void stop()
+	{
+		if (s_rec_open)
+			s_rec_seconds = 0.f; // ends at the next Present
+	}
+
+	void result(LPCSTR name)
+	{
+		s_result_name = name;
+		s_result_notes.clear();
+	}
+
+	void note(LPCSTR text)
+	{
+		s_result_notes.push_back(text);
+	}
+
 	void start(float seconds)
 	{
 		s_samples.clear();
+		s_parts.clear();
+		s_parts.push_back(shared_str(""));
+		s_part = 0;
 		s_samples.reserve(u32(seconds * 250.f));
 		s_rec_first = s_id + 1;
 		s_rec_last = u64(-1);
@@ -657,6 +786,7 @@ namespace frame_pacing
 			}
 		}
 		f.jit = jit;
+		f.part = s_part;
 		f.start = CPU::QPC();
 		f.msg_ms = g_msg_loop_ms;
 		f.msgs = g_msg_loop_count;

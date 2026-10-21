@@ -34,6 +34,7 @@
 #include "../xrEngine/xr_input.h"
 #include "../xrEngine/x_ray.h"
 #include "gamepad.h"
+#include "camera_flight.h"
 
 #ifndef MASTER_GOLD
 #	include "custommonster.h"
@@ -666,6 +667,7 @@ void CGamePersistent::OnFrame()
 	// The next level read ahead (level_changer.cpp): freed once it's loaded, or 2 minutes after the actor left
 	// (a level being changed has no name yet)
 	LPCSTR level_name = g_pGameLevel ? g_pGameLevel->name().c_str() : nullptr;
+	camera_flight::frame();
 	if (level_preload::pending()[0] && level_name && !Device.dwPrecacheFrame)
 	{
 		if (!xr_strcmp(level_preload::pending(), level_name))

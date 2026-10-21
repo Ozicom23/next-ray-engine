@@ -55,6 +55,9 @@ private:
 	float m_fAngSpeed3;
 	float m_fCameraBoundary;
 	float m_fGroundPosition;
+	// A key every m_fAutoKey seconds (0: only SPACE adds one)
+	float m_fAutoKey;
+	float m_fAutoKeyTime;
 
 	BOOL isInputBlocked;
 	xr_unordered_set<CDemoRecord*>* pDemoRecords;
@@ -82,6 +85,7 @@ public:
 	void StopDemo();
 	void EnableReturnCtrlInputs();
 	void SetCameraBoundary(float boundary);
+	void SetAutoKey(float seconds) { m_fAutoKey = seconds; m_fAutoKeyTime = 0; }
 	virtual BOOL ProcessCam(SCamEffectorInfo& info);
 	static void SetGlobalPosition(const Fvector& p) { g_position.p.set(p), g_position.set_position = true; }
 	static void GetGlobalPosition(Fvector& p) { p.set(g_position.p); }

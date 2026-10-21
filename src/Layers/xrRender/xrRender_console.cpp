@@ -796,8 +796,28 @@ public:
 	CCC_FramePacingStats(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; }
 	virtual void Execute(LPCSTR args)
 	{
-		const float seconds = float(atof(args));
-		frame_pacing::start(seconds > 0.f ? _min(seconds, 120.f) : 10.f);
+		// stat_frame_pacing [seconds] | mark <name> | stop | result <name> | note <text>
+		auto arg = [&](LPCSTR word) -> LPCSTR
+		{
+			const size_t len = xr_strlen(word);
+			if (strncmp(args, word, len) || (args[len] && args[len] != ' '))
+				return nullptr;
+			return args[len] ? args + len + 1 : args + len;
+		};
+		if (LPCSTR name = arg("mark"))
+			frame_pacing::mark(name);
+		else if (arg("stop"))
+			frame_pacing::stop();
+		else if (LPCSTR name = arg("result"))
+			frame_pacing::result(name);
+		else if (LPCSTR text = arg("note"))
+			frame_pacing::note(text);
+		else
+		{
+			// Up to an hour (benchmarks end it with stop)
+			const float seconds = float(atof(args));
+			frame_pacing::start(seconds > 0.f ? _min(seconds, 3600.f) : 10.f);
+		}
 	}
 	virtual void Info(TInfo& I)
 	{

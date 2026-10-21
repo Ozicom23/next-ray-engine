@@ -20,6 +20,7 @@ class ENGINE_API CDemoPlay : public CEffectorCam
 	int m_count;
 	float fStartTime;
 	float fSpeed;
+	float fHold;
 	u32 dwCyclesLeft;
 
 	// statistics
@@ -34,8 +35,11 @@ class ENGINE_API CDemoPlay : public CEffectorCam
 public:
 	virtual BOOL ProcessCam(SCamEffectorInfo& info);
 
-	CDemoPlay(const char* name, float ms, u32 cycles, float life_time = 60 * 60 * 1000);
+	// hold: seconds the first key is held before the flight starts (so the view there streams in)
+	CDemoPlay(const char* name, float ms, u32 cycles, float life_time = 60 * 60 * 1000, float hold = 0);
 	virtual ~CDemoPlay();
+
+	bool Holding() const { return fHold > 0 || Device.dwPrecacheFrame; }
 };
 
 #endif // !defined(AFX_FDEMOPLAY_H__9B07E6E0_FC3C_11D3_B4E3_4854E82A090D__INCLUDED_)

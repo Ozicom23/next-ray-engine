@@ -18,9 +18,17 @@
 //   stat_frame_pacing [seconds]: each frame's interval, latency wait, sleep, CPU, Present, GPU time, GPU idle, queue
 //     time, latency (frame start to GPU completion), time in the message loop before the frame with its message count and
 //     the mouse events read, to logs/frame_pacing_<time>.csv, and a summary to the log (10 s)
+//   stat_frame_pacing mark <name>: the frames from here on belong to the part <name> (each part's summary at the end)
+//   stat_frame_pacing stop: ends the recording now
+//   stat_frame_pacing result <name>: the recording also writes logs/bench_<time>_<name>.txt (each part, the settings);
+//   stat_frame_pacing note <text>: a line for it (benchmarks: route, weather, stops)
 namespace frame_pacing
 {
 	void start(float seconds);
+	void mark(LPCSTR name);
+	void stop();
+	void result(LPCSTR name);
+	void note(LPCSTR text);
 	// stat_frame_pacing is recording (the engine's stage timers are gathered meanwhile)
 	bool recording();
 	// At the start of a frame of the game loop, after the latency wait (wait_ms spent in it). game_frame: not the

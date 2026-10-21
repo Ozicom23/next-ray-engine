@@ -16,7 +16,7 @@
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
 
-CDemoPlay::CDemoPlay(const char* name, float ms, u32 cycles, float life_time) : CEffectorCam(
+CDemoPlay::CDemoPlay(const char* name, float ms, u32 cycles, float life_time, float hold) : CEffectorCam(
 	cefDemo, life_time/*,FALSE*/)
 {
 	Msg("*** Playing demo: %s", name);
@@ -25,6 +25,7 @@ CDemoPlay::CDemoPlay(const char* name, float ms, u32 cycles, float life_time) : 
 		Console->Execute("hud_draw 0");
 
 	fSpeed = ms;
+	fHold = hold;
 	dwCyclesLeft = cycles ? cycles : 1;
 
 	m_pMotion = 0;
@@ -258,7 +259,10 @@ BOOL CDemoPlay::ProcessCam(SCamEffectorInfo& info)
 			return TRUE;
 		}
 
-		fStartTime += Device.fTimeDelta;
+		if (fHold > 0)
+			fHold -= Device.fTimeDelta;
+		else
+			fStartTime += Device.fTimeDelta;
 
 		float ip;
 		float p = fStartTime / fSpeed;
@@ -266,7 +270,8 @@ BOOL CDemoPlay::ProcessCam(SCamEffectorInfo& info)
 		int frame = iFloor(ip);
 		VERIFY(t >= 0);
 
-		if (frame >= m_count)
+		// The last cycle ends at its last key instead of flying on through the wrap to the first one
+		if (frame >= (dwCyclesLeft == 1 && m_count > 3 ? m_count - 3 : m_count))
 		{
 			dwCyclesLeft--;
 			if (0 == dwCyclesLeft) return FALSE;

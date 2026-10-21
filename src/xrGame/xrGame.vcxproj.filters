@@ -7113,6 +7113,9 @@
     <ClInclude Include="UICursor.h">
       <Filter>UI\Cursor</Filter>
     </ClInclude>
+    <ClInclude Include="camera_flight.h">
+      <Filter>Core\Common\Console Commands</Filter>
+    </ClInclude>
     <ClInclude Include="gamepad.h">
       <Filter>UI\Cursor</Filter>
     </ClInclude>
@@ -9726,6 +9729,9 @@
       <Filter>Core\Client\Spectator\Cameras</Filter>
     </ClCompile>
     <ClCompile Include="console_commands.cpp">
+      <Filter>Core\Common\Console Commands</Filter>
+    </ClCompile>
+    <ClCompile Include="camera_flight.cpp">
       <Filter>Core\Common\Console Commands</Filter>
     </ClCompile>
     <ClCompile Include="console_commands_mp.cpp">

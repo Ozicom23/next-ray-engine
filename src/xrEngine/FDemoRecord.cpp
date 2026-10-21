@@ -76,6 +76,8 @@ CDemoRecord::CDemoRecord(const char* name, float life_time, BOOL return_ctrl_inp
 	 psHUD_Flags.set(HUD_CROSSHAIR, FALSE);
 	 */
 	m_b_redirect_input_to_level = false;
+	m_fAutoKey = 0;
+	m_fAutoKeyTime = 0;
 	_unlink(name);
 	file = FS.w_open(name);
 	isInputBlocked = FALSE;
@@ -481,6 +483,12 @@ BOOL CDemoRecord::ProcessCam(SCamEffectorInfo& info)
 		info.n.set(m_Camera.j);
 		info.d.set(m_Camera.k);
 		info.p.set(m_Camera.c);
+
+		if (m_fAutoKey > 0)
+		{
+			for (m_fAutoKeyTime += Device.fTimeDelta; m_fAutoKeyTime >= m_fAutoKey; m_fAutoKeyTime -= m_fAutoKey)
+				RecordKey();
+		}
 
 		fLifeTime -= Device.fTimeDelta;
 		if (fLifeTime < 0) {

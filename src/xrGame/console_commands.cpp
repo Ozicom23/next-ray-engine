@@ -68,6 +68,7 @@
 #include "..\..\xrEngine\x_ray.h"
 
 #include "NewZoomFlag.h"
+#include "camera_flight.h"
 float n_zoom_step_count = 3.0f;
 
 string_path g_last_saved_game;
@@ -2793,6 +2794,7 @@ void CCC_RegisterCommands()
 	// Demo
 	//#ifndef MASTER_GOLD
 	CMD1(CCC_DemoPlay, "demo_play");
+	camera_flight::register_commands();
 	CMD1(CCC_DemoRecord, "demo_record");
 	CMD1(CCC_DemoRecordBlockedInput, "demo_record_blocked_input");
 	CMD1(CCC_DemoRecordStop, "demo_record_stop");
