@@ -55,6 +55,9 @@ struct Context::Impl : public Context::NativeRecorder
 	ID3D12Device* d3d = nullptr;
 
 	ID3D12GraphicsCommandList* list = nullptr;
+	ID3D12GraphicsCommandList5* list5 = nullptr; // variable rate shading (tier 2 only)
+	Resource* vrs_image = nullptr; // SetShadingRateImage
+	bool vrs_dirty = true, vrs_applied = true;
 	ID3D12CommandAllocator* allocator[kFrames] = {};
 	u64 frame_fence[kFrames] = {};
 	UINT frame_index = 0;
@@ -277,6 +280,7 @@ struct Context::Impl : public Context::NativeRecorder
 		vb_applied_valid = false;
 		ib_applied_valid = false;
 		rt_dirty = vp_dirty = sc_dirty = topo_dirty = ref_dirty = factor_dirty = true;
+		vrs_dirty = vrs_applied = true;
 	}
 
 	//---------------------------------------------------------------------------------------------------------------
@@ -802,6 +806,8 @@ struct Context::Impl : public Context::NativeRecorder
 			}
 			for (UINT s = StageVS; s <= StagePS; ++s)
 				PrepareStageViews(s, outputs, output_res, output_count);
+			if (vrs_image && list5)
+				RequireWhole(vrs_image, D3D12_RESOURCE_STATE_SHADING_RATE_SOURCE);
 			// Static vertex and index buffers stay in their read state from creation on
 			FlushBarriers();
 
@@ -928,6 +934,16 @@ struct Context::Impl : public Context::NativeRecorder
 				rt_dirty = false;
 			}
 		}
+		if (vrs_dirty && list5 && (vrs_image || vrs_applied))
+		{
+			// The image's rate as it is (the per-draw and per-primitive rates stay 1x1)
+			static const D3D12_SHADING_RATE_COMBINER image[2] = { D3D12_SHADING_RATE_COMBINER_PASSTHROUGH,
+			                                                      D3D12_SHADING_RATE_COMBINER_OVERRIDE };
+			list5->RSSetShadingRate(D3D12_SHADING_RATE_1X1, vrs_image ? image : nullptr);
+			list5->RSSetShadingRateImage(vrs_image ? vrs_image->m_resource : nullptr);
+			vrs_applied = vrs_image != nullptr;
+		}
+		vrs_dirty = false;
 		if (vp_dirty)
 		{
 			if (viewport_count)
@@ -1197,6 +1213,35 @@ struct Context::Impl : public Context::NativeRecorder
 		if (rtv)
 			*rtv = device->CurrentBackBufferRTV();
 		return device->CurrentBackBuffer();
+	}
+
+	// HDR output: the SDR frame drawn into dst through the conversion (Device::Impl::CreateHdrPipeline)
+	void ConvertOutput(Resource* dst, D3D12_CPU_DESCRIPTOR_HANDLE rtv)
+	{
+		Texture2D* src = dev->sdr_target;
+		if (!src || !dst || !dev->hdr_pipeline)
+			return;
+		RequireWhole(src, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+		RequireWhole(dst, D3D12_RESOURCE_STATE_RENDER_TARGET);
+		FlushBarriers();
+		Record();
+		SetHeaps();
+		D3D12_CPU_DESCRIPTOR_HANDLE cpu;
+		D3D12_GPU_DESCRIPTOR_HANDLE gpu;
+		AllocViews(1, cpu, gpu);
+		d3d->CreateShaderResourceView(src->m_resource, nullptr, cpu);
+		list->SetGraphicsRootSignature(dev->hdr_signature);
+		list->SetPipelineState(dev->hdr_pipeline);
+		list->SetGraphicsRootDescriptorTable(0, gpu);
+		list->SetGraphicsRoot32BitConstants(1, 4, dev->hdr_params, 0);
+		list->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+		const D3D12_VIEWPORT vp = { 0.f, 0.f, float(dst->m_width), float(dst->m_height), 0.f, 1.f };
+		const D3D12_RECT sc = { 0, 0, LONG(dst->m_width), LONG(dst->m_height) };
+		list->RSSetViewports(1, &vp);
+		list->RSSetScissorRects(1, &sc);
+		list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		list->DrawInstanced(3, 1, 0, 0);
+		InvalidateApplied();
 	}
 };
 
@@ -1718,6 +1763,8 @@ Context::Context(Device* device)
 		d3d->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&c.allocator[i]));
 	d3d->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, c.allocator[0], nullptr, IID_PPV_ARGS(&c.list));
 	c.list->SetName(L"xr frame");
+	if (device->ShadingRateTileSize())
+		c.list->QueryInterface(IID_PPV_ARGS(&c.list5));
 
 	D3D12_DESCRIPTOR_HEAP_DESC hd = {};
 	hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
@@ -1807,6 +1854,8 @@ Context::~Context()
 	c.dev->rtv_pool.Free(c.null_rtv_slot);
 	c.list->Close();
 	m_front->upload.Destroy();
+	if (c.list5)
+		c.list5->Release();
 	c.list->Release();
 	for (ID3D12CommandAllocator* a : c.allocator)
 		if (a)
@@ -3176,8 +3225,12 @@ HRESULT Context::Present(IDXGISwapChain1* swap_chain, UINT interval, UINT flags)
 	Front& f = *m_front;
 	const u64 frame = f.frame;
 	f.Emit([swap_chain, interval, flags, frame](Impl& c) {
-		if (Texture2D* bb = c.device->CurrentBackBuffer())
+		D3D12_CPU_DESCRIPTOR_HANDLE rtv = {};
+		if (Texture2D* bb = c.device->SwapChainBuffer(&rtv))
+		{
+			c.ConvertOutput(bb, rtv); // HDR output
 			c.RequireWhole(bb, D3D12_RESOURCE_STATE_PRESENT);
+		}
 		const u64 fence = c.Submit(false);
 		const HRESULT hr = swap_chain ? swap_chain->Present(interval, flags) : S_OK;
 		if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET)
@@ -3225,6 +3278,29 @@ void Context::ExecuteNative(std::function<void(NativeRecorder&)> fn)
 		fn(c);
 		// The native code set its own pipeline, root signature, heaps and targets
 		c.InvalidateApplied();
+	});
+}
+
+void Context::ConvertOutput(Resource* dst)
+{
+	if (!dst || !m_impl->device->HdrOutput())
+		return;
+	const D3D12_CPU_DESCRIPTOR_HANDLE rtv = m_impl->device->HdrTargetRTV(dst);
+	Front& f = *m_front;
+	f.BeforeWork();
+	f.Emit([dst, rtv](Impl& c) { c.ConvertOutput(dst, rtv); });
+}
+
+void Context::SetShadingRateImage(Resource* image)
+{
+	if (!m_impl->list5 && image)
+		return;
+	m_front->Emit([image](Impl& c) {
+		if (c.vrs_image != image)
+		{
+			c.vrs_image = image;
+			c.vrs_dirty = true;
+		}
 	});
 }
 

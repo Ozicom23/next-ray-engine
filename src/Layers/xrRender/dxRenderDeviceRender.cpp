@@ -482,6 +482,7 @@ void dxRenderDeviceRender::End()
 #ifdef USE_DX12
 		// The frame's commands go to the queue, then the swap chain presents
 		framegen::skip_frame();
+		HW.pDevice->SetHdrParams(ps_r4_hdr_paper_white, ps_r4_hdr_peak, ps_r4_hdr_expand); // HDR output, read at Present
 		HW.pContext->Present(HW.m_pSwapChain, present_interval, present_flags);
 		framegen::after_present();
 #else

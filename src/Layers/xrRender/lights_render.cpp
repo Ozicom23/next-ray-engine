@@ -3,6 +3,7 @@
 #include "FBasicVisual.h"
 #include "SkeletonCustom.h"
 #include "light_smap_keep.h"
+#include "../xrRenderPC_R4/r4_vrs.h"
 
 extern int ps_r2_shadow_omnipart_vischeck;
 
@@ -638,7 +639,13 @@ void CRender::render_lights(light_Package& LP)
 #ifdef USE_DX11
 					Target->smap_keep_bind(L);
 #endif
+#ifdef USE_DX12
+					vrs::begin();
+#endif
 					Target->accum_spot(L);
+#ifdef USE_DX12
+					vrs::end();
+#endif
 					render_indirect(L);
 					if (L->flags.bVolumetric && RImplementation.o.advancedpp && ps_r2_ls_flags.is(R2FLAG_VOLUMETRIC_LIGHTS))
 					{
@@ -689,7 +696,13 @@ void CRender::render_lights(light_Package& LP)
 					if (!L->vis.visible)
 						continue;
 
+#ifdef USE_DX12
+					vrs::begin();
+#endif
 					Target->accum_point(L);
+#ifdef USE_DX12
+					vrs::end();
+#endif
 					++stats.ls_unshadowed_point_rendered;
 					render_indirect(L);
 				}
@@ -709,7 +722,13 @@ void CRender::render_lights(light_Package& LP)
 					if (!L->vis.visible)
 						continue;
 
+#ifdef USE_DX12
+					vrs::begin();
+#endif
 					Target->accum_spot(L);
+#ifdef USE_DX12
+					vrs::end();
+#endif
 					++stats.ls_unshadowed_spot_rendered;
 					render_indirect(L);
 				}

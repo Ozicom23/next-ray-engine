@@ -10,6 +10,9 @@
 // when the map's size changed. Near shadows (cascade 0) are not kept.
 //   r4_sun_cascade_cache 0/1/2: off, the far cascade, the two far cascades
 //   r4_sun_cascade_cache_drift: texels of sun movement allowed before a refresh (0.5)
+//   r4_sun_cascade_cache_trees 0/1/2: the trees and bushes kept in the map too in the far cascade, the two far cascades
+//     (their shadows there stop swaying, they change at a refresh; the trees were ~70% of the far cascades' GPU time on
+//     the Steam Deck)
 //   stat_sun_cache <seconds>: frames served from the kept maps and refreshes with their reasons, in the log
 namespace sun_cache
 {
@@ -25,6 +28,8 @@ namespace sun_cache
 	CFrustum& big_frustum(u32 cascade);
 	// Binds the kept map as the depth target (cleared, no color target), sets its viewport and the shadow states
 	void begin_refresh(u32 cascade);
+	// The kept map holds the trees and bushes too (r4_sun_cascade_cache_trees): they aren't drawn over the window
+	bool keeps_trees(u32 cascade, u32 cascade_count);
 	// Draws the window into the atlas (bound as the depth target with the cascade's viewport). Raw device calls: the
 	// backend's state is reset after it, the caller sets its targets and state anew
 	void draw_window(u32 cascade, ID3DDepthStencilView* atlas, u32 used);

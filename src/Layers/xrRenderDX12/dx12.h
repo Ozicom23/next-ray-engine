@@ -423,6 +423,20 @@ public:
 	Texture2D* BackBufferAlias();
 	Texture2D* CurrentBackBuffer(); // where commands are recorded (the context's worker when threaded)
 	D3D12_CPU_DESCRIPTOR_HANDLE CurrentBackBufferRTV();
+	Texture2D* SwapChainBuffer(D3D12_CPU_DESCRIPTOR_HANDLE* rtv); // the swap chain's current buffer, HDR output or not
+
+	// HDR output (set before AttachSwapChain, on an R10G10B10A2 swap chain in the HDR10 color space): the renderer draws
+	// SDR as before into a texture the back buffer stands for, Present converts it (SDR white at paper_white nits,
+	// highlights raised toward peak nits by expand, 0: none) into the swap chain's buffer. Off when it can't be set up
+	void SetHdrOutput(bool on);
+	bool HdrOutput() const;
+	void SetHdrParams(float paper_white, float peak, float expand);
+	DXGI_FORMAT SwapChainFormat() const;
+
+	// Variable rate shading with a shading rate image (tier 2): its tile size in pixels, 0 without
+	UINT ShadingRateTileSize() const { return m_vrs_tile; }
+	UINT m_vrs_tile = 0;
+	D3D12_CPU_DESCRIPTOR_HANDLE HdrTargetRTV(Resource* target); // a conversion target's view (Context::ConvertOutput)
 
 	// Pipeline cache on disk: the pipelines created in earlier runs are created again on a background thread, the new
 	// ones are added to the file
@@ -581,6 +595,12 @@ public:
 		virtual Texture2D* BackBuffer(D3D12_CPU_DESCRIPTOR_HANDLE* rtv) = 0; // the swap chain buffer being drawn
 	};
 	void ExecuteNative(std::function<void(NativeRecorder&)> fn);
+	// HDR output: the SDR back buffer converted into dst (R10G10B10A2, a render target), as Present does it into the
+	// swap chain's buffer (frame generation's image without the UI)
+	void ConvertOutput(Resource* dst);
+	// Variable rate shading: the draws that follow take their shading rate from image (R8_UINT, a D3D12_SHADING_RATE per
+	// tile, Device::ShadingRateTileSize pixels each), null: full rate again
+	void SetShadingRateImage(Resource* image);
 	ID3D12DescriptorHeap* ShaderVisibleHeap() const;
 	// Signals a fence on the queue right after the next submission of the frame's commands (frame pacing: the GPU
 	// reached the end of the frame)

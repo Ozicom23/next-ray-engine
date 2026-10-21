@@ -3,6 +3,7 @@
 #pragma hdrstop
 
 #include "dx12Internal.h"
+#include <D3DCompiler.h>
 
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxguid.lib")
@@ -922,6 +923,15 @@ Device* Device::Create(IDXGIAdapter1* adapter, bool debug_layer)
 	}
 
 	d.serialize_root_signature = D3D12SerializeRootSignature;
+
+	{
+		D3D12_FEATURE_DATA_D3D12_OPTIONS6 o6 = {};
+		if (SUCCEEDED(d3d->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS6, &o6, sizeof(o6))) &&
+		    o6.VariableShadingRateTier >= D3D12_VARIABLE_SHADING_RATE_TIER_2)
+			device->m_vrs_tile = o6.ShadingRateImageTileSize;
+		Msg("* D3D12: variable rate shading %s", device->m_vrs_tile ? make_string("tier 2, %u px tiles", device->m_vrs_tile).c_str() :
+		    "with an image unsupported");
+	}
 
 	// Initial upload list
 	for (UINT i = 0; i < kFrames + 1; ++i)
@@ -2103,7 +2113,35 @@ HRESULT Device::AttachSwapChain(IDXGISwapChain1* swap_chain)
 	}
 	DXGI_SWAP_CHAIN_DESC1 sd = {};
 	swap_chain->GetDesc1(&sd);
-	d.back_buffer_format = sd.Format;
+	d.swap_chain_format = sd.Format;
+	// HDR output: the renderer sees an SDR back buffer, sdr_target
+	if (d.hdr_output)
+	{
+		D3D11_TEXTURE2D_DESC td = {};
+		td.Width = sd.Width;
+		td.Height = sd.Height;
+		td.MipLevels = 1;
+		td.ArraySize = 1;
+		td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		td.SampleDesc.Count = 1;
+		td.Usage = D3D11_USAGE_DEFAULT;
+		td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+		if (sd.Format != DXGI_FORMAT_R10G10B10A2_UNORM || !d.CreateHdrPipeline(m_device) ||
+		    FAILED(CreateTexture2D(&td, nullptr, &d.sdr_target)))
+		{
+			Msg("! D3D12: HDR output unavailable, SDR");
+			d.hdr_output = false; // the 10-bit buffers take the SDR frame as it is
+		}
+		else
+		{
+			d.sdr_target->m_debug_name = "hdr_output_sdr";
+			d.sdr_rtv_slot = d.rtv_pool.Alloc(&d.sdr_rtv);
+			m_device->CreateRenderTargetView(d.sdr_target->m_resource, nullptr, d.sdr_rtv);
+			Msg("* D3D12: HDR output, the frame drawn in SDR and converted to HDR10 at Present");
+		}
+	}
+	const DXGI_FORMAT seen_format = d.sdr_target ? DXGI_FORMAT_R8G8B8A8_UNORM : sd.Format;
+	d.back_buffer_format = seen_format;
 	for (UINT i = 0; i < sd.BufferCount; ++i)
 	{
 		ID3D12Resource* res = nullptr;
@@ -2139,8 +2177,9 @@ HRESULT Device::AttachSwapChain(IDXGISwapChain1* swap_chain)
 			}
 			Texture2D* a = d.back_buffer_alias;
 			a->m_desc = t->m_desc;
+			a->m_desc.Format = seen_format;
 			FillTextureResource(a, D3D11_RESOURCE_DIMENSION_TEXTURE2D, D3D11_USAGE_DEFAULT, D3D11_BIND_RENDER_TARGET, 0, 0,
-			                    sd.Format, sd.Width, sd.Height, 1, 1, 1, 0);
+			                    seen_format, sd.Width, sd.Height, 1, 1, 1, 0);
 		}
 
 		D3D12_CPU_DESCRIPTOR_HANDLE h;
@@ -2149,6 +2188,135 @@ HRESULT Device::AttachSwapChain(IDXGISwapChain1* swap_chain)
 		m_device->CreateRenderTargetView(res, nullptr, h);
 	}
 	return S_OK;
+}
+
+// The conversion: the SDR frame as an SDR display shows it (gamma 2.2), SDR white at hdr_params[0] nits, highlights
+// above the knee raised toward the peak (hdr_params[1] nits) by hdr_params[2] (0: none), Rec.709 to Rec.2020, PQ
+bool Device::Impl::CreateHdrPipeline(ID3D12Device* d3d)
+{
+	if (hdr_pipeline)
+		return true;
+	static const char kShader[] = R"(
+Texture2D<float4> sdr : register(t0);
+cbuffer P : register(b0) { float paper_white; float peak; float expand; float pad; };
+float4 vs(uint id : SV_VertexID) : SV_Position
+{
+	float2 uv = float2((id << 1) & 2, id & 2);
+	return float4(uv * float2(2, -2) + float2(-1, 1), 0, 1);
+}
+float3 pq(float3 nits)
+{
+	const float m1 = 0.1593017578125, m2 = 78.84375, c1 = 0.8359375, c2 = 18.8515625, c3 = 18.6875;
+	float3 y = pow(saturate(nits / 10000.0), m1);
+	return pow((c1 + c2 * y) / (1.0 + c3 * y), m2);
+}
+float4 ps(float4 pos : SV_Position) : SV_Target
+{
+	float3 c = pow(saturate(sdr.Load(int3(pos.xy, 0)).rgb), 2.2);
+	const float knee = 0.5;
+	float t = saturate((dot(c, float3(0.2126, 0.7152, 0.0722)) - knee) / (1.0 - knee));
+	c *= lerp(1.0, max(peak / paper_white, 1.0), expand * t * t);
+	c = mul(float3x3(0.6274040, 0.3292820, 0.0433136, 0.0690970, 0.9195400, 0.0113612, 0.0163916, 0.0880132, 0.8955950), c);
+	return float4(pq(c * paper_white), 1);
+}
+)";
+	ID3DBlob* vs = nullptr;
+	ID3DBlob* ps = nullptr;
+	ID3DBlob* err = nullptr;
+	HRESULT hr = D3DCompile(kShader, sizeof(kShader) - 1, "hdr_output", nullptr, nullptr, "vs", "vs_5_0", 0, 0, &vs, &err);
+	if (SUCCEEDED(hr))
+		hr = D3DCompile(kShader, sizeof(kShader) - 1, "hdr_output", nullptr, nullptr, "ps", "ps_5_0", 0, 0, &ps, &err);
+	if (FAILED(hr))
+	{
+		Msg("! D3D12: HDR output shader: %s", err ? static_cast<const char*>(err->GetBufferPointer()) : "?");
+		if (err)
+			err->Release();
+		if (vs)
+			vs->Release();
+		return false;
+	}
+
+	// The SDR frame (t0) and the parameters (b0, root constants)
+	D3D12_DESCRIPTOR_RANGE range = {};
+	range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+	range.NumDescriptors = 1;
+	D3D12_ROOT_PARAMETER params[2] = {};
+	params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+	params[0].DescriptorTable.NumDescriptorRanges = 1;
+	params[0].DescriptorTable.pDescriptorRanges = &range;
+	params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+	params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+	params[1].Constants.Num32BitValues = 4;
+	params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+	D3D12_ROOT_SIGNATURE_DESC rd = {};
+	rd.NumParameters = 2;
+	rd.pParameters = params;
+	ID3DBlob* blob = nullptr;
+	hr = serialize_root_signature(&rd, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &err);
+	if (SUCCEEDED(hr))
+	{
+		hr = d3d->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&hdr_signature));
+		blob->Release();
+	}
+	if (SUCCEEDED(hr))
+	{
+		D3D12_GRAPHICS_PIPELINE_STATE_DESC pd = {};
+		pd.pRootSignature = hdr_signature;
+		pd.VS = { vs->GetBufferPointer(), vs->GetBufferSize() };
+		pd.PS = { ps->GetBufferPointer(), ps->GetBufferSize() };
+		pd.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+		pd.SampleMask = UINT_MAX;
+		pd.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+		pd.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+		pd.RasterizerState.DepthClipEnable = TRUE;
+		pd.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+		pd.NumRenderTargets = 1;
+		pd.RTVFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM;
+		pd.SampleDesc.Count = 1;
+		hr = d3d->CreateGraphicsPipelineState(&pd, IID_PPV_ARGS(&hdr_pipeline));
+	}
+	if (err)
+		err->Release();
+	vs->Release();
+	ps->Release();
+	if (FAILED(hr))
+	{
+		Msg("! D3D12: HDR output pipeline: 0x%08x", hr);
+		if (hdr_signature)
+			hdr_signature->Release();
+		hdr_signature = nullptr;
+		return false;
+	}
+	return true;
+}
+
+void Device::SetHdrOutput(bool on) { m_impl->hdr_output = on; }
+bool Device::HdrOutput() const { return m_impl->hdr_output && m_impl->sdr_target; }
+DXGI_FORMAT Device::SwapChainFormat() const { return m_impl->swap_chain_format; }
+
+void Device::SetHdrParams(float paper_white, float peak, float expand)
+{
+	float* p = m_impl->hdr_params;
+	p[0] = paper_white;
+	p[1] = peak;
+	p[2] = expand;
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE Device::HdrTargetRTV(Resource* target)
+{
+	Impl& d = *m_impl;
+	std::lock_guard<std::mutex> lock(d.hdr_lock);
+	auto it = d.hdr_rtvs.find(target->m_resource);
+	if (it != d.hdr_rtvs.end())
+		return it->second.second;
+	D3D12_CPU_DESCRIPTOR_HANDLE h;
+	const UINT slot = d.rtv_pool.Alloc(&h);
+	D3D12_RENDER_TARGET_VIEW_DESC rd = {};
+	rd.Format = DXGI_FORMAT_R10G10B10A2_UNORM;
+	rd.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+	m_device->CreateRenderTargetView(target->m_resource, &rd, h);
+	d.hdr_rtvs[target->m_resource] = { slot, h };
+	return h;
 }
 
 void Device::ReleaseBackBuffers()
@@ -2172,6 +2340,15 @@ void Device::ReleaseBackBuffers()
 		d.rtv_pool.Free(slot);
 	d.back_buffer_rtv_slots.clear();
 	d.back_buffer_rtv.clear();
+	if (d.sdr_target)
+	{
+		d.sdr_target->Release();
+		d.sdr_target = nullptr;
+		d.rtv_pool.Free(d.sdr_rtv_slot);
+	}
+	for (auto& r : d.hdr_rtvs)
+		d.rtv_pool.Free(r.second.first);
+	d.hdr_rtvs.clear();
 	if (d.swap_chain)
 	{
 		d.swap_chain->Release();
@@ -2182,18 +2359,29 @@ void Device::ReleaseBackBuffers()
 
 Texture2D* Device::CurrentBackBuffer()
 {
-	Impl& d = *m_impl;
-	if (!d.swap_chain || d.back_buffers.empty())
-		return nullptr;
-	return d.back_buffers[d.swap_chain->GetCurrentBackBufferIndex() % d.back_buffers.size()];
+	if (m_impl->sdr_target)
+		return m_impl->sdr_target;
+	return SwapChainBuffer(nullptr);
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE Device::CurrentBackBufferRTV()
 {
+	if (m_impl->sdr_target)
+		return m_impl->sdr_rtv;
+	D3D12_CPU_DESCRIPTOR_HANDLE h = { 0 };
+	SwapChainBuffer(&h);
+	return h;
+}
+
+Texture2D* Device::SwapChainBuffer(D3D12_CPU_DESCRIPTOR_HANDLE* rtv)
+{
 	Impl& d = *m_impl;
-	if (!d.swap_chain || d.back_buffer_rtv.empty())
-		return D3D12_CPU_DESCRIPTOR_HANDLE{ 0 };
-	return d.back_buffer_rtv[d.swap_chain->GetCurrentBackBufferIndex() % d.back_buffer_rtv.size()];
+	if (!d.swap_chain || d.back_buffers.empty())
+		return nullptr;
+	const UINT i = d.swap_chain->GetCurrentBackBufferIndex();
+	if (rtv && !d.back_buffer_rtv.empty())
+		*rtv = d.back_buffer_rtv[i % d.back_buffer_rtv.size()];
+	return d.back_buffers[i % d.back_buffers.size()];
 }
 
 HRESULT Device::CreateBackBufferRTV(RenderTargetView** out)

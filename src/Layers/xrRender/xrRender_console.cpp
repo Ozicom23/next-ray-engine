@@ -316,6 +316,12 @@ int   ps_r4_hdr10_pda             = 0;	    // r4-only (NOTE: this is a hack to n
 int   ps_r4_hdr10_on              = 0;	    // r4-only, default = off
 int   ps_r4_hdr10_colorspace      = 2;      // r4-only, default = Rec.2020
 
+// HDR output (DX12, vid_restart): the SDR frame as it is drawn shown on an HDR10 display (dx12::Device::SetHdrOutput)
+int   ps_r4_hdr_output      = 0;
+float ps_r4_hdr_paper_white = 200.f;  // nits of SDR white
+float ps_r4_hdr_peak        = 1000.f; // the display's peak nits
+float ps_r4_hdr_expand      = 0.f;    // highlights raised toward the peak, 0: the SDR image unchanged
+
 // Temporal upscaling: DLSS / FSR / XeSS (r4-only; XeSS in the DX12 renderer)
 u32   ps_r4_upscaler              = 0;      // r4-only, applied with vid_restart
 xr_token upscaler_token[] = {
@@ -707,6 +713,7 @@ public:
 	}
 };
 extern u32 ps_r4_framegen; // r4_framegen.cpp
+extern int ps_r4_framegen_async; // r4_framegen.cpp
 extern int ps_r4_xefg_ui; // r4_xefg.cpp
 // 0 and 1 as written by builds where it was a switch (FSR's)
 xr_token framegen_token[] = { { "off", 0 }, { "fsr", 1 }, { "xess", 2 }, { "0", 0 }, { "1", 1 }, { 0, 0 } };
@@ -754,6 +761,7 @@ namespace sun_receivers { void start_stats(float seconds); }
 extern int ps_r4_sun_caster_cull;
 namespace sun_cache { void start_stats(float seconds); }
 extern int ps_r4_sun_cascade_cache;
+extern int ps_r4_sun_cascade_cache_trees; // r4_sun_cache.cpp
 extern float ps_r4_sun_cascade_cache_drift;
 class CCC_SunCacheStats : public IConsole_Command
 {
@@ -767,6 +775,7 @@ public:
 };
 
 #include "../xrRenderPC_R4/r4_frame_pacing.h"
+#include "../xrRenderPC_R4/r4_vrs.h"
 extern int ps_r4_swap_wait;
 extern int ps_r4_frame_latency;
 extern int ps_r4_frame_jit;
@@ -1477,6 +1486,10 @@ void xrRender_initconsole()
 	CMD2(CCC_Dx12Threaded, "r__dx12_threaded", &ps_r__dx12_threaded);
 	CMD4(CCC_Integer, "r__dx12_gpu_pacing", &ps_r__dx12_gpu_pacing, 0, 1);
 	CMD3(CCC_Token, "r4_framegen", &ps_r4_framegen, framegen_token); // off, AMD FSR or Intel XeSS, vid_restart; needs an upscaler on
+	CMD4(CCC_Integer, "r4_framegen_async", &ps_r4_framegen_async, 0, 1); // FSR's interpolation on the swap chain's compute queue
+	CMD4(CCC_Integer, "r4_vrs", &ps_r4_vrs, 0, 1); // variable rate shading (r4_vrs.h)
+	CMD4(CCC_Float, "r4_vrs_threshold", &ps_r4_vrs_threshold, 0.f, 0.5f);
+	CMD4(CCC_IntegerNotSaved, "r4_vrs_debug", &ps_r4_vrs_debug, 0, 1);
 	CMD4(CCC_Integer, "r4_xefg_ui", &ps_r4_xefg_ui, 0, 1); // XeSS frame generation: UI composited (1) or interpolated, vid_restart
 #endif
 
@@ -1651,6 +1664,10 @@ void xrRender_initconsole()
     CMD4(CCC_Float,   "r4_hdr10_ui_nits", 		  &ps_r4_hdr10_ui_nits, 	     10.0f, 10000.0f);
     CMD4(CCC_Float,   "r4_hdr10_pda_intensity",   &ps_r4_hdr10_pda_intensity,      0.1, 2);
 	CMD4(CCC_Integer, "r4_hdr10_on", 			  &ps_r4_hdr10_on, 				     0, 1);
+	CMD4(CCC_Integer, "r4_hdr_output", &ps_r4_hdr_output, 0, 1);
+	CMD4(CCC_Float, "r4_hdr_paper_white", &ps_r4_hdr_paper_white, 80.f, 500.f);
+	CMD4(CCC_Float, "r4_hdr_peak", &ps_r4_hdr_peak, 200.f, 4000.f);
+	CMD4(CCC_Float, "r4_hdr_expand", &ps_r4_hdr_expand, 0.f, 1.f);
 
 	CMD3(CCC_Token,   "r4_upscaler",              &ps_r4_upscaler,                   upscaler_token);
 	CMD3(CCC_Token,   "r4_upscaler_quality",      &ps_r4_upscaler_quality,           upscaler_quality_token);
@@ -1687,6 +1704,7 @@ void xrRender_initconsole()
 	CMD4(CCC_IntegerNotSaved, "r4_cull_freeze", &ps_r4_cull_freeze, 0, 1);
 	CMD1(CCC_SunCasterStats, "stat_sun_casters");
 	CMD4(CCC_Integer, "r4_sun_cascade_cache", &ps_r4_sun_cascade_cache, 0, 2);
+	CMD4(CCC_Integer, "r4_sun_cascade_cache_trees", &ps_r4_sun_cascade_cache_trees, 0, 2);
 	CMD4(CCC_Float, "r4_sun_cascade_cache_drift", &ps_r4_sun_cascade_cache_drift, 0.1f, 4.f);
 	CMD1(CCC_SunCacheStats, "stat_sun_cache");
 	CMD4(CCC_Integer, "r4_swap_wait", &ps_r4_swap_wait, 0, 1);         // vid_restart

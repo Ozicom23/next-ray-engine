@@ -221,6 +221,20 @@ struct Device::Impl
 	DXGI_FORMAT back_buffer_format = DXGI_FORMAT_UNKNOWN;
 	Texture2D* back_buffer_alias = nullptr; // GetBackBuffer's texture: resolved to the current buffer at recording
 
+	// HDR output (SetHdrOutput): the renderer draws SDR into sdr_target, which the back buffer stands for, and
+	// Present converts it into the swap chain's HDR10 buffer
+	bool hdr_output = false;
+	DXGI_FORMAT swap_chain_format = DXGI_FORMAT_UNKNOWN;
+	Texture2D* sdr_target = nullptr;
+	UINT sdr_rtv_slot = 0;
+	D3D12_CPU_DESCRIPTOR_HANDLE sdr_rtv = {};
+	ID3D12RootSignature* hdr_signature = nullptr;
+	ID3D12PipelineState* hdr_pipeline = nullptr;
+	float hdr_params[4] = { 200.f, 1000.f, 0.f, 0.f }; // SDR white nits, peak nits, highlight expansion
+	std::mutex hdr_lock;
+	std::unordered_map<ID3D12Resource*, std::pair<UINT, D3D12_CPU_DESCRIPTOR_HANDLE>> hdr_rtvs; // other targets
+	bool CreateHdrPipeline(ID3D12Device* d3d);
+
 	// Null descriptors for unbound slots
 	D3D12_CPU_DESCRIPTOR_HANDLE null_srv[11] = {}; // per D3D12_SRV_DIMENSION (0: 2D)
 	D3D12_CPU_DESCRIPTOR_HANDLE null_uav = {};

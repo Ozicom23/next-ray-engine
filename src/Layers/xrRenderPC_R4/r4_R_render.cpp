@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "r4_hiz.h"
+#include "r4_vrs.h"
 #include "r4_tex_stream.h"
 #include "../../xrEngine/igame_persistent.h"
 #include "../xrRender/FBasicVisual.h"
@@ -212,8 +213,14 @@ void CRender::Render()
 		PIX_EVENT(DEFER_PART0_SPLIT);
 		// level, SPLIT
 		Target->phase_scene_begin();
+#ifdef USE_DX12
+		vrs::begin();
+#endif
 		{ PIX_EVENT(STATIC_GEOMETRY); GMBase.r_dsgraph_render_static(0); }
 		{ PIX_EVENT(DYNAMIC_OBJECTS); GMBase.r_dsgraph_render_dynamic(0); }
+#ifdef USE_DX12
+		vrs::end();
+#endif
 		Target->disable_aniso();
 		// Scene depth without HUD, for the occlusion culling of a later frame
 		if (hiz_frame)

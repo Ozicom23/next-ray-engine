@@ -19,12 +19,16 @@
 #pragma comment(lib, "winmm.lib")
 
 u32 ps_r4_framegen = 0;
+int ps_r4_framegen_async = 0;
 
 namespace framegen
 {
 namespace
 {
 const size_t kMaxContexts = 4; // optical flow, frame interpolation, shared resources, and one to spare
+// Frames whose interpolation inputs are kept apart: with r4_framegen_async a frame's interpolation runs on the swap
+// chain's compute queue while the next frames prepare theirs
+const u32 kSlots = 3;
 
 FfxSwapchain s_swap = nullptr;
 FfxInterface s_iface = {};
@@ -35,17 +39,19 @@ DXGI_FORMAT s_format = DXGI_FORMAT_UNKNOWN;
 FfxOpticalflowContext s_of = {};
 FfxFrameInterpolationContext s_fi = {};
 FfxUInt32 s_shared = 0;
-FfxResourceInternal s_of_vector = {}, s_of_scd = {}, s_dilated_depth = {}, s_dilated_mv = {}, s_prev_depth = {};
+FfxResourceInternal s_of_vector = {}, s_of_scd = {};
+FfxResourceInternal s_dilated_depth[kSlots] = {}, s_dilated_mv[kSlots] = {}, s_prev_depth[kSlots] = {};
+bool s_async = false; // the contexts and the swap chain configured for r4_framegen_async
 u64 s_frame_id = 0;
 bool s_had_inputs = false; // frame() ran since the last Present
 bool s_configured_on = false;
 std::atomic<u32> s_logged{ 0 };
 
 // Set where the commands are recorded, read by the callback in the same thread's Present
-FfxFrameInterpolationPrepareDescription s_prepared[2] = {};
+FfxFrameInterpolationPrepareDescription s_prepared[kSlots] = {};
 FfxResource s_hudless = {};
 
-ID3DTexture2D* s_hudless_tex = nullptr;
+ID3DTexture2D* s_hudless_tex[kSlots] = {};
 
 void log_error(const char* what, FfxErrorCode e)
 {
@@ -53,18 +59,18 @@ void log_error(const char* what, FfxErrorCode e)
 		Msg("! FSR frame generation: %s failed (0x%08x)", what, u32(e));
 }
 
-FfxResource ffx_resource(ID3DResource* r, const wchar_t* name)
+FfxResource ffx_resource(ID3DResource* r, const wchar_t* name, FfxResourceStates state = FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ)
 {
 	ID3D12Resource* native = r ? r->Native() : nullptr;
 	if (!native)
 		return FfxResource{};
-	return ffxGetResourceDX12(native, ffxGetResourceDescriptionDX12(native), name, FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ);
+	return ffxGetResourceDX12(native, ffxGetResourceDescriptionDX12(native), name, state);
 }
 
 // The swap chain's frame generation callback: optical flow from the HUD-less image, then the interpolated frame
 FfxErrorCode dispatch(const FfxFrameGenerationDispatchDescription* d, void*)
 {
-	const FfxFrameInterpolationPrepareDescription& prep = s_prepared[d->frameID & 1];
+	const FfxFrameInterpolationPrepareDescription& prep = s_prepared[d->frameID % kSlots];
 
 	FfxOpticalflowDispatchDescription of = {};
 	of.commandList = d->commandList;
@@ -117,7 +123,7 @@ void configure(bool on, u64 frame_id)
 	c.swapChain = s_swap;
 	c.frameGenerationCallback = on ? dispatch : nullptr;
 	c.frameGenerationEnabled = on;
-	c.allowAsyncWorkloads = false;
+	c.allowAsyncWorkloads = s_async;
 	c.HUDLessColor = on ? s_hudless : FfxResource{};
 	c.onlyPresentInterpolated = false;
 	c.interpolationRect = { 0, 0, int(s_display_w), int(s_display_h) };
@@ -131,9 +137,15 @@ void destroy_contexts()
 {
 	if (!s_ready)
 		return;
-	FfxResourceInternal* shared[] = { &s_of_vector, &s_of_scd, &s_dilated_depth, &s_dilated_mv, &s_prev_depth };
+	FfxResourceInternal* shared[] = { &s_of_vector, &s_of_scd };
 	for (FfxResourceInternal* r : shared)
 		s_iface.fpDestroyResource(&s_iface, *r, s_shared);
+	for (u32 i = 0; i < kSlots; ++i)
+	{
+		s_iface.fpDestroyResource(&s_iface, s_dilated_depth[i], s_shared);
+		s_iface.fpDestroyResource(&s_iface, s_dilated_mv[i], s_shared);
+		s_iface.fpDestroyResource(&s_iface, s_prev_depth[i], s_shared);
+	}
 	s_iface.fpDestroyBackendContext(&s_iface, s_shared);
 	ffxFrameInterpolationContextDestroy(&s_fi);
 	ffxOpticalflowContextDestroy(&s_of);
@@ -174,6 +186,9 @@ bool create_contexts(const FrameParams& p, DXGI_FORMAT format)
 	fi.backBufferFormat = ffxGetSurfaceFormatDX12(format);
 	fi.previousInterpolationSourceFormat = fi.backBufferFormat;
 	fi.backendInterface = s_iface;
+	s_async = ps_r4_framegen_async != 0;
+	if (s_async)
+		fi.flags |= FFX_FRAMEINTERPOLATION_ENABLE_ASYNC_SUPPORT;
 	if ((e = ffxFrameInterpolationContextCreate(&s_fi, &fi)) != FFX_OK)
 	{
 		log_error("frame interpolation context", e);
@@ -190,9 +205,12 @@ bool create_contexts(const FrameParams& p, DXGI_FORMAT format)
 	ffxFrameInterpolationGetSharedResourceDescriptions(&s_fi, &fir);
 	s_iface.fpCreateResource(&s_iface, &ofr.opticalFlowVector, s_shared, &s_of_vector);
 	s_iface.fpCreateResource(&s_iface, &ofr.opticalFlowSCD, s_shared, &s_of_scd);
-	s_iface.fpCreateResource(&s_iface, &fir.dilatedDepth, s_shared, &s_dilated_depth);
-	s_iface.fpCreateResource(&s_iface, &fir.dilatedMotionVectors, s_shared, &s_dilated_mv);
-	s_iface.fpCreateResource(&s_iface, &fir.reconstructedPrevNearestDepth, s_shared, &s_prev_depth);
+	for (u32 i = 0; i < kSlots; ++i)
+	{
+		s_iface.fpCreateResource(&s_iface, &fir.dilatedDepth, s_shared, &s_dilated_depth[i]);
+		s_iface.fpCreateResource(&s_iface, &fir.dilatedMotionVectors, s_shared, &s_dilated_mv[i]);
+		s_iface.fpCreateResource(&s_iface, &fir.reconstructedPrevNearestDepth, s_shared, &s_prev_depth[i]);
+	}
 
 	s_render_w = p.render_w;
 	s_render_h = p.render_h;
@@ -200,7 +218,8 @@ bool create_contexts(const FrameParams& p, DXGI_FORMAT format)
 	s_display_h = p.display_h;
 	s_format = format;
 	s_ready = true;
-	Msg("* FSR frame generation: %ux%u -> %ux%u, back buffer format %d", p.render_w, p.render_h, p.display_w, p.display_h, int(format));
+	Msg("* FSR frame generation: %ux%u -> %ux%u, back buffer format %d%s", p.render_w, p.render_h, p.display_w, p.display_h, int(format),
+	    s_async ? ", interpolation on the compute queue" : "");
 	return true;
 }
 } // namespace
@@ -239,28 +258,38 @@ void render_begin() { xefg::render_begin(); }
 void after_present() { xefg::after_present(); }
 void release() { xefg::release(); }
 
+// The presented image's format: the swap chain's (HDR output converts the SDR frame into it)
+static DXGI_FORMAT present_format()
+{
+	if (HW.pDevice->HdrOutput())
+		return HW.pDevice->SwapChainFormat();
+	dx12::Texture2D* bb = HW.pDevice->BackBufferAlias();
+	return bb ? bb->m_format : DXGI_FORMAT_UNKNOWN;
+}
+
 ID3DResource* hudless_target(u32 width, u32 height)
 {
-	dx12::Texture2D* bb = HW.pDevice->BackBufferAlias();
-	if (!bb || !width || !height)
+	const DXGI_FORMAT format = present_format();
+	if (format == DXGI_FORMAT_UNKNOWN || !width || !height)
 		return nullptr;
-	if (s_hudless_tex && s_hudless_tex->m_desc.Width == width && s_hudless_tex->m_desc.Height == height &&
-	    s_hudless_tex->m_desc.Format == bb->m_format)
-		return s_hudless_tex;
-	_RELEASE(s_hudless_tex);
+	// The slot of the frame() that follows (s_frame_id is its id)
+	ID3DTexture2D*& tex = s_hudless_tex[s_frame_id % kSlots];
+	if (tex && tex->m_desc.Width == width && tex->m_desc.Height == height && tex->m_desc.Format == format)
+		return tex;
+	_RELEASE(tex);
 	D3D11_TEXTURE2D_DESC d = {};
 	d.Width = width;
 	d.Height = height;
 	d.MipLevels = 1;
 	d.ArraySize = 1;
-	d.Format = bb->m_format;
+	d.Format = format;
 	d.SampleDesc.Count = 1;
 	d.Usage = D3D11_USAGE_DEFAULT;
-	d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-	if (FAILED(HW.pDevice->CreateTexture2D(&d, nullptr, &s_hudless_tex)))
+	d.BindFlags = D3D11_BIND_SHADER_RESOURCE | (HW.pDevice->HdrOutput() ? D3D11_BIND_RENDER_TARGET : 0);
+	if (FAILED(HW.pDevice->CreateTexture2D(&d, nullptr, &tex)))
 		return nullptr;
-	s_hudless_tex->m_debug_name = "framegen_hudless";
-	return s_hudless_tex;
+	tex->m_debug_name = "framegen_hudless";
+	return tex;
 }
 
 void frame(const FrameParams& p)
@@ -272,10 +301,9 @@ void frame(const FrameParams& p)
 	}
 	if (!s_swap || !p.depth || !p.motion || !p.hudless)
 		return;
-	dx12::Texture2D* bb = HW.pDevice->BackBufferAlias();
-	const DXGI_FORMAT format = bb ? bb->m_format : DXGI_FORMAT_UNKNOWN;
+	const DXGI_FORMAT format = present_format();
 	if (!s_ready || p.render_w != s_render_w || p.render_h != s_render_h || p.display_w != s_display_w ||
-	    p.display_h != s_display_h || format != s_format)
+	    p.display_h != s_display_h || format != s_format || s_async != (ps_r4_framegen_async != 0))
 	{
 		if (s_ready)
 		{
@@ -297,7 +325,8 @@ void frame(const FrameParams& p)
 		const D3D12_RESOURCE_STATES read = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 		r.Transition(q.depth, read);
 		r.Transition(q.motion, read);
-		r.Transition(q.hudless, read);
+		// Read on the compute queue with r4_framegen_async: a state compute work may use
+		r.Transition(q.hudless, s_async ? D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE : read);
 
 		FfxFrameInterpolationPrepareDescription d = {};
 		d.commandList = ffxGetCommandListDX12(r.List());
@@ -312,9 +341,10 @@ void frame(const FrameParams& p)
 		d.depth = ffx_resource(q.depth, L"xr depth");
 		d.motionVectors = ffx_resource(q.motion, L"xr motion vectors");
 		d.frameID = id;
-		d.dilatedDepth = s_iface.fpGetResource(&s_iface, s_dilated_depth);
-		d.dilatedMotionVectors = s_iface.fpGetResource(&s_iface, s_dilated_mv);
-		d.reconstructedPrevDepth = s_iface.fpGetResource(&s_iface, s_prev_depth);
+		const u32 slot = u32(id % kSlots);
+		d.dilatedDepth = s_iface.fpGetResource(&s_iface, s_dilated_depth[slot]);
+		d.dilatedMotionVectors = s_iface.fpGetResource(&s_iface, s_dilated_mv[slot]);
+		d.reconstructedPrevDepth = s_iface.fpGetResource(&s_iface, s_prev_depth[slot]);
 		d.cameraPosition[0] = q.camera_position.x;
 		d.cameraPosition[1] = q.camera_position.y;
 		d.cameraPosition[2] = q.camera_position.z;
@@ -330,8 +360,8 @@ void frame(const FrameParams& p)
 		const FfxErrorCode e = ffxFrameInterpolationPrepare(&s_fi, &d);
 		if (e != FFX_OK)
 			log_error("prepare", e);
-		s_prepared[id & 1] = d;
-		s_hudless = ffx_resource(q.hudless, L"xr hudless");
+		s_prepared[slot] = d;
+		s_hudless = ffx_resource(q.hudless, L"xr hudless", s_async ? FFX_RESOURCE_STATE_COMPUTE_READ : FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 		configure(true, id);
 	});
 }
@@ -361,7 +391,8 @@ void shutdown()
 	ffxWaitForPresents(s_swap);
 	HW.pDevice->WaitIdle();
 	destroy_contexts();
-	_RELEASE(s_hudless_tex);
+	for (ID3DTexture2D*& t : s_hudless_tex)
+		_RELEASE(t);
 	s_swap = nullptr;
 	s_configured_on = false;
 	s_had_inputs = false;

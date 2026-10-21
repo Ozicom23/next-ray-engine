@@ -3,6 +3,7 @@
 
 int ps_r4_sun_cascade_cache = 2;
 float ps_r4_sun_cascade_cache_drift = 0.5f;
+int ps_r4_sun_cascade_cache_trees = 0;
 
 namespace sun_cache
 {
@@ -35,6 +36,7 @@ namespace
 		CFrustum frustum; // its casters
 		Fvector dir; // the sun's direction it was drawn with
 		int ox = 0, oy = 0; // the window: the atlas pixel (0, 0) in the kept map
+		bool trees = false; // the trees and bushes drawn into it too
 		// stats
 		u32 frames = 0, refresh_sun = 0, refresh_view = 0, refresh_other = 0;
 	};
@@ -178,6 +180,11 @@ void start_stats(float seconds)
 	Msg("* [Sun cascade cache] measuring for %.0f s...", seconds);
 }
 
+bool keeps_trees(u32 cascade, u32 cascade_count)
+{
+	return cascade > 0 && cascade + u32(clampr(ps_r4_sun_cascade_cache_trees, 0, 2)) >= cascade_count;
+}
+
 mode frame(u32 cascade, u32 cascade_count, const Fmatrix& xform, u32 used, float size, float far_plane, const Fvector& sun_dir, Fmatrix& window_xform)
 {
 	if (s_stats && Device.dwTimeGlobal >= s_end_time)
@@ -262,7 +269,8 @@ mode frame(u32 cascade, u32 cascade_count, const Fmatrix& xform, u32 used, float
 		if (!inside)
 			reason = &e.refresh_view;
 	}
-	if (!e.valid)
+	const bool trees = keeps_trees(cascade, cascade_count);
+	if (!e.valid || e.trees != trees)
 		reason = &e.refresh_other;
 
 	if (reason)
@@ -282,6 +290,7 @@ mode frame(u32 cascade, u32 cascade_count, const Fmatrix& xform, u32 used, float
 		e.frustum.CreateFromMatrix(e.xform, FRUSTUM_P_ALL);
 		e.dir = sun_dir;
 		e.ox = e.oy = int(pad);
+		e.trees = trees;
 		e.valid = true;
 		result = m_refresh;
 	}

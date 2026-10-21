@@ -100,6 +100,7 @@ public:
 	HANDLE							m_hFrameLatency = nullptr;
 	bool							m_FrameWaitOwed = false; // a wait is due before the next Present (one per frame)
 	UINT	SwapChainFlags() const;
+	DXGI_FORMAT SwapChainFormat() const; // 10 bits with HDR10 (r4_hdr10_on) or HDR output (r4_hdr_output, DX12)
 	void	CreateSwapChain();  // from m_ChainDesc / m_ChainDescFullscreen, with the color space and the frame latency
 	void	DestroySwapChain();
 	void	SetupFrameLatency(); // r4_frame_latency on the swap chain (waitable) or the DXGI device

@@ -574,6 +574,7 @@
     <ClInclude Include="..\xrRenderPC_R4\r4_frame_pacing.h" />
     <ClInclude Include="..\xrRenderPC_R4\r4_upscaler.h" />
     <ClInclude Include="..\xrRenderPC_R4\r4_framegen.h" />
+    <ClInclude Include="..\xrRenderPC_R4\r4_vrs.h" />
     <ClInclude Include="..\xrRenderPC_R4\r4_rendertarget.h" />
     <ClInclude Include="..\xrRenderPC_R4\r4_rendertarget_wallmarks.h" />
     <ClInclude Include="..\xrRenderPC_R4\R_Backend_LOD.h" />
@@ -886,6 +887,7 @@
       <AdditionalIncludeDirectories>$(SolutionDir)3rd party\FidelityFX-FSR3\include;$(SolutionDir)3rd party\FidelityFX-FSR3\src\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\components;$(SolutionDir)3rd party\FidelityFX-FSR3\src\backends\shared;$(SolutionDir)3rd party\FidelityFX-FSR3\src\libs;$(SolutionDir)3rd party\FidelityFX-FSR3\generated_dx12;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;FFX_FI;FFX_OF;NOMINMAX;_CRT_SECURE_NO_WARNINGS;_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
+    <ClCompile Include="..\xrRenderPC_R4\r4_vrs.cpp" />
     <ClCompile Include="..\xrRenderPC_R4\r4_framegen.cpp">
       <AdditionalIncludeDirectories>$(SolutionDir)3rd party\FidelityFX-FSR3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>

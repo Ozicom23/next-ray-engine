@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "r4_vrs.h"
 #include "r4.h"
 #include "../xrRender/fbasicvisual.h"
 #include "../../xrEngine/xr_object.h"
@@ -576,6 +577,9 @@ void CRender::destroy()
 	shader_precompile::stop();
 	tex_streaming::clear();
 	hiz::destroy();
+#ifdef USE_DX12
+	vrs::release();
+#endif
 	light_smap_keep::destroy();
 	sun_cache::destroy();
 	m_bMakeAsyncSS = false;

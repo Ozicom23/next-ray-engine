@@ -478,7 +478,7 @@ void CHW::CreateDevice(HWND hwnd, bool move_window)
 
 #if defined(USE_DX11)
     sd.AlphaMode   = DXGI_ALPHA_MODE_IGNORE;
-    sd.Format      = ps_r4_hdr10_on ? DXGI_FORMAT_R10G10B10A2_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM;
+    sd.Format      = SwapChainFormat();
 #elif defined(USE_DX10)
     sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 #endif
@@ -716,6 +716,15 @@ void CHW::CreateDevice(HWND hwnd, bool move_window)
 }
 
 #if defined(USE_DX11)
+DXGI_FORMAT CHW::SwapChainFormat() const
+{
+#if defined(USE_DX12)
+    if (ps_r4_hdr_output && !ps_r4_hdr10_on)
+        return DXGI_FORMAT_R10G10B10A2_UNORM;
+#endif
+    return ps_r4_hdr10_on ? DXGI_FORMAT_R10G10B10A2_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM;
+}
+
 UINT CHW::SwapChainFlags() const
 {
     UINT flags = 0;
@@ -746,6 +755,21 @@ void CHW::CreateSwapChain()
     IDXGISwapChain3* swapchain3;
     R_CHK(m_pSwapChain->QueryInterface(&swapchain3));
 
+#if defined(USE_DX12)
+    // HDR output: the device converts the SDR frame at Present (dx12::Device::SetHdrOutput), on an HDR10 display only
+    bool hdr_output = false;
+    if (ps_r4_hdr_output && !ps_r4_hdr10_on) {
+        UINT color_space_supported = 0;
+        if (SUCCEEDED(swapchain3->CheckColorSpaceSupport(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020, &color_space_supported)) &&
+            (color_space_supported & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) &&
+            SUCCEEDED(swapchain3->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)))
+            hdr_output = true;
+        else
+            Log("! HDR output: the display takes no HDR10 (HDR off in the system or no HDR display), SDR");
+    }
+    pDevice->SetHdrOutput(hdr_output);
+    if (!hdr_output) // the color space set above
+#endif
     if (ps_r4_hdr10_on) {
         UINT color_space_supported = 0;
         R_CHK(swapchain3->CheckColorSpaceSupport(
@@ -946,7 +970,8 @@ void CHW::Reset(HWND hwnd)
     // The frame latency waitable object exists on windowed swap chains only. A swap chain with it, or one that has to
     // get or lose it, is created anew below instead of resized: the frame latency and the object's count start fresh
     const bool want_waitable = ps_r4_swap_wait && bWindowed;
-    if (want_waitable || m_FrameLatencyWaitable)
+    // HDR10 or HDR output turned on or off: a swap chain of the other format
+    if (want_waitable || m_FrameLatencyWaitable || cd.Format != SwapChainFormat())
     {
         if (!cd_fs.Windowed)
             m_pSwapChain->SetFullscreenState(FALSE, NULL);
@@ -955,6 +980,7 @@ void CHW::Reset(HWND hwnd)
         DestroySwapChain();
         m_FrameLatencyWaitable = want_waitable;
         cd.Flags = SwapChainFlags();
+        cd.Format = SwapChainFormat();
     }
     cd_fs.Windowed = bWindowed;
 #elif defined(USE_DX10)

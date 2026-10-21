@@ -369,7 +369,37 @@ function on_xml_read()
 						precondition = for_r4,
 					})
 				end
-				local in_basic = {upscaler = true, upscaler_quality = true, dlss_preset = true, fsr_sharpness = true, framegen = true}
+				-- HDR output and its brightness (the DX12 exe): after frame generation
+				if get_console():get_string("r__dx12_threaded") and get_console():get_string("r4_hdr_output") then
+					local at = #rows + 1
+					for i, row in ipairs(rows) do
+						if row.id == "perf_overlay" then
+							at = i
+							break
+						end
+					end
+					table.insert(rows, at, {
+						id           = "hdr_output",
+						type         = "list",
+						val          = 0,
+						cmd          = "r4_hdr_output",
+						content      = {{"0", "hdr_output_off"}, {"1", "hdr_output_on"}},
+						vid          = true,
+						precondition = for_r4,
+					})
+					table.insert(rows, at + 1, {
+						id           = "hdr_brightness",
+						type         = "track",
+						val          = 2,
+						cmd          = "r4_hdr_paper_white",
+						min          = 80,
+						max          = 500,
+						step         = 10,
+						precondition = for_r4,
+					})
+				end
+				local in_basic = {upscaler = true, upscaler_quality = true, dlss_preset = true, fsr_sharpness = true, framegen = true,
+					hdr_output = true, hdr_brightness = true}
 				for _, row in ipairs(rows) do
 					if in_basic[row.id] then
 						table.insert(basic.gr, row)

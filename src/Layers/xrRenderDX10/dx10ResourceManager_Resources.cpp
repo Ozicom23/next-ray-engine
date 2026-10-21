@@ -267,25 +267,32 @@ static bool patch_tree_instancing_shader(LPCSTR data, xr_string& patched)
 	if (!has_xform)
 		return false;
 
-	// main gets the instance's index, and sets the per-tree values first
-	size_t m = 0;
-	for (; (m = find_word(src, "main", m)) != xr_string::npos; m += 4)
+	// main gets the instance's index, and sets the per-tree values first. Every signature of main before its body gets
+	// the index: a shader can declare main under #ifdef / #else over one body (SSS's shadow_direct_tree.vs)
+	xr_vector<std::pair<size_t, size_t>> signatures; // the ( and ) of each
+	size_t brace = xr_string::npos;
+	for (size_t m = 0; (m = find_word(src, "main", m)) != xr_string::npos; m += 4)
 	{
-		const size_t open = src.find_first_not_of(" \t\r\n", m + 4);
-		if (open != xr_string::npos && src[open] == '(')
-		{
-			const size_t close = src.find(')', open);
-			const size_t brace = close == xr_string::npos ? close : src.find('{', close);
-			if (brace == xr_string::npos)
-				return false;
-			src.insert(brace + 1, assigns);
-			const bool empty = trim(src.substr(open + 1, close - open - 1)).empty();
-			src.insert(close, empty ? "uint xr_tree_iid : SV_InstanceID" : ", uint xr_tree_iid : SV_InstanceID");
+		if (brace != xr_string::npos && m > brace)
 			break;
-		}
+		const size_t open = src.find_first_not_of(" \t\r\n", m + 4);
+		if (open == xr_string::npos || src[open] != '(')
+			continue;
+		const size_t close = src.find(')', open);
+		if (close == xr_string::npos)
+			return false;
+		signatures.push_back({ open, close });
+		if (brace == xr_string::npos && (brace = src.find('{', close)) == xr_string::npos)
+			return false;
 	}
-	if (m == xr_string::npos)
+	if (signatures.empty())
 		return false;
+	src.insert(brace + 1, assigns);
+	for (auto it = signatures.rbegin(); it != signatures.rend(); ++it)
+	{
+		const bool empty = trim(src.substr(it->first + 1, it->second - it->first - 1)).empty();
+		src.insert(it->second, empty ? "uint xr_tree_iid : SV_InstanceID" : ", uint xr_tree_iid : SV_InstanceID");
+	}
 	patched = "cbuffer xr_tree_instances { float4 xr_tree_inst[32 * 9]; }\n#line 1\n" + src;
 	return true;
 }

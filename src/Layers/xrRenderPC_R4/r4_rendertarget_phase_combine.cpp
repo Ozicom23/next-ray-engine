@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "r4_vrs.h"
 #include "../../xrEngine/igame_persistent.h"
 #include "../../xrEngine/environment.h"
 
@@ -792,6 +793,11 @@ void CRenderTarget::phase_combine()
 	if (ps_r2_anomaly_flags.test(R2_AN_FLAG_FLARES) && ps_r2_heatvision == 0) //--DSR-- HeatVision
 		g_pGamePersistent->Environment().RenderFlares(); // lens-flares
 
+#ifdef USE_DX12
+	// Variable rate shading: the next frame's shading rates from this frame (r4_vrs)
+	vrs::build(this);
+#endif
+
 	// Upscaler (DLSS / FSR): upscale rt_Color to output resolution, everything after this runs at output resolution
 	phase_upscale();
 
@@ -816,7 +822,10 @@ void CRenderTarget::phase_combine()
 		if (f.hudless)
 		{
 			PIX_EVENT(framegen_prepare);
-			HW.pContext->CopyResource(f.hudless, bb);
+			if (HW.pDevice->HdrOutput())
+				HW.pContext->ConvertOutput(f.hudless); // as Present converts the frame
+			else
+				HW.pContext->CopyResource(f.hudless, bb);
 			framegen::frame(f);
 		}
 	}

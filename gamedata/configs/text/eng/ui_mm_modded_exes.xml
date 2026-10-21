@@ -43,6 +43,24 @@
 	<string id="ui_mm_video_basic_framegen_desc">
 		<text>DX12 only. Shows a generated frame between every two rendered frames, so motion looks smoother at the cost of slightly more input lag. Works with any upscaler, which must be on. AMD FSR works on any GPU. Intel XeSS needs Shader Model 6.4 and adds Intel XeLL latency reduction. Works best at 45 rendered fps or more. (r4_framegen)</text>
 	</string>
+	<string id="ui_mm_video_basic_hdr_output">
+		<text>HDR</text>
+	</string>
+	<string id="ui_mm_video_basic_hdr_output_desc">
+		<text>DX12 only. Sends the image to an HDR display (HDR10). The game looks as it does in SDR, at the brightness set below. Needs HDR turned on in the system (Windows display settings, or Steam Deck OLED: Settings > Display > Enable HDR, with DXVK_HDR=1 in the game's launch options); without it the game stays SDR. (r4_hdr_output)</text>
+	</string>
+	<string id="ui_mm_video_basic_hdr_brightness">
+		<text>HDR Brightness</text>
+	</string>
+	<string id="ui_mm_video_basic_hdr_brightness_desc">
+		<text>With HDR on: how bright white is on the HDR display, in nits. Around 200 matches a typical SDR screen. (r4_hdr_paper_white)</text>
+	</string>
+	<string id="ui_mm_lst_hdr_output_off">
+		<text>Off</text>
+	</string>
+	<string id="ui_mm_lst_hdr_output_on">
+		<text>On</text>
+	</string>
 	<string id="ui_mm_video_basic_dlss_preset">
 		<text>DLSS Preset</text>
 	</string>
