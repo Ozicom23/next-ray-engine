@@ -2,11 +2,15 @@
 # Builds the working tree on a Windows VM over SSH: a snapshot commit of the tree as it is (uncommitted and untracked
 # files included, the real index and branches untouched) is pushed to the VM's repo and built there by build.ps1,
 # like the dev build CI. Incremental: only what changed since the last build recompiles.
-# Usage: tools/vm-build/build.sh [-c CONF] [--package] [--rebuild] [--no-build] [--fetch] [--install] [--deck] [--install-to DEST]
+# Usage: tools/vm-build/build.sh [-c CONF] [--quick] [--package] [--rebuild] [--no-build] [--fetch] [--install] [--deck] [--install-to DEST]
 #   -c CONF          build configuration (default DX11-AVX)
+#   --quick          a test build without LTCG (a one-file change links in a fraction of the time, the exes are a
+#                    little slower: never for benchmarks or releases), in its own checkout on the VM ($NEXTRAY_VM_DIR
+#                    with -quick appended) so neither build recompiles everything when switching. Give it to
+#                    --no-build too, to fetch/install the quick build
 #   --package        also stage the CI artifact layout (bin, db/mods, mods) on the VM
 #   --no-build       no snapshot and no build: fetch/install what the VM built last (build while the game runs,
-#                    then close it and install in seconds; another build relinks both exes, ~5 min)
+#                    then close it and install in seconds; a change relinks both exes, 5-16 min with LTCG)
 #   --fetch          copy the result back to _build/vm/ (package/ with --package, else the exes, their .sym files
 #                    (crash reports), nvngx_dlss.dll and the XeSS DLLs)
 #   --install-to DEST  --fetch, then install into the game folder DEST (the one with anomaly/ and gamma/), a local
@@ -21,6 +25,7 @@ set -euo pipefail
 
 VM=${NEXTRAY_VM:-windows@192.168.64.4}
 DIR=${NEXTRAY_VM_DIR:-C:/nr}
+QUICK=0
 MOD="neXt-Ray performance patches"
 CONF=DX11-AVX
 PS_ARGS=()
@@ -31,6 +36,7 @@ TARGETS=()
 while [ $# -gt 0 ]; do
     case "$1" in
         -c) CONF=$2; shift ;;
+        --quick) PS_ARGS+=(-Quick); QUICK=1 ;;
         --package) PS_ARGS+=(-Package); PACKAGE=1 ;;
         --rebuild) PS_ARGS+=(-Rebuild) ;;
         --fetch) FETCH=1 ;;
@@ -43,6 +49,7 @@ while [ $# -gt 0 ]; do
     shift
 done
 [ ${#TARGETS[@]} -gt 0 ] && FETCH=1
+[ $QUICK = 1 ] && DIR=$DIR-quick
 
 cd "$(git rev-parse --show-toplevel)"
 WIN_DIR=${DIR//\//\\}

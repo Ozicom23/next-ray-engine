@@ -1,14 +1,16 @@
 # Builds the engine on the Windows VM the way the dev build CI does (.github/workflows/dev-build.yml), started by
 # tools/vm-build/build.sh from the Mac after it has checked out the snapshot to build.
-# Usage: powershell -File build.ps1 [-Conf DX11-AVX] [-Package] [-Rebuild]
+# Usage: powershell -File build.ps1 [-Conf DX11-AVX] [-Package] [-Rebuild] [-Quick]
 #   -Package: also packs gamedata and stages package/ (bin, db/mods, mods) like the CI artifact
 #   -Rebuild: msbuild /t:Rebuild instead of an incremental build
+#   -Quick: without whole program optimization and link-time code generation (quick.props), for test builds
 # The DLSS and XeSS SDKs and the FSR shaders are fetched/compiled only when missing or when their inputs changed.
 
 param(
     [string]$Conf = "DX11-AVX",
     [switch]$Package,
-    [switch]$Rebuild
+    [switch]$Rebuild,
+    [switch]$Quick
 )
 
 $ErrorActionPreference = "Stop"
@@ -71,7 +73,9 @@ $msbuild = @("$vs\MSBuild\Current\Bin\arm64\MSBuild.exe", "$vs\MSBuild\Current\B
     Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $msbuild) { throw "MSBuild not found (Visual Studio 2022 Build Tools)" }
 $target = if ($Rebuild) { "Rebuild" } else { "Build" }
-& $msbuild /m /nologo /v:m /t:$target /p:Configuration=$Conf src\engine-vs2022.sln; Check "msbuild"
+$quickArgs = @()
+if ($Quick) { $quickArgs += "/p:ForceImportBeforeCppTargets=$PSScriptRoot\quick.props" }
+& $msbuild /m /nologo /v:m /t:$target /p:Configuration=$Conf @quickArgs src\engine-vs2022.sln; Check "msbuild"
 
 Step "Crash report symbols"
 # Each exe writes its function names from its PDB next to itself (<exe>.sym, read by the crash reports)

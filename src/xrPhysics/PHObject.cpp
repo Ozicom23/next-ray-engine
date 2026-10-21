@@ -276,6 +276,9 @@ void CPHObject::UnFreeze()
 	ph_world->AddObject(this);
 }
 
+// Without link-time code generation MSVC leaves this inline constructor (used by ~CPHUpdateObject) unresolved: the
+// class is instantiated by the friend declaration in DECLARE_PHLIST_ITEM while CPHUpdateObject is still incomplete
+template class CPHItemList<CPHUpdateObject>::iterator;
 
 CPHUpdateObject::CPHUpdateObject()
 {

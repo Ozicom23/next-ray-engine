@@ -31,16 +31,25 @@ if not exist "host\buildvm.exe" (
   link /nologo /OPT:REF /OPT:ICF /out:host\buildvm.exe buildvm.obj buildvm_peobj.obj buildvm_lib.obj buildvm_asm.obj buildvm_fold.obj || exit /b 1
 )
 
-REM Generate VM object and header files
+REM Generate VM object and header files (a file whose content is the same keeps its timestamp, so lua51.lib and the
+REM exes linking it are not rebuilt)
 echo [LuaJIT] Generating lj_vm.obj and headers
-host\buildvm.exe -m peobj -o lj_vm.obj || exit /b 1
-host\buildvm.exe -m bcdef -o lj_bcdef.h lib_base.c lib_math.c lib_bit.c lib_string.c lib_table.c lib_io.c lib_os.c lib_package.c lib_debug.c lib_jit.c lib_ffi.c || exit /b 1
-host\buildvm.exe -m ffdef -o lj_ffdef.h lib_base.c lib_math.c lib_bit.c lib_string.c lib_table.c lib_io.c lib_os.c lib_package.c lib_debug.c lib_jit.c lib_ffi.c || exit /b 1
-host\buildvm.exe -m libdef -o lj_libdef.h lib_base.c lib_math.c lib_bit.c lib_string.c lib_table.c lib_io.c lib_os.c lib_package.c lib_debug.c lib_jit.c lib_ffi.c || exit /b 1
-host\buildvm.exe -m recdef -o lj_recdef.h lib_base.c lib_math.c lib_bit.c lib_string.c lib_table.c lib_io.c lib_os.c lib_package.c lib_debug.c lib_jit.c lib_ffi.c || exit /b 1
-host\buildvm.exe -m vmdef -o jit\vmdef.lua lib_base.c lib_math.c lib_bit.c lib_string.c lib_table.c lib_io.c lib_os.c lib_package.c lib_debug.c lib_jit.c lib_ffi.c || exit /b 1
-host\buildvm.exe -m folddef -o lj_folddef.h lj_opt_fold.c || exit /b 1
+set "LJLIB_C=lib_base.c lib_math.c lib_bit.c lib_string.c lib_table.c lib_io.c lib_os.c lib_package.c lib_debug.c lib_jit.c lib_ffi.c"
+call :update peobj lj_vm.obj "" || exit /b 1
+call :update bcdef lj_bcdef.h "%LJLIB_C%" || exit /b 1
+call :update ffdef lj_ffdef.h "%LJLIB_C%" || exit /b 1
+call :update libdef lj_libdef.h "%LJLIB_C%" || exit /b 1
+call :update recdef lj_recdef.h "%LJLIB_C%" || exit /b 1
+call :update vmdef jit\vmdef.lua "%LJLIB_C%" || exit /b 1
+call :update folddef lj_folddef.h lj_opt_fold.c || exit /b 1
 
 echo [LuaJIT] Generation complete
 popd
+exit /b 0
+
+REM :update <buildvm mode> <output> <inputs>: generated to <output>.tmp, which replaces <output> only when they differ
+:update
+host\buildvm.exe -m %1 -o "%~2.tmp" %~3 || exit /b 1
+fc /b "%~2.tmp" "%~2" >nul 2>&1
+if errorlevel 1 (move /y "%~2.tmp" "%~2" >nul) else (del "%~2.tmp")
 exit /b 0
