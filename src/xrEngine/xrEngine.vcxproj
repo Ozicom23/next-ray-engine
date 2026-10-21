@@ -1142,7 +1142,7 @@
     <ResourceCompile Include="resource.rc" />
   </ItemGroup>
   <ItemGroup>
-    <Image Include="splash_xrcs_en.bmp" />
+    <Image Include="splash_xrcs_dx11.bmp" />
     <Image Include="stalker_cs.ico" />
   </ItemGroup>
   <ItemGroup>

@@ -825,7 +825,7 @@
     <ClCompile Include="EngineThreading.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <Image Include="splash_xrcs_en.bmp">
+    <Image Include="splash_xrcs_dx11.bmp">
       <Filter>General\Resources</Filter>
     </Image>
     <Image Include="stalker_cs.ico">
