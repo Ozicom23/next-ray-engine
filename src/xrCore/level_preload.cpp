@@ -10,7 +10,7 @@ namespace level_preload
 {
 // Off: on the Mac (Wine, fast SSD) transitions took the same time with it (the level's own phase is ~0.9 s either way);
 // to measure where reading is slow (the Deck's card, hard disks) before turning it on
-int enabled = 0;
+int enabled = 1;
 int budget_mb = 768;
 
 namespace

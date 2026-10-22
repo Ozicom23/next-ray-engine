@@ -40,6 +40,7 @@ namespace frame_pacing
 		u32 mouse;      // mouse events DirectInput gave the frame
 		float kb_ms, mouse_ms, mouse_read_ms; // the input step: keyboard read, mouse update, its DirectInput read
 		float stage[kStages]; // the engine's stage timers of the frame (kStageNames), from the next frame's start
+		float mt[mt_t_count]; // its secondary tasks (MT_TIMER_NAMES), from the next frame's start too
 		bool jit;       // went through the just-in-time path
 		u8 part;        // the recording's part when the frame started (stat_frame_pacing mark)
 	};
@@ -114,6 +115,7 @@ namespace frame_pacing
 		u32 msgs, mouse;
 		float kb_ms, mouse_ms, mouse_read_ms;
 		float stage[kStages];
+		float mt[mt_t_count];
 		u8 part;
 	};
 	static xr_vector<sample> s_samples;
@@ -445,6 +447,7 @@ namespace frame_pacing
 		s.mouse_ms = f.mouse_ms;
 		s.mouse_read_ms = f.mouse_read_ms;
 		memcpy(s.stage, f.stage, sizeof(s.stage));
+		memcpy(s.mt, f.mt, sizeof(s.mt));
 		s.part = f.part;
 		s_samples.push_back(s);
 		s_prev_present1 = f.present1;
@@ -680,7 +683,7 @@ namespace frame_pacing
 			Msg("! [Frame pacing] cannot write %s", path);
 			return;
 		}
-		w->w_printf("frame,t_ms,interval_ms,wait_ms,sleep_ms,cpu_ms,present_ms,gpu_ms,gpu_interval_ms,gpu_idle_ms,queued_ms,latency_ms,step_ms,msg_ms,msgs,mouse_events,input_kb_ms,input_mouse_ms,input_mouse_read_ms,%s,part\r\n", kStageNames);
+		w->w_printf("frame,t_ms,interval_ms,wait_ms,sleep_ms,cpu_ms,present_ms,gpu_ms,gpu_interval_ms,gpu_idle_ms,queued_ms,latency_ms,step_ms,msg_ms,msgs,mouse_events,input_kb_ms,input_mouse_ms,input_mouse_read_ms,%s," MT_TIMER_NAMES ",part\r\n", kStageNames);
 		for (u32 i = 0; i < n; i++)
 		{
 			const sample& s = s_samples[i];
@@ -688,6 +691,8 @@ namespace frame_pacing
 				s.present, s.gpu, s.gpu_interval, s.gpu_idle, s.queue, s.latency, s.step, s.msg_ms, s.msgs, s.mouse, s.kb_ms, s.mouse_ms, s.mouse_read_ms);
 			for (u32 k = 0; k < kStages; ++k)
 				w->w_printf(",%.3f", s.stage[k]);
+			for (u32 k = 0; k < mt_t_count; ++k)
+				w->w_printf(",%.3f", s.mt[k]);
 			w->w_printf(",%s\r\n", s.part < s_parts.size() ? s_parts[s.part].c_str() : "");
 		}
 		FS.w_close(w);
@@ -760,8 +765,12 @@ namespace frame_pacing
 			const CStatTimer* timers[kStages] = { &st->EngineTOTAL, &st->Sheduler, &st->UpdateClient, &st->Physics, &st->AI_Think,
 				&st->Animation, &st->RenderTOTAL, &st->RenderCALC, &st->RenderCALC_HOM };
 			if (prev.id == s_id - 1)
+			{
 				for (u32 i = 0; i < kStages; ++i)
 					prev.stage[i] = timers[i]->last;
+				for (u32 i = 0; i < mt_t_count; ++i)
+					prev.mt[i] = g_mt_ms[i];
+			}
 		}
 		frame_info& f = cur();
 		if (f.start)

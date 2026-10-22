@@ -220,6 +220,7 @@ void CLevelSoundManager::Unload()
 void CLevelSoundManager::Update()
 {
 	PROF_EVENT("CLevelSoundManager::Update");
+	mt_timed_sum t(mt_t_level_sounds);
 	if (Device.Paused()) return;
 	if (Device.dwPrecacheFrame != 0) return;
 	// static sounds

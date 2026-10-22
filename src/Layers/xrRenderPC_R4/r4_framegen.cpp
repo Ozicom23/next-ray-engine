@@ -19,7 +19,7 @@
 #pragma comment(lib, "winmm.lib")
 
 u32 ps_r4_framegen = 0;
-int ps_r4_framegen_async = 0;
+int ps_r4_framegen_async = 1;
 
 namespace framegen
 {

@@ -45,6 +45,7 @@ public:
 	void process_impl(bool separate_computing = true)
 	{
 		PROF_EVENT("CDetailPathBuilder::process_impl");
+		mt_timed_sum t(mt_t_paths);
 		if (separate_computing)
 			m_object->m_wait_for_distributed_computation = false;
 

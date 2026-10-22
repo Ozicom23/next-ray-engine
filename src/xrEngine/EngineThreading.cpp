@@ -16,6 +16,7 @@ extern BOOL mt_calc_bones_parallel;
 void XRay::Engine::PreRenderThread()
 {
 	PROF_THREAD("Secondary Task 1");
+	mt_timed t(mt_t_rain_particles);
 
 	if (g_pGamePersistent && g_pGamePersistent->pEnvironment && g_pGamePersistent->pEnvironment->eff_Rain)
 	{
@@ -33,6 +34,7 @@ void XRay::Engine::PreRenderThread()
 void XRay::Engine::PreRenderPostTransformsThread()
 {
     PROF_THREAD("Secondary Task 1.1");
+    mt_timed t(mt_t_parallel_render);
     {
         PROF_EVENT("seqParallelRender");
         for (auto& it : Device.seqParallelRender)
@@ -53,6 +55,7 @@ void XRay::Engine::CalculateBonesThread()
 	PROF_THREAD("Secondary Task 3");
 
 	PROF_EVENT("CalculateBones");
+	mt_timed t(mt_t_bones);
 
 	if (!g_SpatialSpace) return;
 	if (Device.Paused()) return;
@@ -154,12 +157,14 @@ void XRay::Engine::GameThread()
 	if (g_hud)
 	{
 		PROF_EVENT("g_hud OnFrameMT");
+		mt_timed t(mt_t_hud);
 		g_hud->OnFrameMT();
 	}
 
 	if (g_pGameLevel && g_pGameLevel->bReady)
 	{
 		PROF_EVENT("SoundEvent_Dispatch");
+		mt_timed t(mt_t_sound);
 		g_pGameLevel->SoundEvent_Dispatch();
 	}
 
@@ -168,6 +173,7 @@ void XRay::Engine::GameThread()
 		if (mt_Scheduler)
 		{
 			PROF_EVENT("Sheduler Deferred");
+			mt_timed t(mt_t_scheduler);
 			::Engine.Sheduler.UpdateDeferred();
 			::Engine.Sheduler.UpdateFinalize();
 		}
@@ -175,6 +181,7 @@ void XRay::Engine::GameThread()
 
 	{
 		PROF_EVENT("seqParallel");
+		mt_timed t(mt_t_parallel);
 		for (u32 pit = 0; pit < Device.seqParallel.size(); pit++)
 			Device.seqParallel[pit]();
 		Device.seqParallel.clear();
@@ -185,6 +192,7 @@ void XRay::Engine::GameThread()
     static auto LuaGC = []()
     {
         PROF_EVENT("seqLuaGC");
+        mt_timed t(mt_t_lua_gc);
         // Do at least once
         do
         {
@@ -202,6 +210,7 @@ void XRay::Engine::GameThread()
 
 	{
 		PROF_EVENT("seqFrameMT");
+		mt_timed t(mt_t_frame_mt);
 		Device.seqFrameMT.Process(rp_Frame);
 	}
 }

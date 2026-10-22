@@ -547,6 +547,32 @@ extern ENGINE_API u32 g_mouse_events;
 extern ENGINE_API float g_input_kb_ms;
 extern ENGINE_API float g_input_mouse_ms;
 extern ENGINE_API float g_input_mouse_read_ms;
+// The frame's secondary tasks, ms each (stat_frame_pacing's CSV): the main thread's wait for them after Present, then
+// each task. Set while the frame runs, final once the next frame starts
+enum EMtTimer
+{
+	mt_t_wait, mt_t_rain_particles, mt_t_parallel_render, mt_t_bones, mt_t_hud, mt_t_sound, mt_t_scheduler, mt_t_parallel,
+	mt_t_lua_gc, mt_t_frame_mt,
+	// seqParallel's jobs (xrGame), summed over the frame
+	mt_t_alife, mt_t_level_scripts, mt_t_map, mt_t_level_sounds, mt_t_stalker_items, mt_t_paths, mt_t_count
+};
+extern ENGINE_API float g_mt_ms[mt_t_count];
+#define MT_TIMER_NAMES "mt_wait_ms,mt_rain_particles_ms,mt_parallel_render_ms,mt_bones_ms,mt_hud_ms,mt_sound_ms,mt_scheduler_ms,mt_parallel_ms,mt_lua_gc_ms,mt_frame_mt_ms,mt_alife_ms,mt_level_scripts_ms,mt_map_ms,mt_level_sounds_ms,mt_stalker_items_ms,mt_paths_ms"
+struct mt_timed
+{
+	EMtTimer which;
+	u64 from;
+	explicit mt_timed(EMtTimer w) : which(w), from(CPU::QPC()) {}
+	~mt_timed() { g_mt_ms[which] = float(double(CPU::QPC() - from) * 1000.0 / double(CPU::qpc_freq)); }
+};
+// The same, added up: a job that runs several times a frame (from one thread at a time: seqParallel's run in turn)
+struct mt_timed_sum
+{
+	EMtTimer which;
+	u64 from;
+	explicit mt_timed_sum(EMtTimer w) : which(w), from(CPU::QPC()) {}
+	~mt_timed_sum() { g_mt_ms[which] += float(double(CPU::QPC() - from) * 1000.0 / double(CPU::qpc_freq)); }
+};
 
 typedef xr_delegate<bool()> LOADING_EVENT;
 extern ENGINE_API xr_list<LOADING_EVENT> g_loading_events;

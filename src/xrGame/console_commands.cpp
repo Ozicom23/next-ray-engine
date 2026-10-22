@@ -92,6 +92,9 @@ extern float psSqueezeVelocity;
 extern int psLUA_GCSTEP;
 extern int psLua_ParallelGCStep;
 extern int psLua_ParallelGC_CallAmount;
+extern int psLua_ParallelGC_Paced;
+extern int psLua_GCPause;
+extern int psLua_GCFinalizeUs;
 extern BOOL psLua_ParallelGC_debug;
 extern BOOL psLua_ParallelGC;
 extern BOOL lua_debug;
@@ -2848,6 +2851,9 @@ void CCC_RegisterCommands()
 	CMD4(CCC_Integer, "lua_parallel_gc_call_amount", &psLua_ParallelGC_CallAmount, 1, 50);
 	CMD4(CCC_Integer, "lua_parallel_gc_debug", &psLua_ParallelGC_debug, 0, 1);
 	CMD4(CCC_Integer, "lua_parallel_gc", &psLua_ParallelGC, 0, 1);
+	CMD4(CCC_Integer, "lua_parallel_gc_paced", &psLua_ParallelGC_Paced, 0, 2);
+	CMD4(CCC_Integer, "lua_gc_pause", &psLua_GCPause, 0, 1000);
+	CMD4(CCC_Integer, "lua_gc_finalize_us", &psLua_GCFinalizeUs, 100, 20000);
 
 	CMD4(CCC_Integer, "lua_debug", &lua_debug, 0, 1);
 	CMD4(CCC_Integer, "lua_use_functor_cache", &lua_use_functor_cache, 0, 1);

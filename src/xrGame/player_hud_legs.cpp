@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "player_hud_legs.h"
 #include "player_hud.h"
+#include "camera_flight.h"
 #include "actor.h"
 #include "inventory_item.h"
 #include "Inventory.h"
@@ -236,7 +237,7 @@ void player_legs_controller::update(CActor* actor, bool isShadowPass)
     copy_bones_from_actor(actor, isShadowPass);
 
     m_legs_transform.set(actor->XFORM());
-    if (legs_attach_to_camera && pDemoRecords.empty())
+    if (legs_attach_to_camera && pDemoRecords.empty() && !camera_flight::playing())
         m_legs_transform.c.set(Device.vCameraPosition.x, m_legs_transform.c.y, Device.vCameraPosition.z);       
 
     Fvector fwd = m_legs_transform.k;

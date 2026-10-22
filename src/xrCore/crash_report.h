@@ -9,9 +9,15 @@ namespace crash_report
 // Lines the game adds (the level, the actor's position...), set by the game; called inside the crash handler
 XRCORE_API extern void (*game_context)(char* out, u32 size);
 
-// what: the error as the log has it; context: the exception's (nullptr: the stack here). Returns the report's path
-// ("" when not written)
-XRCORE_API LPCSTR write(LPCSTR what, const void* exception_context);
+// what: the error as the log has it; context: the exception's (nullptr: the stack here), thread: the thread it is from
+// (nullptr: this one). Returns the report's path ("" when not written)
+XRCORE_API LPCSTR write(LPCSTR what, const void* exception_context, void* thread = nullptr);
+// A report was started: a fatal error is being reported (its dialog may be up)
+XRCORE_API bool started();
+
+// The hang watchdog's heartbeat: the main thread made progress (the main loop, its log lines, a long task's steps)
+XRCORE_API void beat();
+XRCORE_API u32 beats();
 
 // -dump_symbols <file>: the exe's functions (address, size, name) from its PDB, for the reports. Called before the engine
 // starts; false when the PDB isn't there

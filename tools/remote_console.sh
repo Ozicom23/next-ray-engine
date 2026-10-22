@@ -1,6 +1,8 @@
 #!/bin/bash
 # Drives the game's remote console (engine flag -remote_console) on the Steam Deck (Steam shortcut) or on macOS
 # (Sikarugir wrapper app in the game folder, through MO2).
+#   remote_console.sh [--root <game folder>] <command> ...   the folder with anomaly/ and gamma/ (or GAMMA_ROOT);
+#                                       needed on macOS, the Deck's is /home/deck/Games/gamma
 #   remote_console.sh launch [s]         start the game, wait for the main menu (default 300 s)
 #   remote_console.sh send <cmd>...     queue console commands (one argument per command)
 #   remote_console.sh run <file>        queue the commands in a file
@@ -17,8 +19,14 @@
 # Env: GAMMA_ROOT (the game folder with anomaly/ and gamma/), GAMMA_SHORTCUT (MO2 executable, macOS, default
 # "Anomaly (DX11-AVX)"), GAMMA_GAMEID (Steam shortcut id, Deck)
 set -u
+if [ "${1:-}" = --root ]; then
+	[ $# -ge 2 ] || { echo "--root needs the game folder" >&2; exit 2; }
+	GAMMA_ROOT="${2%/}"
+	shift 2
+fi
 if [ "$(uname)" = Darwin ]; then
-	ROOT="${GAMMA_ROOT:-/Volumes/SSD/stalker-gamma+mac.arm64}"
+	[ -n "${GAMMA_ROOT:-}" ] || { echo "the game folder: --root <folder> or GAMMA_ROOT" >&2; exit 2; }
+	ROOT="$GAMMA_ROOT"
 	LOGNAME_="xray_crossover.log"
 	mtime() { stat -f %m "$1"; }
 else

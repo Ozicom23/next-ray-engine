@@ -1140,6 +1140,37 @@ LUA_API int lua_resume(lua_State *L, int nargs)
 
 /* -- GC and memory management -------------------------------------------- */
 
+/* neXt-Ray: where the Lua state runs, for crash and hang reports (read from another thread while it is stuck, so the
+   caller guards it): the compiled trace's function, or the interpreter's frames. Returns the frames written */
+LUA_API int lua_xr_where(lua_State *L, char *buf, int size)
+{
+  global_State *g = G(L);
+  int32_t st = g->vmstate;
+  int n = 0, used = 0;
+  lua_Debug ar;
+  if (size <= 0) return 0;
+  buf[0] = 0;
+#if LJ_HASJIT
+  if (st > 0) {  /* Running a trace: its starting function. */
+    jit_State *J = G2J(g);
+    if ((MSize)st < J->sizetrace && gcref(J->trace[st]) != NULL) {
+      GCtrace *T = (GCtrace *)gcref(J->trace[st]);
+      GCproto *pt = gco2pt(gcref(T->startpt));
+      snprintf(buf, (size_t)size, "compiled Lua (trace %d) in the function at %s:%d", (int)st,
+	       proto_chunknamestr(pt), (int)pt->firstline);
+      return 1;
+    }
+  }
+#endif
+  while (n < 6 && used < size - 1 && lua_getstack(L, n, &ar) && lua_getinfo(L, "Sl", &ar)) {
+    int w = snprintf(buf + used, (size_t)(size - used), "%s%s:%d", n ? " <- " : "", ar.short_src, ar.currentline);
+    if (w < 0) break;
+    used += w;
+    n++;
+  }
+  return n;
+}
+
 LUA_API int lua_gc(lua_State *L, int what, int data)
 {
   global_State *g = G(L);
@@ -1177,6 +1208,46 @@ LUA_API int lua_gc(lua_State *L, int what, int data)
   case LUA_GCSETSTEPMUL:
     res = (int)(g->gc.stepmul);
     g->gc.stepmul = (MSize)data;
+    break;
+  case LUA_GCXRSTEP: {
+    int n = data > 0 ? data : 1;
+    lj_gc_xr_inside = lj_gc_xr_worker = 1;
+    while (n-- > 0) {
+      if (g->gc.state == GCSfinalize && gcref(g->gc.mmudata) != NULL) {
+	res = 2;  /* The finalizers are the main thread's (LUA_GCXRFINALIZE). */
+	break;
+      }
+      if (lj_gc_step(L) > 0) {
+	res = 1;
+	break;
+      }
+    }
+    lj_gc_xr_inside = lj_gc_xr_worker = 0;
+    break;
+  }
+  case LUA_GCXRFINALIZE:
+    res = lj_gc_xr_finalize(L, data);
+    break;
+  case LUA_GCXRINLINE:
+    res = (int)(lj_gc_xr_inline_us < 0x7fffffff ? lj_gc_xr_inline_us : 0x7fffffff);
+    lj_gc_xr_inline_us = 0;
+    break;
+  case LUA_GCXRATOMIC:
+    res = (data >= 0 && data < 6) ? lj_gc_xr_atomic_us[data] :
+	  (data >= 6 && data < 9) ? lj_gc_xr_udata[data - 6] : -1;
+    break;
+  case LUA_GCXRSLOW:
+    res = lj_gc_xr_slow_states;
+    lj_gc_xr_slow_states = 0;
+    break;
+  case LUA_GCXRDEFER:
+    res = lj_gc_xr_defer + lj_gc_xr_incsep;
+    lj_gc_xr_defer = data != 0;
+    lj_gc_xr_incsep = data >= 2;
+    break;
+  case LUA_GCXRDUE:
+    res = g->gc.state != GCSpause ||
+	  (uint64_t)g->gc.total * 100 >= (uint64_t)g->gc.threshold * (uint64_t)data;
     break;
   default:
     res = -1;  /* Invalid option. */

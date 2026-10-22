@@ -86,7 +86,8 @@ void LJ_FASTCALL lj_func_closeuv(lua_State *L, TValue *level)
     GCobj *o = obj2gco(uv);
     lua_assert(!isblack(o) && !uv->closed && uvval(uv) != &uv->tv);
     setgcrefr(L->openupval, uv->nextgc);  /* No longer in open list. */
-    if (isdead(g, o)) {
+    /* neXt-Ray: not while finalizable userdata are separated after the flip (GCSxrseparate): one may still reach it */
+    if (isdead(g, o) && g->gc.state != GCSxrseparate) {
       lj_func_freeuv(g, uv);
     } else {
       unlinkuv(uv);

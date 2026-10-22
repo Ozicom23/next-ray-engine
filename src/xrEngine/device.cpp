@@ -3,6 +3,7 @@
 #include "xr_ioconsole.h"
 #include "xr_input.h"
 #include "../xrCore/profiler.h"
+#include "../xrCore/crash_report.h"
 
 #pragma warning(disable:4995)
 // mmsystem.h
@@ -54,6 +55,7 @@ ENGINE_API u32 g_mouse_events = 0;
 ENGINE_API float g_input_kb_ms = 0.f;
 ENGINE_API float g_input_mouse_ms = 0.f;
 ENGINE_API float g_input_mouse_read_ms = 0.f;
+ENGINE_API float g_mt_ms[mt_t_count] = {};
 ENGINE_API CLoadScreenRenderer load_screen_renderer;
 ENGINE_API CRenderDevice* DevicePtr = nullptr;
 
@@ -405,6 +407,7 @@ void mt_FreezeThread(void *ptr) {
 
 void CRenderDevice::on_idle()
 {
+	crash_report::beat(); // the hang watchdog: the main loop goes on (remote_console.h)
 
 	FreezeTimer.Start();
 
@@ -423,6 +426,8 @@ void CRenderDevice::on_idle()
 	// frame just in time for the GPU (r4_frame_jit); the loading screen never sleeps
 	m_pRender->WaitFrame(g_loading_events.empty() && !dwPrecacheFrame);
 #endif
+	for (float& ms : g_mt_ms) // the frame pacing took the last frame's
+		ms = 0.f;
 
 #ifdef DEDICATED_SERVER
     u32 FrameStartTime = TimerGlobal.GetElapsed_ms();
@@ -616,6 +621,7 @@ void CRenderDevice::on_idle()
 	{
 		// The main thread idle until the frame's secondary tasks (scheduler, bones, Lua GC step) are done
 		PROF_EVENT("Wait for secondary tasks");
+		mt_timed t(mt_t_wait);
 		secondary_tasks.wait();
 	}
 

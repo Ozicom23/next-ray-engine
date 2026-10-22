@@ -45,7 +45,26 @@ struct ContextStats
 {
 	u64 frames, draws, dispatches, barrier_calls, barriers, pso_sets, root_sets, srv_tables, srv_table_hits,
 		srv_table_sets, sampler_tables, cbv_sets, rt_sets, vb_sets, ib_sets, vp_sets, sc_sets, clears, copies, submits;
+	// Threaded: the worker's time in commands, of that waiting for the GPU (a frame in flight free) and in Present
+	u64 worker_ticks, gpu_wait_ticks, present_ticks;
 };
+
+static u64 Ticks()
+{
+	LARGE_INTEGER t;
+	QueryPerformanceCounter(&t);
+	return u64(t.QuadPart);
+}
+
+static double TicksMs(u64 ticks)
+{
+	static const double freq = [] {
+		LARGE_INTEGER f;
+		QueryPerformanceFrequency(&f);
+		return double(f.QuadPart);
+	}();
+	return double(ticks) * 1000.0 / freq;
+}
 
 struct Context::Impl : public Context::NativeRecorder
 {
@@ -160,6 +179,9 @@ struct Context::Impl : public Context::NativeRecorder
 	ContextStats stats = {};
 	bool stats_on = false;
 	u64 stats_end_ms = 0;
+	u64 stats_start_ticks = 0;
+	std::atomic<u64> caller_wait_ticks{ 0 }; // the calling thread waiting for the worker (counted always)
+	u64 caller_wait_start = 0;
 	std::unordered_map<std::wstring, u64> stats_event_barriers;
 	UINT draws_since_submit = 0;
 	u32 submits_this_frame = 0, submits_last_frame = 0;
@@ -1127,7 +1149,10 @@ struct Context::Impl : public Context::NativeRecorder
 		recorded_frame.store(caller_frame, std::memory_order_release);
 		frame_fence[frame_index] = fence;
 		frame_index = (frame_index + 1) % kFrames;
+		const u64 wait_from = Ticks();
 		dev->WaitFence(frame_fence[frame_index]);
+		if (stats_on)
+			stats.gpu_wait_ticks += Ticks() - wait_from;
 		allocator[frame_index]->Reset();
 		list->Reset(allocator[frame_index], nullptr);
 		const u64 completed = dev->Completed();
@@ -1181,6 +1206,16 @@ struct Context::Impl : public Context::NativeRecorder
 			Msg("*   barriers in %-40s %.1f per frame", name.c_str(), top[i].first / n);
 		}
 		stats_event_barriers.clear();
+		if (t.worker_ticks)
+		{
+			const double wall = TicksMs(Ticks() - stats_start_ticks) / n;
+			const double worker = TicksMs(t.worker_ticks) / n, gpu_wait = TicksMs(t.gpu_wait_ticks) / n;
+			const double present = TicksMs(t.present_ticks) / n;
+			const double caller = TicksMs(caller_wait_ticks.load() - caller_wait_start) / n;
+			Msg("* [stat_dx12] recording thread per frame (%.2f ms): busy %.2f ms, waiting for the GPU %.2f ms, in Present %.2f ms; "
+			    "the render thread waiting for it %.2f ms",
+			    wall, worker - gpu_wait - present, gpu_wait, present, caller);
+		}
 	}
 
 	bool CommandsPending(u64 fence) const { return fence >= dev->pending_fence.load(); }
@@ -1496,8 +1531,12 @@ struct Context::Front
 	{
 		if (Done(id))
 			return;
-		std::unique_lock<std::mutex> lock(done_lock);
-		done_cv.wait(lock, [&] { return Done(id); });
+		const u64 from = Ticks();
+		{
+			std::unique_lock<std::mutex> lock(done_lock);
+			done_cv.wait(lock, [&] { return Done(id); });
+		}
+		impl->caller_wait_ticks.fetch_add(Ticks() - from, std::memory_order_relaxed);
 	}
 
 	void WorkerMain()
@@ -1513,6 +1552,7 @@ struct Context::Front
 				ch = queue.front();
 				queue.pop_front();
 			}
+			const u64 from = Ticks();
 			for (Cmd* cmd = ch->first; cmd;)
 			{
 				Cmd* next = cmd->next;
@@ -1520,6 +1560,8 @@ struct Context::Front
 				cmd->~Cmd();
 				cmd = next;
 			}
+			if (impl->stats_on)
+				impl->stats.worker_ticks += Ticks() - from;
 			const u64 id = ch->id;
 			ch->used = 0;
 			ch->first = ch->last = nullptr;
@@ -3232,7 +3274,10 @@ HRESULT Context::Present(IDXGISwapChain1* swap_chain, UINT interval, UINT flags)
 			c.RequireWhole(bb, D3D12_RESOURCE_STATE_PRESENT);
 		}
 		const u64 fence = c.Submit(false);
+		const u64 present_from = Ticks();
 		const HRESULT hr = swap_chain ? swap_chain->Present(interval, flags) : S_OK;
+		if (c.stats_on)
+			c.stats.present_ticks += Ticks() - present_from;
 		if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET)
 			c.device->ReportRemoval("Present");
 		c.present_result.store(hr);
@@ -3265,6 +3310,8 @@ void Context::StartStats(float seconds)
 		c.stats = ContextStats();
 		c.stats_event_barriers.clear();
 		c.stats_end_ms = GetTickCount64() + u64(seconds * 1000.f);
+		c.stats_start_ticks = Ticks();
+		c.caller_wait_start = c.caller_wait_ticks.load();
 		c.stats_on = true;
 		Msg("* [stat_dx12] measuring for %.0f s", seconds);
 	});

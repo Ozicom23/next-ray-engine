@@ -6,6 +6,7 @@
 #include "../../xrEngine/Stats.h"
 #include "../../xrEngine/IGame_Persistent.h"
 #include "../../xrEngine/mod_cost.h"
+#include "../../xrCore/crash_report.h"
 
 #include <dxgi1_4.h>
 #include <psapi.h>
@@ -483,7 +484,11 @@ namespace shader_progress
 		s_what = what;
 	}
 
-	void step() { ++s_done; }
+	void step()
+	{
+		++s_done;
+		crash_report::beat(); // a long compile on the main thread is progress (the hang watchdog)
+	}
 
 	void end(bool completed)
 	{

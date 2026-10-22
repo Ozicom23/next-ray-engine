@@ -3,7 +3,7 @@
 #include "r4_rendertarget.h"
 #include <D3DCompiler.h>
 
-int ps_r4_vrs = 0;
+int ps_r4_vrs = 1;
 int ps_r4_vrs_debug = 0;
 float ps_r4_vrs_threshold = 0.03f;
 
@@ -11,28 +11,34 @@ namespace vrs
 {
 namespace
 {
-	// One thread per tile: the largest difference between neighbouring pixels across and down (luma of the final
-	// image), a D3D12_SHADING_RATE out (2x1: 0x4, 1x2: 0x1, 2x2: 0x5)
+	// One group per tile, its 64 threads sharing the tile's pixels: the largest difference between neighbouring pixels
+	// across and down (luma of the final image), a D3D12_SHADING_RATE out (2x1: 0x4, 1x2: 0x1, 2x2: 0x5)
 	const char* kBuildShader =
 		"Texture2D<float4> color : register(t0);\n"
 		"RWTexture2D<uint> rate : register(u0);\n"
 		"cbuffer c : register(b0) { uint tile; float threshold; uint w; uint h; };\n"
+		"groupshared uint s_dx, s_dy;\n"
 		"float luma(uint2 p) { return dot(color.Load(int3(min(p, uint2(w - 1, h - 1)), 0)).rgb, float3(0.299, 0.587, 0.114)); }\n"
 		"[numthreads(8, 8, 1)]\n"
-		"void main(uint3 id : SV_DispatchThreadID)\n"
+		"void main(uint3 g : SV_GroupID, uint3 t : SV_GroupThreadID, uint i : SV_GroupIndex)\n"
 		"{\n"
-		"	uint2 base = id.xy * tile;\n"
-		"	if (base.x >= w || base.y >= h) return;\n"
+		"	if (i == 0) { s_dx = 0; s_dy = 0; }\n"
+		"	GroupMemoryBarrierWithGroupSync();\n"
+		"	uint step = tile / 8;\n"
 		"	float dx = 0, dy = 0;\n"
-		"	for (uint y = 0; y < tile; y++)\n"
-		"		for (uint x = 0; x < tile; x++)\n"
+		"	for (uint y = 0; y < step; y++)\n"
+		"		for (uint x = 0; x < step; x++)\n"
 		"		{\n"
-		"			uint2 p = base + uint2(x, y);\n"
+		"			uint2 p = g.xy * tile + t.xy * step + uint2(x, y);\n"
 		"			float l = luma(p);\n"
 		"			dx = max(dx, abs(l - luma(p + uint2(1, 0))));\n"
 		"			dy = max(dy, abs(l - luma(p + uint2(0, 1))));\n"
 		"		}\n"
-		"	rate[id.xy] = (dx < threshold ? 0x4 : 0) | (dy < threshold ? 0x1 : 0);\n"
+		"	InterlockedMax(s_dx, asuint(dx));\n"
+		"	InterlockedMax(s_dy, asuint(dy));\n"
+		"	GroupMemoryBarrierWithGroupSync();\n"
+		"	if (i == 0)\n"
+		"		rate[g.xy] = (asfloat(s_dx) < threshold ? 0x4 : 0) | (asfloat(s_dy) < threshold ? 0x1 : 0);\n"
 		"}\n";
 
 	// r4_vrs_debug: the coarse tiles tinted over the frame
@@ -207,7 +213,7 @@ void build(CRenderTarget* t)
 	ctx->CSSetShaderResources(0, 1, &src);
 	ctx->CSSetUnorderedAccessViews(0, 1, &s_uav, nullptr);
 	ctx->CSSetConstantBuffers(0, 1, &s_cb);
-	ctx->Dispatch(((s_w + tile - 1) / tile + 7) / 8, ((s_h + tile - 1) / tile + 7) / 8, 1);
+	ctx->Dispatch((s_w + tile - 1) / tile, (s_h + tile - 1) / tile, 1);
 	ID3DShaderResourceView* no_srv = nullptr;
 	ID3DUnorderedAccessView* no_uav = nullptr;
 	ctx->CSSetShaderResources(0, 1, &no_srv);

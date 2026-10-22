@@ -1062,6 +1062,8 @@ void CCC_Register()
 	CMD1(CCC_NextLoadStats, "stat_next_load");
 #endif
 	CMD4(CCC_Integer, "stat_memory_on_load", &ps_stat_memory_on_load, 0, 1);
+	extern int g_hang_watchdog;
+	CMD4(CCC_Integer, "hang_watchdog", &g_hang_watchdog, 0, 600);
 	CMD1(CCC_Start, "start");
 	CMD1(CCC_Disconnect, "disconnect");
 	CMD1(CCC_SaveCFG, "cfg_save");

@@ -6,7 +6,7 @@
 // level is loaded what it didn't take is freed; so is all of it when another level is asked for
 namespace level_preload
 {
-XRCORE_API extern int enabled; // level_preload: 1 on (off by default)
+XRCORE_API extern int enabled; // level_preload: 1 on (the default), 0 off
 XRCORE_API extern int budget_mb; // level_preload_budget: the most read ahead, MB
 
 // The level's folder name (l02_garbage). Again for the same level: nothing

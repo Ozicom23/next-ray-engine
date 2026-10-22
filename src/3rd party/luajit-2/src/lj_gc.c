@@ -19,6 +19,10 @@
 #include "lj_meta.h"
 #include "lj_state.h"
 #include "lj_frame.h"
+#if LJ_TARGET_WINDOWS
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 #if LJ_HASFFI
 #include "lj_ctype.h"
 #include "lj_cdata.h"
@@ -122,18 +126,25 @@ static void gc_mark_mmudata(global_State *g)
 }
 
 /* Separate userdata objects to be finalized to mmudata list. */
+/* neXt-Ray: the last separation's userdata (LUA_GCXRATOMIC 5-7): visited, of those to finalize, without __gc */
+int lj_gc_xr_udata[3];
+
 size_t lj_gc_separateudata(global_State *g, int all)
 {
   size_t m = 0;
   GCRef *p = &mainthread(g)->nextgc;
   GCobj *o;
+  int visited = 0, tofinalize = 0, nogc = 0;
   while ((o = gcref(*p)) != NULL) {
+    visited++;
     if (!(iswhite(o) || all) || isfinalized(gco2ud(o))) {
       p = &o->gch.nextgc;  /* Nothing to do. */
     } else if (!lj_meta_fastg(g, tabref(gco2ud(o)->metatable), MM_gc)) {
+      nogc++;
       markfinalized(o);  /* Done, as there's no __gc metamethod. */
       p = &o->gch.nextgc;
     } else {  /* Otherwise move userdata to be finalized to mmudata list. */
+      tofinalize++;
       m += sizeudata(gco2ud(o));
       markfinalized(o);
       *p = o->gch.nextgc;
@@ -148,6 +159,9 @@ size_t lj_gc_separateudata(global_State *g, int all)
       }
     }
   }
+  lj_gc_xr_udata[0] = visited;
+  lj_gc_xr_udata[1] = tofinalize;
+  lj_gc_xr_udata[2] = nogc;
   return m;
 }
 
@@ -409,6 +423,22 @@ static GCRef *gc_sweep(global_State *g, GCRef *p, uint32_t lim)
 }
 
 /* Check whether we can clear a key or a value slot from a table. */
+/* neXt-Ray: set while weak tables are cleared after the white flip (the userdata to be finalized separated in steps,
+   GCSxrseparate): dead is the other white then, objects made since have the current one. A userdata that the separation
+   keeps for its finalizer stays, as the stock atomic phase marks those before it clears */
+static global_State *gc_xr_clear_g = NULL;
+
+static int gc_xr_mayclear_obj(global_State *g, cTValue *o)
+{
+  GCobj *x = gcV(o);
+  if (!isdead(g, x))
+    return 0;
+  if (tvisudata(o) && !isfinalized(udataV(o)) &&
+      lj_meta_fastg(g, tabref(udataV(o)->metatable), MM_gc))
+    return 0;  /* To be finalized: kept. */
+  return 1;
+}
+
 static int gc_mayclear(cTValue *o, int val)
 {
   if (tvisgcv(o)) {  /* Only collectable objects can be weak references. */
@@ -416,7 +446,7 @@ static int gc_mayclear(cTValue *o, int val)
       gc_mark_str(strV(o));  /* And need to be marked. */
       return 0;
     }
-    if (iswhite(gcV(o)))
+    if (gc_xr_clear_g ? gc_xr_mayclear_obj(gc_xr_clear_g, o) : iswhite(gcV(o)))
       return 1;  /* Object is about to be collected. */
     if (tvisudata(o) && val && isfinalized(udataV(o)))
       return 1;  /* Finalized userdata is dropped only from values. */
@@ -566,12 +596,83 @@ void lj_gc_freeall(global_State *g)
 /* -- Collector ----------------------------------------------------------- */
 
 /* Atomic part of the GC cycle, transitioning from mark to sweep phase. */
+/* neXt-Ray: the last atomic phase's parts in microseconds (LUA_GCXRATOMIC): left-overs, weak tables + roots, the
+   2nd chance list, userdata to finalize, clearing weak tables */
+int lj_gc_xr_atomic_us[6];
+
+#if LJ_TARGET_WINDOWS
+static uint64_t gc_xr_us(void)
+{
+  static LARGE_INTEGER freq;
+  LARGE_INTEGER t;
+  if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
+  QueryPerformanceCounter(&t);
+  return (uint64_t)t.QuadPart * 1000000 / (uint64_t)freq.QuadPart;
+}
+#else
+static uint64_t gc_xr_us(void) { return 0; }
+#endif
+
+int lj_gc_xr_incsep = 0;  /* LUA_GCXRDEFER 2: GCSxrseparate */
+static int gc_xr_sep_steps = 0;  /* This cycle's atomic phase leaves the separation to GCSxrseparate. */
+static GCRef *gc_xr_sepcur;  /* GCSxrseparate: the link to the next userdata to look at. */
+
+/* GCSxrseparate's step: up to lim userdata, as lj_gc_separateudata and gc_mark_mmudata did in the atomic phase. The
+   whites are flipped already: dead is the other white; userdata made since have the current one and are skipped.
+   Nothing is swept before the separation ends, so the list behind the cursor stays; new userdata go to its front */
+static size_t gc_xr_separate(global_State *g, int lim)
+{
+  GCRef *p = gc_xr_sepcur;
+  GCobj *o;
+  size_t m = 0;
+  int n = 0;
+  while (n < lim && (o = gcref(*p)) != NULL) {
+    n++;
+    lj_gc_xr_udata[0]++;
+    if (!isdead(g, o) || isfinalized(gco2ud(o))) {
+      p = &o->gch.nextgc;  /* Nothing to do. */
+    } else if (!lj_meta_fastg(g, tabref(gco2ud(o)->metatable), MM_gc)) {
+      lj_gc_xr_udata[2]++;
+      markfinalized(o);  /* Done, as there's no __gc metamethod. */
+      p = &o->gch.nextgc;
+    } else {  /* Otherwise move userdata to be finalized to mmudata list. */
+      lj_gc_xr_udata[1]++;
+      m += sizeudata(gco2ud(o));
+      markfinalized(o);
+      *p = o->gch.nextgc;
+      if (gcref(g->gc.mmudata)) {  /* Link to end of mmudata list. */
+	GCobj *root = gcref(g->gc.mmudata);
+	setgcrefr(o->gch.nextgc, root->gch.nextgc);
+	setgcref(root->gch.nextgc, o);
+	setgcref(g->gc.mmudata, o);
+      } else {  /* Create circular list. */
+	setgcref(o->gch.nextgc, o);
+	setgcref(g->gc.mmudata, o);
+      }
+      makewhite(g, o);  /* Kept for its finalizer, with what it references. */
+      gc_mark(g, o);
+    }
+  }
+  gc_xr_sepcur = p;
+  m += gc_propagate_gray(g);
+  if (gcref(g->gc.weak)) {  /* Weak tables those referenced. */
+    gc_xr_clear_g = g;
+    gc_clearweak(gcref(g->gc.weak));
+    gc_xr_clear_g = NULL;
+    setgcrefnull(g->gc.weak);
+  }
+  g->gc.estimate = g->gc.estimate > (MSize)m ? g->gc.estimate - (MSize)m : 0;
+  return (size_t)n;
+}
+
 static void atomic(global_State *g, lua_State *L)
 {
   size_t udsize;
+  uint64_t t0 = gc_xr_us(), t1;
 
   gc_mark_uv(g);  /* Need to remark open upvalues (the thread may be dead). */
   gc_propagate_gray(g);  /* Propagate any left-overs. */
+  t1 = gc_xr_us(); lj_gc_xr_atomic_us[0] = (int)(t1 - t0); t0 = t1;
 
   setgcrefr(g->gc.gray, g->gc.weak);  /* Empty the list of weak tables. */
   setgcrefnull(g->gc.weak);
@@ -580,17 +681,45 @@ static void atomic(global_State *g, lua_State *L)
   gc_traverse_curtrace(g);  /* Traverse current trace. */
   gc_mark_gcroot(g);  /* Mark GC roots (again). */
   gc_propagate_gray(g);  /* Propagate all of the above. */
+  t1 = gc_xr_us(); lj_gc_xr_atomic_us[1] = (int)(t1 - t0); t0 = t1;
 
   setgcrefr(g->gc.gray, g->gc.grayagain);  /* Empty the 2nd chance list. */
   setgcrefnull(g->gc.grayagain);
   gc_propagate_gray(g);  /* Propagate it. */
+  t1 = gc_xr_us(); lj_gc_xr_atomic_us[2] = (int)(t1 - t0); t0 = t1;
+
+  if (gc_xr_sep_steps) {
+    /* neXt-Ray: the userdata to be finalized are separated after this, in GCSxrseparate's steps (walking all
+       userdata, ~300k with GAMMA, took 30-50 ms here). Those still waiting for their finalizer from an earlier cycle
+       (a full GC in the finalize phase) are marked here, as gc_mark_mmudata does. Weak tables are cleared after the
+       flip, keeping their entries to userdata the separation will keep */
+    gc_mark_mmudata(g);
+    gc_propagate_gray(g);
+    lj_gc_xr_atomic_us[3] = (int)(gc_xr_us() - t0);
+    lj_gc_xr_atomic_us[5] = 0;
+    g->gc.currentwhite = (uint8_t)otherwhite(g);  /* Flip current white. */
+    g->strempty.marked = g->gc.currentwhite;
+    t0 = gc_xr_us();
+    gc_xr_clear_g = g;
+    gc_clearweak(gcref(g->gc.weak));
+    gc_xr_clear_g = NULL;
+    setgcrefnull(g->gc.weak);
+    lj_gc_xr_atomic_us[4] = (int)(gc_xr_us() - t0);
+    setmref(g->gc.sweep, &g->gc.root);
+    g->gc.estimate = g->gc.total;  /* Less what the separation keeps for finalizers. */
+    gc_xr_sepcur = &mainthread(g)->nextgc;
+    return;
+  }
 
   udsize = lj_gc_separateudata(g, 0);  /* Separate userdata to be finalized. */
+  t1 = gc_xr_us(); lj_gc_xr_atomic_us[3] = (int)(t1 - t0); t0 = t1;
   gc_mark_mmudata(g);  /* Mark them. */
   udsize += gc_propagate_gray(g);  /* And propagate the marks. */
+  t1 = gc_xr_us(); lj_gc_xr_atomic_us[5] = (int)(t1 - t0); t0 = t1;
 
   /* All marking done, clear weak tables. */
   gc_clearweak(gcref(g->gc.weak));
+  lj_gc_xr_atomic_us[4] = (int)(gc_xr_us() - t0);
 
   /* Prepare for sweep phase. */
   g->gc.currentwhite = (uint8_t)otherwhite(g);  /* Flip current white. */
@@ -600,6 +729,18 @@ static void atomic(global_State *g, lua_State *L)
 }
 
 /* GC state machine. Returns a cost estimate for each step performed. */
+/* neXt-Ray: while lj_gc_xr_defer is set (LUA_GCXRDEFER) the collector works only in LUA_GCXRSTEP or a full GC: the
+   engine's parallel GC steps it while the frame renders, an allocation in a script on the main thread doesn't (a step
+   there marked a whole large table, 10+ ms, or ran the atomic phase, ~30 ms). Unless the heap grew past where a cycle
+   starts by the live estimate again (the parallel GC not running: loading, menus) */
+#define gc_xr_deferred(g) \
+  (lj_gc_xr_defer && !lj_gc_xr_inside && \
+   (uint64_t)(g)->gc.total < (uint64_t)(g)->gc.estimate * ((g)->gc.pause / 100 + 1))
+
+int lj_gc_xr_defer = 0;
+int lj_gc_xr_inside = 0;
+int lj_gc_xr_worker = 0;  /* LUA_GCXRSTEP runs: the parallel GC's thread */
+
 static size_t gc_onestep(lua_State *L)
 {
   global_State *g = G(L);
@@ -615,10 +756,26 @@ static size_t gc_onestep(lua_State *L)
   case GCSatomic:
     if (gcref(g->jit_L))  /* Don't run atomic phase on trace. */
       return LJ_MAX_MEM;
+    if (gc_xr_deferred(g))
+      return LJ_MAX_MEM;
+    gc_xr_sep_steps = lj_gc_xr_incsep;
+    lj_gc_xr_udata[0] = lj_gc_xr_udata[1] = lj_gc_xr_udata[2] = 0;
     atomic(g, L);
+    if (gc_xr_sep_steps) {
+      g->gc.state = GCSxrseparate;
+      return 0;
+    }
     g->gc.state = GCSsweepstring;  /* Start of sweep phase. */
     g->gc.sweepstr = 0;
     return 0;
+  case GCSxrseparate: {
+    size_t n = gc_xr_separate(g, 500);
+    if (gcref(*gc_xr_sepcur) == NULL) {
+      g->gc.state = GCSsweepstring;  /* Start of sweep phase. */
+      g->gc.sweepstr = 0;
+    }
+    return n;
+    }
   case GCSsweepstring: {
     MSize old = g->gc.total;
     gc_fullsweep(g, &g->strhash[g->gc.sweepstr++]);  /* Sweep one chain. */
@@ -651,6 +808,10 @@ static size_t gc_onestep(lua_State *L)
     if (gcref(g->gc.mmudata) != NULL) {
       if (gcref(g->jit_L))  /* Don't call finalizers on trace. */
 	return LJ_MAX_MEM;
+      /* neXt-Ray: not on the parallel GC's thread (finalizers run game code: particles, sounds): the main thread
+	 runs them, LUA_GCXRFINALIZE */
+      if (lj_gc_xr_worker)
+	return LJ_MAX_MEM;
       gc_finalize(L);  /* Finalize one userdata object. */
       if (g->gc.estimate > GCFINALIZECOST)
 	g->gc.estimate -= GCFINALIZECOST;
@@ -668,8 +829,40 @@ static size_t gc_onestep(lua_State *L)
   }
 }
 
+/* neXt-Ray: time in steps outside LUA_GCXRSTEP (an allocation's, in scripts on the main thread), LUA_GCXRINLINE */
+uint64_t lj_gc_xr_inline_us = 0;
+int lj_gc_xr_slow_states = 0; /* bit per GC state a step over 10 ms of those began in, LUA_GCXRSLOW */
+
+static int gc_step(lua_State *L);
+
 /* Perform a limited amount of incremental GC steps. */
 int LJ_FASTCALL lj_gc_step(lua_State *L)
+{
+  if (gc_xr_deferred(G(L))) {
+    G(L)->gc.threshold = G(L)->gc.total + GCSTEPSIZE * 16;  /* Not at every allocation. */
+    return -1;
+  }
+#if LJ_TARGET_WINDOWS
+  if (!lj_gc_xr_inside) {
+    static LARGE_INTEGER freq;
+    LARGE_INTEGER t0, t1;
+    int res, state = G(L)->gc.state;
+    uint64_t us;
+    if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&t0);
+    res = gc_step(L);
+    QueryPerformanceCounter(&t1);
+    us = (uint64_t)(t1.QuadPart - t0.QuadPart) * 1000000 / (uint64_t)freq.QuadPart;
+    lj_gc_xr_inline_us += us;
+    if (us > 10000)
+      lj_gc_xr_slow_states |= 1 << state;
+    return res;
+  }
+#endif
+  return gc_step(L);
+}
+
+static int gc_step(lua_State *L)
 {
   global_State *g = G(L);
   MSize lim;
@@ -712,6 +905,10 @@ void LJ_FASTCALL lj_gc_step_fixtop(lua_State *L)
 int LJ_FASTCALL lj_gc_step_jit(global_State *g, MSize steps)
 {
   lua_State *L = gco2th(gcref(g->jit_L));
+  if (gc_xr_deferred(g)) {  /* neXt-Ray: the parallel GC does the work: no trace exit for it */
+    g->gc.threshold = g->gc.total + GCSTEPSIZE * 16;
+    return 0;
+  }
   L->base = mref(G(L)->jit_base, TValue);
   L->top = curr_topL(L);
   while (steps-- > 0 && lj_gc_step(L) == 0)
@@ -721,12 +918,33 @@ int LJ_FASTCALL lj_gc_step_jit(global_State *g, MSize steps)
 }
 #endif
 
+/* neXt-Ray: the finalize phase's finalizers for up to budget_us, on the main thread at a safe point (LUA_GCXRFINALIZE,
+   called inside lua_cpcall: a finalizer's error is thrown). Returns the userdata finalized; the phase may end with it */
+int lj_gc_xr_finalize(lua_State *L, int budget_us)
+{
+  global_State *g = G(L);
+  uint64_t end = gc_xr_us() + (uint64_t)(budget_us > 0 ? budget_us : 0);
+  int n = 0;
+  int32_t ostate = g->vmstate;
+  setvmstate(g, GC);
+  while (g->gc.state == GCSfinalize) {
+    gc_onestep(L);  /* One finalizer, or the end of the phase. */
+    n++;
+    if ((n & 7) == 0 && gc_xr_us() >= end)
+      break;
+  }
+  g->vmstate = ostate;
+  return n;
+}
+
 /* Perform a full GC cycle. */
 void lj_gc_fullgc(lua_State *L)
 {
   global_State *g = G(L);
   int32_t ostate = g->vmstate;
+  int xr_inside = lj_gc_xr_inside;
   setvmstate(g, GC);
+  lj_gc_xr_inside = 1;
   if (g->gc.state <= GCSatomic) {  /* Caught somewhere in the middle. */
     setmref(g->gc.sweep, &g->gc.root);  /* Sweep everything (preserving it). */
     setgcrefnull(g->gc.gray);  /* Reset lists from partial propagation. */
@@ -735,6 +953,8 @@ void lj_gc_fullgc(lua_State *L)
     g->gc.state = GCSsweepstring;  /* Fast forward to the sweep phase. */
     g->gc.sweepstr = 0;
   }
+  while (g->gc.state == GCSxrseparate)  /* Its dead userdata must be separated before the sweep. */
+    gc_onestep(L);
   while (g->gc.state == GCSsweepstring || g->gc.state == GCSsweep)
     gc_onestep(L);  /* Finish sweep. */
   lua_assert(g->gc.state == GCSfinalize || g->gc.state == GCSpause);
@@ -742,6 +962,7 @@ void lj_gc_fullgc(lua_State *L)
   g->gc.state = GCSpause;
   do { gc_onestep(L); } while (g->gc.state != GCSpause);
   g->gc.threshold = (g->gc.estimate/100) * g->gc.pause;
+  lj_gc_xr_inside = xr_inside;
   g->vmstate = ostate;
 }
 

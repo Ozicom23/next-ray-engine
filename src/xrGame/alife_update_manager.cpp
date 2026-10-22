@@ -113,8 +113,17 @@ void CALifeUpdateManager::update_scheduled(bool init_ef)
 void CALifeUpdateManager::update()
 {
 	PROF_EVENT("AI: A-Life Update");
+	mt_timed_sum t(mt_t_alife);
+	// A long update to the log (stat_frame_pacing): which half
+	const u64 t0 = CPU::QPC();
 	update_switch();
+	const u64 t1 = CPU::QPC();
 	update_scheduled(false);
+	const u64 t2 = CPU::QPC();
+	const double to_ms = 1000.0 / double(CPU::qpc_freq);
+	if (double(t2 - t0) * to_ms > 15.0 && g_bEnableStatGather)
+		Msg("* [A-Life] update %.1f ms: switch %.1f ms, scheduled %.1f ms", double(t2 - t0) * to_ms, double(t1 - t0) * to_ms,
+			double(t2 - t1) * to_ms);
 }
 
 void CALifeUpdateManager::shedule_Update(u32 dt)

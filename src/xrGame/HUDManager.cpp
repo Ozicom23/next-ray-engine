@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "gamepad.h"
+#include "camera_flight.h"
 #include "HUDManager.h"
 #include "hudtarget.h"
 #include "actor.h"
@@ -222,6 +223,8 @@ void CHUDManager::Render_First(IDSGraphManager* DM)
 
 bool need_render_hud()
 {
+	if (camera_flight::playing())
+		return false;
 	CObject* O = g_pGameLevel ? g_pGameLevel->CurrentViewEntity() : NULL;
 	if (0 == O)
 		return false;
@@ -312,6 +315,8 @@ void CHUDManager::RenderUI()
 		return;
 
 	if (!b_online) return;
+	// A benchmark flight: the frame without the game's UI (the performance overlay is drawn elsewhere)
+	if (camera_flight::playing()) return;
 
 	if (true /*|| psHUD_Flags.is(HUD_DRAW | HUD_DRAW_RT)*/)
 	{

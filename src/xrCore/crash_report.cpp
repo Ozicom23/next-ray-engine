@@ -3,6 +3,7 @@
 #include "mod_origin.h"
 #include <dbghelp.h>
 #include <algorithm>
+#include <atomic>
 #include <string>
 #include <vector>
 #include "../3rd party/stackwalker/include/StackWalker.h"
@@ -245,13 +246,18 @@ std::string wine_version()
 }
 } // namespace
 
-LPCSTR write(LPCSTR what, const void* exception_context)
+static std::atomic<bool> s_started{ false };
+static std::atomic<u32> s_beats{ 0 };
+
+bool started() { return s_started.load(); }
+void beat() { s_beats.fetch_add(1, std::memory_order_relaxed); }
+u32 beats() { return s_beats.load(std::memory_order_relaxed); }
+
+LPCSTR write(LPCSTR what, const void* exception_context, void* thread)
 {
 	static string_path s_path = "";
-	static bool s_written = false;
-	if (s_written) // a crash inside the report's own writing
+	if (s_started.exchange(true)) // a crash inside the report's own writing
 		return s_path;
-	s_written = true;
 
 	// The engine's stack
 	frame_walker walker;
@@ -266,7 +272,7 @@ LPCSTR write(LPCSTR what, const void* exception_context)
 			copy.Rsp += 8;
 		}
 #endif
-		walker.ShowCallstack(GetCurrentThread(), &copy);
+		walker.ShowCallstack(thread ? (HANDLE)thread : GetCurrentThread(), &copy);
 	}
 	else
 		walker.ShowCallstack();
@@ -362,22 +368,36 @@ LPCSTR write(LPCSTR what, const void* exception_context)
 		t.wSecond);
 	fprintf(f, "%s (built %s)%s, MO2 profile: %s\r\n", exe_name, built, wine_version().c_str(),
 		mod_origin::profile()[0] ? mod_origin::profile() : "-");
+	char context[1024] = "";
 	if (game_context)
 	{
-		char context[1024] = "";
 		safe_game_context(context, sizeof(context));
 		if (context[0])
 			fprintf(f, "%s\r\n", context);
 	}
 
 	fprintf(f, "\r\nPROBABLE CAUSE\r\n");
-	if (!lua_cause.empty() || !what_script.empty())
+	// A hang (another thread's stack: the hang watchdog): where the scripts are stuck; the log's earlier script errors
+	// are listed below but are not its cause
+	if (thread)
+	{
+		const char* lua_at = strstr(context, "Lua: ");
+		if (lua_at)
+		{
+			std::string l(lua_at + 5);
+			l = l.substr(0, l.find_first_of("\r\n"));
+			fprintf(f, "  Stuck in: %s\r\n", l.c_str());
+		}
+	}
+	if (thread)
+		; // the log's Lua stacks are from before the hang
+	else if (!lua_cause.empty() || !what_script.empty())
 		fprintf(f, "  Script: %s\r\n", (!what_script.empty() ? what_script : lua_cause).c_str());
 	else if (!lua_any.empty())
 		fprintf(f, "  Script: %s\r\n", lua_any.c_str());
 	if (!walker.first_engine.empty())
 		fprintf(f, "  Engine: %s\r\n", walker.first_engine.c_str());
-	if (!script_errors.empty())
+	if (!script_errors.empty() && !thread)
 		fprintf(f, "  Earlier in the log: %u script error(s), the last: %s\r\n", script_error_count, script_errors.back().c_str());
 
 	fprintf(f, "\r\nERROR\r\n");

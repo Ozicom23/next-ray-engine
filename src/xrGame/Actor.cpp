@@ -2119,6 +2119,7 @@ void CActor::RenderCamAttached(IDSGraphManager* DM)
 }
 
 #include "../xrEngine/FDemoRecord.h"
+#include "camera_flight.h"
 extern xr_unordered_set<CDemoRecord*> pDemoRecords;
 extern Flags32 ps_actor_shadow_flags;
 BOOL r__actor_shadow_in_demo_record = TRUE;
@@ -2149,6 +2150,7 @@ bool canRenderLegs(CActor* actor, CHolderCustom* m_holder) noexcept
         && g_player_hud
         && !m_holder
         && (legs_in_demo_record || pDemoRecords.empty())
+        && !camera_flight::playing()
         && showActorBody == 0
         && !actor->m_FPCam;
 };

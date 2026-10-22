@@ -1,5 +1,7 @@
--- neXt-Ray performance patches. The original mods stay untouched: this script wraps their functions at runtime, and
--- what they compute and show stays the same; only when the work runs changes. Remove this mod to undo all of it.
+-- neXt-Ray performance patches for GAMMA's mods (in the engine's gamedata). The original mods stay untouched: this script
+-- wraps their functions at runtime, and what they compute and show stays the same; only when the work runs changes.
+-- A patch applies only to the mod's exact known version (the bytecode of the functions it relies on); after an update
+-- of that mod it stays off (one log line with the new fingerprints) and the mod runs as it is.
 --   nextray_perf_off: a file in appdata turns every patch off (for comparisons).
 --
 -- 1. Dynamic Anomalies (drx_da_main): every anomaly registers its own actor_on_update closure, which returns at once
@@ -22,11 +24,30 @@ local function msg(fmt, ...)
 	log(log_prefix .. string.format(fmt, ...))
 end
 
+-- A function's bytecode without debug info, hashed (as _g_patches.script): the same for the same code
+local function fingerprint(f)
+	if type(f) ~= "function" then return "none" end
+	local ok, d = pcall(string.dump, f, true)
+	if not ok then return "?" end
+	local h = 0
+	for i = 1, #d do h = (h * 31 + d:byte(i)) % 2147483647 end
+	return #d .. ":" .. h
+end
+
+-- The known versions (GAMMA, 2026-10)
+local KNOWN = {
+	da_update = "938:774180173", -- drx_da_main: the anomaly's actor_on_update closure (returns until binder.on_update_time)
+	surge_build = "766:1699894902", surge_nearby = "445:1118901213", -- illish.lib.surge buildCovers, nearbyCovers
+	pos_snap = "74:1471059612", -- illish.lib.pos snap
+	tdss_normalize = "262:1173514111", -- z_3dss_shader_switcher.normalize_marker_shaders
+}
+
 ---------------------------------------------------------------------------------------------------------------------
 -- 1. Dynamic Anomalies: one dispatcher for the anomalies' timed update closures
 
 local da_sched = {} -- update key -> { binder = anomaly binder, func = the mod's closure }
 local da_count = 0
+local da_known = nil -- the closures are the known code: checked on the first one
 
 local function da_patch()
 	if not (drx_da_main and type(drx_da_main.callbacks) == "table") then return false end
@@ -38,7 +59,14 @@ local function da_patch()
 		local result = spawn(self, se_abstract)
 		local key = self.update_key
 		local cb = key and drx_da_main.callbacks[key]
-		if cb and cb.callback == "actor_on_update" and type(cb.func) == "function" and type(self.on_update_time) == "number" then
+		if da_known == nil and cb and type(cb.func) == "function" then
+			local fp = fingerprint(cb.func)
+			da_known = fp == KNOWN.da_update
+			if not da_known then
+				msg("Dynamic Anomalies' update closure is not the known one (%s), kept", fp)
+			end
+		end
+		if da_known and cb and cb.callback == "actor_on_update" and type(cb.func) == "function" and type(self.on_update_time) == "number" then
 			UnregisterScriptCallback("actor_on_update", cb.func)
 			if not da_sched[key] then da_count = da_count + 1 end
 			da_sched[key] = { binder = self, func = cb.func, due = self.on_update_time }
@@ -110,6 +138,11 @@ local function surge_patch()
 	if not (ok and type(SURGE) == "table" and type(SURGE.buildCovers) == "function") then return false end
 	local okp, POS = pcall(require, "illish.lib.pos")
 	if not (okp and type(POS) == "table" and type(POS.snap) == "function") then return false end
+	local fb, fn, fs = fingerprint(SURGE.buildCovers), fingerprint(SURGE.nearbyCovers), fingerprint(POS.snap)
+	if fb ~= KNOWN.surge_build or fn ~= KNOWN.surge_nearby or fs ~= KNOWN.pos_snap then
+		msg("Useful Idiots' cover cache functions are not the known ones (%s %s %s), kept", fb, fn, fs)
+		return false
+	end
 
 	local build = SURGE.buildCovers
 	local snap = POS.snap
@@ -186,6 +219,11 @@ local tdss_deadline = nil -- fallback when the end of the load isn't signalled: 
 local function tdss_patch()
 	local m = z_3dss_shader_switcher
 	if not (m and type(m.normalize_marker_shaders) == "function") then return false end
+	local fp = fingerprint(m.normalize_marker_shaders)
+	if fp ~= KNOWN.tdss_normalize then
+		msg("3DSS's normalize_marker_shaders is not the known one (%s), kept", fp)
+		return false
+	end
 	local normalize = m.normalize_marker_shaders
 	m.normalize_marker_shaders = function(weapon)
 		if tdss_loading and weapon and weapon.id then
@@ -230,7 +268,7 @@ local function actor_on_update()
 			msg("3DSS: %d marker normalization requests done as %d", tdss_calls, tdss_done)
 		end
 		msg("Dynamic Anomalies dispatcher %s (%d anomalies), emission cover cache %s, 3DSS normalization after loads %s",
-			da_on and "on" or "off", da_count, surge_on and "spread over frames" or "off", tdss_on and "on" or "off")
+			da_on and da_known and "on" or "off", da_count, surge_on and "spread over frames" or "off", tdss_on and "on" or "off")
 	end
 end
 

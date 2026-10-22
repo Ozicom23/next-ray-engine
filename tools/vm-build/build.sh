@@ -2,7 +2,7 @@
 # Builds the working tree on a Windows VM over SSH: a snapshot commit of the tree as it is (uncommitted and untracked
 # files included, the real index and branches untouched) is pushed to the VM's repo and built there by build.ps1,
 # like the dev build CI. Incremental: only what changed since the last build recompiles.
-# Usage: tools/vm-build/build.sh [-c CONF] [--quick] [--package] [--rebuild] [--no-build] [--fetch] [--install] [--deck] [--install-to DEST]
+# Usage: tools/vm-build/build.sh [-c CONF] [--quick] [--package] [--rebuild] [--no-build] [--fetch] [--install DEST] [--deck]
 #   -c CONF          build configuration (default DX11-AVX)
 #   --quick          a test build without LTCG (a one-file change links in a fraction of the time, the exes are a
 #                    little slower: never for benchmarks or releases), in its own checkout on the VM ($NEXTRAY_VM_DIR
@@ -13,13 +13,12 @@
 #                    then close it and install in seconds; a change relinks both exes, 5-16 min with LTCG)
 #   --fetch          copy the result back to _build/vm/ (package/ with --package, else the exes, their .sym files
 #                    (crash reports), nvngx_dlss.dll and the XeSS DLLs)
-#   --install-to DEST  --fetch, then install into the game folder DEST (the one with anomaly/ and gamma/), a local
+#   --install DEST   --fetch, then install into the game folder DEST (the one with anomaly/ and gamma/), a local
 #                    path or user@host:/path over SSH: the exes and DLLs (DLSS, XeSS) to anomaly/bin (the replaced ones
 #                    kept in backup-nextray-exes-prev/), gamedata/ to anomaly/gamedata, the MO2 mod to gamma/mods.
-#                    Can be given more than once
-#   --install        --install-to $NEXTRAY_GAME (default /Volumes/SSD/stalker-gamma+mac.arm64)
-#   --deck           --install-to $NEXTRAY_DECK (default deck@192.168.0.230:/home/deck/Games/gamma)
-# Env: NEXTRAY_VM (default windows@192.168.64.4), NEXTRAY_VM_DIR (default C:/nr), NEXTRAY_GAME, NEXTRAY_DECK
+#                    Can be given more than once (--install-to is the same)
+#   --deck           --install $NEXTRAY_DECK (default deck@192.168.0.230:/home/deck/Games/gamma)
+# Env: NEXTRAY_VM (default windows@192.168.64.4), NEXTRAY_VM_DIR (default C:/nr), NEXTRAY_DECK
 
 set -euo pipefail
 
@@ -41,9 +40,8 @@ while [ $# -gt 0 ]; do
         --rebuild) PS_ARGS+=(-Rebuild) ;;
         --fetch) FETCH=1 ;;
         --no-build) BUILD=0 ;;
-        --install) TARGETS+=("${NEXTRAY_GAME:-/Volumes/SSD/stalker-gamma+mac.arm64}") ;;
+        --install|--install-to) [ $# -ge 2 ] || { echo "$1 needs the game folder" >&2; exit 2; }; TARGETS+=("${2%/}"); shift ;;
         --deck) TARGETS+=("${NEXTRAY_DECK:-deck@192.168.0.230:/home/deck/Games/gamma}") ;;
-        --install-to) TARGETS+=("$2"); shift ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
     shift

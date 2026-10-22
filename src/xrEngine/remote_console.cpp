@@ -6,6 +6,9 @@
 #include <atomic>
 #include <thread>
 #include <tlhelp32.h>
+#include "../xrCore/crash_report.h"
+
+int g_hang_watchdog = 60; // hang_watchdog: seconds without progress on the main thread before a hung game closes, 0 off
 
 namespace remote_console
 {
@@ -156,8 +159,16 @@ namespace remote_console
 	{
 		std::atomic<u32> s_log_lines{ 0 };
 		string_path s_hang_dir;
+		DWORD s_main_thread = 0;
+		std::atomic<bool> s_armed{ false }; // the main loop runs
+		std::atomic<bool> s_loading{ false }; // a level loads (or its precache frames)
 
-		void on_log(const char*) { s_log_lines.fetch_add(1, std::memory_order_relaxed); }
+		void on_log(const char*)
+		{
+			s_log_lines.fetch_add(1, std::memory_order_relaxed);
+			if (GetCurrentThreadId() == s_main_thread)
+				crash_report::beat();
+		}
 
 		// Return addresses of a suspended thread, unwound with the modules' unwind data (no allocation: the thread may
 		// hold the heap lock)
@@ -245,23 +256,77 @@ namespace remote_console
 			fclose(f);
 		}
 
+		// The hang: the stacks, a crash report with the main thread's stack (on a thread of its own: the main thread may
+		// hold a lock the report needs, the log's, so it gets 20 s), a message, the end
+		char s_hang_what[256];
+		string_path s_hang_report;
+
+		void report_hang()
+		{
+			HANDLE th = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, s_main_thread);
+			CONTEXT ctx = {};
+			ctx.ContextFlags = CONTEXT_FULL;
+			bool have = false;
+			if (th && SuspendThread(th) != DWORD(-1))
+			{
+				have = !!GetThreadContext(th, &ctx);
+				ResumeThread(th);
+			}
+			xr_strcpy(s_hang_report, crash_report::write(s_hang_what, have ? &ctx : nullptr, have ? th : nullptr));
+			if (th)
+				CloseHandle(th);
+		}
+
+		void on_hang(u32 seconds)
+		{
+			dump_threads();
+			xr_sprintf(s_hang_what, "The game stopped responding: the main thread made no progress for %u s (hang_watchdog)",
+			           seconds);
+			s_hang_report[0] = 0;
+			std::thread reporter(report_hang);
+			if (WaitForSingleObject(reporter.native_handle(), 20000) == WAIT_OBJECT_0)
+				reporter.join();
+			else
+				reporter.detach();
+			char box[600];
+			xr_sprintf(box, "The game stopped responding for %u seconds and will close.%s%s", seconds,
+			           s_hang_report[0] ? "\n\nCrash report: " : "", s_hang_report);
+			if (!strstr(Core.Params, "-remote_console")) // a test session doesn't wait for a click
+				MessageBoxA(nullptr, box, "neXt-Ray", MB_OK | MB_ICONERROR | MB_TOPMOST | MB_SETFOREGROUND);
+			TerminateProcess(GetCurrentProcess(), 3);
+		}
+
 		void watchdog()
 		{
+			const bool tests = strstr(Core.Params, "-remote_console") != nullptr;
 			u32 last = 0;
-			u32 quiet_since = GetTickCount();
+			ULONGLONG quiet_since = GetTickCount64(), prev = quiet_since;
+			bool dumped = false;
 			for (;;)
 			{
-				Sleep(5000);
-				const u32 beat = s_log_lines.load(std::memory_order_relaxed) + Device.dwFrame;
-				if (beat != last)
+				Sleep(1000);
+				const ULONGLONG now = GetTickCount64();
+				const u32 beat = crash_report::beats();
+				// A jump of the clock: the system slept, or the process was stopped
+				const bool resumed = now - prev > 5000;
+				prev = now;
+				if (beat != last || resumed || !s_armed || IsDebuggerPresent() || crash_report::started())
 				{
 					last = beat;
-					quiet_since = GetTickCount();
+					quiet_since = now;
+					dumped = false;
+					continue;
 				}
-				else if (GetTickCount() - quiet_since >= 120000)
+				const ULONGLONG quiet = now - quiet_since;
+				if (g_hang_watchdog > 0)
+				{
+					if (quiet >= u64(g_hang_watchdog) * 1000 * (s_loading ? 3 : 1))
+						on_hang(u32(quiet / 1000));
+				}
+				else if (tests && !dumped && quiet >= 120000)
 				{
 					dump_threads();
-					quiet_since = GetTickCount(); // again in two minutes while it stays stuck
+					dumped = true;
 				}
 			}
 		}
@@ -269,8 +334,7 @@ namespace remote_console
 
 	void start_watchdog()
 	{
-		if (!strstr(Core.Params, "-remote_console"))
-			return;
+		s_main_thread = GetCurrentThreadId();
 		FS.update_path(s_hang_dir, "$logs$", "");
 		xrLogger::AddLogCallback(on_log);
 		std::thread(watchdog).detach();
@@ -278,6 +342,8 @@ namespace remote_console
 
 	void update()
 	{
+		s_armed = true;
+		s_loading = !g_loading_events.empty() || Device.dwPrecacheFrame != 0;
 		if (!s_initialized)
 		{
 			s_initialized = true;

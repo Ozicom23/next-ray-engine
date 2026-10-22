@@ -10,7 +10,8 @@
 
 /* Garbage collector states. Order matters. */
 enum {
-  GCSpause, GCSpropagate, GCSatomic, GCSsweepstring, GCSsweep, GCSfinalize
+  GCSpause, GCSpropagate, GCSatomic, GCSsweepstring, GCSsweep, GCSfinalize,
+  GCSxrseparate  /* neXt-Ray: after the atomic phase, before the sweep: userdata to be finalized separated in steps */
 };
 
 /* Bitmasks for marked field of GCobj. */
@@ -55,6 +56,12 @@ LJ_FUNC void lj_gc_finalize_cdata(lua_State *L);
 #endif
 LJ_FUNC void lj_gc_freeall(global_State *g);
 LJ_FUNCA int LJ_FASTCALL lj_gc_step(lua_State *L);
+LJ_DATA int lj_gc_xr_defer, lj_gc_xr_inside, lj_gc_xr_incsep, lj_gc_xr_worker;
+LJ_FUNC int lj_gc_xr_finalize(lua_State *L, int budget_us);
+LJ_DATA uint64_t lj_gc_xr_inline_us;
+LJ_DATA int lj_gc_xr_slow_states;
+LJ_DATA int lj_gc_xr_atomic_us[6];
+LJ_DATA int lj_gc_xr_udata[3];
 LJ_FUNCA void LJ_FASTCALL lj_gc_step_fixtop(lua_State *L);
 #if LJ_HASJIT
 LJ_FUNC int LJ_FASTCALL lj_gc_step_jit(global_State *g, MSize steps);

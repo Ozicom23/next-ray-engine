@@ -74,6 +74,15 @@ static void crash_game_context(char* out, u32 size)
 			actor->Position().y, actor->Position().z, Device.dwFrame);
 	else
 		xr_sprintf(out, size, "Where: level %s, no actor, frame %u", level, Device.dwFrame);
+	// Where the scripts run (a hang in a script loop: the main thread's own stack ends in compiled Lua code)
+	CScriptEngine* engine = g_ai_space ? &g_ai_space->script_engine() : nullptr;
+	lua_State* L = engine ? engine->lua() : nullptr;
+	char where[512];
+	if (L && lua_xr_where(L, where, sizeof(where)) > 0)
+	{
+		const u32 len = xr_strlen(out);
+		xr_sprintf(out + len, size - len, "\r\nLua: %s", where);
+	}
 }
 
 CGamePersistent::CGamePersistent(void)

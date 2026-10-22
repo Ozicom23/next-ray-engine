@@ -1,6 +1,6 @@
--- neXt-Ray performance patches: level load costs of mods. Like zzzz_nextray_perf.script, the original mods stay
--- untouched and what they compute stays the same: a patched function is wrapped only when its source text is exactly
--- the known one, and the engine functions it needs exist (other executables run the originals).
+-- neXt-Ray performance patches (in the engine's gamedata): level load costs of mods. Like zzzz_nextray_perf.script, the
+-- original mods stay untouched and what they compute stays the same: a patched function is wrapped only when its source
+-- text is exactly the known one, and the engine functions it needs exist (other executables run the originals).
 --   nextray_perf_off: a file in appdata turns every patch off (for comparisons).
 --
 -- 1. story_objects.get_story_se_item(story_id): finds the first object (lowest id) whose section is story_id by calling

@@ -11,8 +11,10 @@ namespace remote_console
 {
 	// Once per main loop iteration, also during loading
 	void update();
-	// At start, after the file system: with -remote_console, a game that stops making progress (no frame and no log
-	// line for two minutes) writes every thread's stack to $logs$\hang_<time>.txt (a test session kills a hung game,
-	// and the log's last lines with it)
+	// At start, after the file system: the hang watchdog. Once the main loop runs, a main thread that makes no progress
+	// (no main loop pass, no log line of its own, no step of a long task: crash_report::beat) for hang_watchdog seconds
+	// (60; three times that while loading; 0 off) writes every thread's stack to $logs$\hang_<time>.txt and a crash
+	// report with the main thread's stack, says so and closes the game. Not under a debugger, while a fatal error is
+	// reported, or across a system sleep. With -remote_console and the watchdog off, the stacks alone after two minutes
 	void start_watchdog();
 }

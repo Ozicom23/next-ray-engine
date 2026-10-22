@@ -953,6 +953,7 @@ void CAI_Stalker::net_Import(NET_Packet& P)
 void CAI_Stalker::update_object_handler()
 {
 	PROF_EVENT("AI: [Stalker] Update Handler");
+	mt_timed_sum t(mt_t_stalker_items);
 	if (!g_Alive())
 		return;
 

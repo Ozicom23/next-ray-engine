@@ -867,7 +867,9 @@ void CDSGraphManager::add_leaf_Static(dxRender_Visual* pVisual)
 }
 
 #ifdef USE_DX11
-int ps_r4_main_parallel_cull = 0;
+// On by default with 12 hardware threads or more: on the Steam Deck's 4 cores (8 threads) the workers compete with the
+// graphics driver's threads and the frame got 0.1-0.4 ms longer
+int ps_r4_main_parallel_cull = std::thread::hardware_concurrency() >= 12 ? 1 : 0;
 // HOM's recheck delay on the worker threads (::Random is not thread-safe)
 static thread_local CRandom s_static_rnd{ s32(GetCurrentThreadId()) };
 

@@ -45,7 +45,13 @@ private:
 		IC void operator()(_iterator& i, u64 cycle_count) const
 		{
 			START_PROFILE("ALife/scheduled/update")
+				const u64 t0 = CPU::QPC();
 				(*i).second->update();
+				// A long one to the log (stat_frame_pacing): which object
+				const double ms = double(CPU::QPC() - t0) * 1000.0 / double(CPU::qpc_freq);
+				if (ms > 10.0 && g_bEnableStatGather)
+					if (CSE_Abstract* e = (*i).second->base())
+						Msg("* [A-Life] scheduled %.1f ms: %s (%s)", ms, e->name_replace(), e->name());
 			STOP_PROFILE
 		}
 	};

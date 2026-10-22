@@ -226,8 +226,28 @@ LUA_API int  (lua_status) (lua_State *L);
 #define LUA_GCSTEP		5
 #define LUA_GCSETPAUSE		6
 #define LUA_GCSETSTEPMUL	7
+/* neXt-Ray: 1 when collecting is due: a cycle is running, or the heap is within data% of the size that starts one */
+#define LUA_GCXRDUE		100
+/* neXt-Ray: up to data of the collector's own incremental steps, whatever the debt (LUA_GCSTEP goes on until the heap
+   is smaller, which runs a whole finalize or sweep phase at once); 1 when a cycle finished */
+#define LUA_GCXRSTEP		101
+/* neXt-Ray: data 1: collect only in LUA_GCXRSTEP (or a full GC), not in a step an allocation makes; 2 also the
+   userdata to be finalized separated in steps after the atomic phase instead of in it; 0 off */
+#define LUA_GCXRDEFER		102
+/* neXt-Ray: microseconds in the steps allocations made (in scripts) since the last call */
+#define LUA_GCXRINLINE		103
+/* neXt-Ray: a bit per GC state (1 << GCSpause...) steps over 10 ms of those began in, since the last call */
+#define LUA_GCXRSLOW		104
+/* neXt-Ray: microseconds of the last atomic phase's part data (0-5); 6-8 the userdata its separation visited, moved
+   to be finalized, found without __gc */
+#define LUA_GCXRATOMIC		105
+/* neXt-Ray: the finalize phase's finalizers for up to data microseconds (the main thread, at a safe point; call it
+   inside lua_cpcall). LUA_GCXRSTEP leaves them: it returns 2 while they wait. Returns the steps done */
+#define LUA_GCXRFINALIZE	106
 
 LUA_API int (lua_gc) (lua_State *L, int what, int data);
+/* neXt-Ray: where L runs (the compiled trace's function or the interpreter's frames), for crash and hang reports */
+LUA_API int (lua_xr_where) (lua_State *L, char *buf, int size);
 
 
 /*

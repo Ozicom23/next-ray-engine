@@ -982,9 +982,68 @@ void CLevel::MakeReconnect()
 
 BOOL mt_ph_commander = FALSE;
 BOOL mt_TaskManager = FALSE;
+extern BOOL psLua_ParallelGC;
+extern int psLua_ParallelGC_Paced;
+extern int psLua_GCFinalizeUs;
+
+static void lua_gc_cycle_log(lua_State* L)
+{
+    if (g_bEnableStatGather)
+        Msg("* [Lua GC] cycle done, heap %d MB; atomic ms: left-overs %.1f, weak + roots %.1f, written tables %.1f, "
+            "userdata separated %.1f (%d visited, %d to finalize, %d without __gc), marked %.1f, clearing weak "
+            "tables %.1f", lua_gc(L, LUA_GCCOUNT, 0) / 1024,
+            lua_gc(L, LUA_GCXRATOMIC, 0) / 1000.f, lua_gc(L, LUA_GCXRATOMIC, 1) / 1000.f,
+            lua_gc(L, LUA_GCXRATOMIC, 2) / 1000.f, lua_gc(L, LUA_GCXRATOMIC, 3) / 1000.f,
+            lua_gc(L, LUA_GCXRATOMIC, 6), lua_gc(L, LUA_GCXRATOMIC, 7), lua_gc(L, LUA_GCXRATOMIC, 8),
+            lua_gc(L, LUA_GCXRATOMIC, 5) / 1000.f, lua_gc(L, LUA_GCXRATOMIC, 4) / 1000.f);
+}
+
+// lua_cpcall discards what the function returns: the count goes out through its argument
+static int lua_gc_finalize_cf(lua_State* L)
+{
+    int* steps = static_cast<int*>(lua_touserdata(L, 1));
+    *steps = lua_gc(L, LUA_GCXRFINALIZE, psLua_GCFinalizeUs);
+    return 0;
+}
+
+// The paced parallel GC's finalize phase on this thread, protected: a finalizer's error goes to the log
+static void lua_gc_finalize_step()
+{
+    static int s_count = 0;
+    static u64 s_ticks = 0;
+    lua_State* L = ai().script_engine().lua();
+    const u64 t0 = CPU::QPC();
+    int n = 0;
+    if (lua_cpcall(L, lua_gc_finalize_cf, &n) != 0)
+    {
+        // The error message is left on the stack
+        Msg("! [Lua GC] a finalizer failed: %s", lua_isstring(L, -1) ? lua_tostring(L, -1) : "?");
+        lua_pop(L, 1);
+        n = 1;
+    }
+    if (n > 0)
+    {
+        s_count += n;
+        s_ticks += CPU::QPC() - t0;
+    }
+    else if (s_count)
+    {
+        // The phase ended (the call before was its last)
+        if (g_bEnableStatGather)
+            Msg("* [Lua GC] finalizers: %d steps, %.1f ms on the main thread", s_count,
+                double(s_ticks) * 1000.0 / double(CPU::qpc_freq));
+        lua_gc_cycle_log(L);
+        s_count = 0;
+        s_ticks = 0;
+    }
+}
+
 void CLevel::OnFrame()
 {
 	PROF_EVENT("CLevel::OnFrame()");
+
+	if (psLua_ParallelGC && psLua_ParallelGC_Paced && Device.LuaGC)
+		lua_gc_finalize_step();
 
     // demonized: update wallmarks before rendering
     ::Render->update_Wallmarks();
@@ -1186,6 +1245,20 @@ void CLevel::OnFrame()
 
 int psLUA_GCSTEP = 300;
 int psLua_ParallelGCStep = 75;
+// lua_parallel_gc_paced: the parallel GC steps only while collecting is due (a cycle running, or the heap near the size
+// Lua's pause starts the next at: setpause, 200% is twice what the last cycle left), in slices of ~0.5 ms of the
+// collector's own steps. Started at once, the cycles ran back to back and each one's atomic phase (a single step, ~30 ms
+// on the Steam Deck with GAMMA) held a frame about once a second; and lua_gc's step runs until the heap is smaller, a
+// whole finalize or sweep phase at once (120-140 ms) in larger cycles. Due a little before Lua's own start, so the
+// cycles are stepped here rather than inside scripts. 2: also the userdata to be finalized separated in steps after
+// the atomic phase rather than in it (walking all userdata, ~300k with GAMMA, made it 40-55 ms)
+int psLua_ParallelGC_Paced = 1;
+// lua_gc_pause: Lua's GC pause (setpause, %: the next cycle starts when the heap is that much of what the last one
+// left), 0 leaves it to scripts (200)
+int psLua_GCPause = 0;
+// lua_gc_finalize_us: with the paced parallel GC the finalizers (their __gc: game code) run on the main thread at the
+// start of the level's frame, for up to this many microseconds a frame, not on the parallel GC's thread
+int psLua_GCFinalizeUs = 1000;
 extern BOOL psLua_ParallelGC;
 extern BOOL psLua_ParallelGC_debug;
 
@@ -1194,6 +1267,7 @@ void CLevel::script_gc()
 	if (mt_ph_commander)
 	{
 		PROF_EVENT("m_ph_commander");
+		mt_timed_sum t(mt_t_level_scripts);
 		ai().script_engine().script_process(ScriptEngine::eScriptProcessorLevel)->update();
 
 		m_ph_commander->update();
@@ -1202,6 +1276,7 @@ void CLevel::script_gc()
 	if (!(psLua_ParallelGC && Device.LuaGC))
 	{
 		PROF_EVENT("CLevel::script_gc");
+		lua_gc(ai().script_engine().lua(), LUA_GCXRDEFER, 0); // no parallel GC: scripts' allocations step it
 		lua_gc(ai().script_engine().lua(), LUA_GCSTEP, psLUA_GCSTEP);
 	}
 	
@@ -1220,7 +1295,41 @@ bool CLevel::Load(u32 dwNum)
 // demonized: called from Device, via Device.LuaGC pointer
 int CLevel::LuaGC()
 {
-    return lua_gc(ai().script_engine().lua(), LUA_GCSTEP, psLua_ParallelGCStep);
+    lua_State* L = ai().script_engine().lua();
+    // The atomic phase (one step, ~30 ms) only here, while the frame renders, never in a script that allocates
+    lua_gc(L, LUA_GCXRDEFER, psLua_ParallelGC_Paced);
+    if (Device.LuaGCCount == 1) // the frame's first call
+    {
+        static int pause_set = 0;
+        if (psLua_GCPause && psLua_GCPause != pause_set)
+        {
+            lua_gc(L, LUA_GCSETPAUSE, psLua_GCPause);
+            pause_set = psLua_GCPause;
+        }
+        // The steps scripts made since the last (stat_frame_pacing): their time, the GC states long ones began in
+        // (0 pause, 1 propagate, 2 atomic, 3 sweep strings, 4 sweep, 5 finalize, 6 userdata separation)
+        const int inline_us = lua_gc(L, LUA_GCXRINLINE, 0);
+        const int slow = lua_gc(L, LUA_GCXRSLOW, 0);
+        if (inline_us > 5000 && g_bEnableStatGather)
+            Msg("* [Lua GC] steps in scripts %.1f ms, long ones in states 0x%x", inline_us / 1000.f, slow);
+    }
+    if (!psLua_ParallelGC_Paced)
+        return lua_gc(L, LUA_GCSTEP, psLua_ParallelGCStep);
+    if (!lua_gc(L, LUA_GCXRDUE, 90))
+        return 1; // nothing to do yet
+    const u64 until = CPU::QPC() + CPU::qpc_freq / 2000;
+    do
+    {
+        const int res = lua_gc(L, LUA_GCXRSTEP, 4);
+        if (res == 2)
+            return 1; // the finalizers wait for the main thread (lua_gc_finalize_step)
+        if (res == 1)
+        {
+            lua_gc_cycle_log(L); // a cycle without finalizers
+            return 1;
+        }
+    } while (CPU::QPC() < until);
+    return 0;
 }
 void CLevel::LuaGCDebug()
 {

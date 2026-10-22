@@ -23,7 +23,7 @@ namespace camera_flight
 	{
 		const float kKey = 0.1f;		// a key every 0.1 s, played back at the same rate
 		const float kHoldSec = 5.f;		// held at the start so the view there streams in
-		const u32 kWeatherMs = 20000;
+		const u32 kWeatherMs = 15000;
 		LPCSTR const kWeathers[] = {"w_clear1", "w_partly1", "w_cloudy1", "w_foggy1", "w_rain1", "w_storm1"};
 
 		enum class phase { off, recording, holding, flying };
@@ -101,6 +101,8 @@ namespace camera_flight
 			s.now = phase::off;
 		}
 	}
+
+	bool playing() { return s.now == phase::holding || s.now == phase::flying; }
 
 	void frame()
 	{
