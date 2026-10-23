@@ -963,6 +963,11 @@ static int s_layout_version = kLayoutVersion;
 
 void gamepad_layout_update()
 {
+	// Once, after the saved settings are loaded: a gp_unbind_all typed later stays as typed
+	static bool s_checked = false;
+	if (s_checked)
+		return;
+	s_checked = true;
 	if (s_layout_version >= kLayoutVersion)
 		return;
 	if (s_layout_version < 2 && s_gamepad_bindings[GP_RS + GP_AIM - GP_FIRST] == kNOTBINDED)

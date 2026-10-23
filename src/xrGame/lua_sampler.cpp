@@ -2,6 +2,7 @@
 #include "lua_sampler.h"
 #include "../xrEngine/xr_ioconsole.h"
 #include "../xrEngine/xr_ioc_cmd.h"
+#include "../xrEngine/xrSheduler.h"
 #include "../xrCore/crash_report.h"
 #include "ai_space.h"
 #include "script_engine.h"
@@ -19,8 +20,8 @@ namespace lua_sampler
 		const u32 kRing = 4096;
 		const u32 kNative = 40;			  // C++ frames kept per sample
 		const u32 kStackCopy = 64 * 1024; // of the sampled thread's stack, unwound after it runs again
-		const float kLongMs[kinds] = {30.f, 15.f, 20.f}; // a long update
-		LPCSTR const kTitles[kinds] = {"A-Life updates", "NPC updates", "The actor's updates"};
+		const float kLongMs[kinds] = {30.f, 15.f, 20.f, 20.f}; // a long update
+		LPCSTR const kTitles[kinds] = {"A-Life updates", "NPC updates", "The actor's updates", "Scheduled objects' updates"};
 
 		double qpc_ms(u64 d) { return double(d) * 1000.0 / double(CPU::qpc_freq); }
 
@@ -280,7 +281,7 @@ namespace lua_sampler
 				Msg("! [Lua sampler] can't write %s", path);
 				return;
 			}
-			w->w_printf("A-Life's, NPCs' and the actor's updates, sampled about once a millisecond. Lua frames as of Lua's last call out "
+			w->w_printf("A-Life's, NPCs', the actor's and scheduled objects' updates, sampled about once a millisecond. Lua frames as of Lua's last call out "
 			            "of the VM: a pure Lua loop is counted in the function that last called the engine. A line 0: a C "
 			            "function not called by a line (a metamethod: a field of an engine object). C++ functions from the "
 			            "exe's .sym file (inlined ones counted in their caller).\r\n");
@@ -292,9 +293,11 @@ namespace lua_sampler
 				report(s_regions[k].long_ones, w, title);
 			}
 			FS.w_close(w);
-			Msg("* [Lua sampler] A-Life %u updates (%u long), NPCs %u (%u long), the actor %u (%u long), written to %s",
-			    s_regions[alife].all.updates, s_regions[alife].long_ones.updates, s_regions[npc].all.updates,
-			    s_regions[npc].long_ones.updates, s_regions[actor].all.updates, s_regions[actor].long_ones.updates, path);
+			Msg("* [Lua sampler] A-Life %u updates (%u long), NPCs %u (%u long), the actor %u (%u long), scheduled objects %u (%u "
+			    "long), written to %s", s_regions[alife].all.updates, s_regions[alife].long_ones.updates,
+			    s_regions[npc].all.updates, s_regions[npc].long_ones.updates, s_regions[actor].all.updates,
+			    s_regions[actor].long_ones.updates, s_regions[scheduled].all.updates, s_regions[scheduled].long_ones.updates,
+			    path);
 		}
 
 		// One sample of the region's update, if one runs
@@ -419,8 +422,14 @@ namespace lua_sampler
 				s_thread = std::thread(run);
 				Msg("* [Lua sampler] %.0f s", seconds);
 			}
-			virtual void Info(TInfo& I) { xr_strcpy(I, "seconds to sample A-Life's, NPCs' and the actor's updates for, a report to logs (0 ends it)"); }
+			virtual void Info(TInfo& I) { xr_strcpy(I, "seconds to sample A-Life's, NPCs', the actor's and scheduled objects' updates for, a report to logs (0 ends it)"); }
 		};
+	}
+
+	void shutdown()
+	{
+		if (s_thread.joinable())
+			stop();
 	}
 
 	// stat_luabind_objects 1: count the luabind objects scripts make and the GC collects, by class; 0: the counts to
@@ -467,6 +476,16 @@ namespace lua_sampler
 
 	void register_commands()
 	{
+		g_sheduled_update_hook = [](LPCSTR name)
+		{
+			if (name)
+			{
+				update_begin(scheduled);
+				object(scheduled, name);
+			}
+			else
+				update_end(scheduled);
+		};
 		CMD1(CCC_LuaSample, "stat_lua_sample");
 		CMD1(CCC_LuabindObjects, "stat_luabind_objects");
 	}

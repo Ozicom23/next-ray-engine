@@ -127,6 +127,7 @@ namespace frame_pacing
 	static shared_str s_result_name;
 	static xr_vector<xr_string> s_result_notes;
 	static bool s_recording = false;
+	static xr_string s_rec_settings; // " cmd=value;" for the result file, as the recording started
 	static bool s_rec_open = false;   // frames still being added
 	static u64 s_rec_first = 0, s_rec_last = 0;
 	static u64 s_rec_start_qpc = 0;
@@ -553,15 +554,7 @@ namespace frame_pacing
 		GetModuleFileNameA(nullptr, exe, sizeof(exe));
 		w->w_printf("neXt-Ray benchmark: %s\r\n", s_result_name.c_str());
 		w->w_printf("exe %s, built %s\r\n", strrchr(exe, '\\') ? strrchr(exe, '\\') + 1 : exe, __DATE__);
-		static const char* settings[] = { "vid_mode", "r4_upscaler", "r4_upscaler_quality", "r4_upscaler_scale", "r4_framegen",
-			"r__framelimit", "rs_v_sync", "texture_lod", "r4_sun_smap_scale", "r2_ls_squality", "ssfx_ao", "ssfx_ssr",
-			"ssfx_sss_quality", "ssfx_shadow_cascades", "r__detail_density", "r__detail_radius", "r__geometry_lod",
-			"r4_tree_instancing", "r4_tex_stream" };
-		w->w_printf("settings:");
-		for (const char* cmd : settings)
-			if (LPCSTR v = Console->GetString(cmd))
-				w->w_printf(" %s=%s;", cmd, v);
-		w->w_printf("\r\n");
+		w->w_printf("settings:%s\r\n", s_rec_settings.c_str());
 		for (const xr_string& n : s_result_notes)
 			w->w_printf("%s\r\n", n.c_str());
 		w->w_printf("recorded %.1f s, %u frames%s\r\n\r\n", seconds, all.n, s_rec_presents_ok ? "" : ", no present count");
@@ -738,6 +731,20 @@ namespace frame_pacing
 
 	void start(float seconds)
 	{
+		// The settings as the recording starts: the result file takes them from here (written at the game's exit too,
+		// when the console is gone)
+		static const char* settings[] = { "vid_mode", "r4_upscaler", "r4_upscaler_quality", "r4_upscaler_scale", "r4_framegen",
+			"r__framelimit", "rs_v_sync", "texture_lod", "r4_sun_smap_scale", "r2_ls_squality", "ssfx_ao", "ssfx_ssr",
+			"ssfx_sss_quality", "ssfx_shadow_cascades", "r__detail_density", "r__detail_radius", "r__geometry_lod",
+			"r4_tree_instancing", "r4_tex_stream" };
+		s_rec_settings.clear();
+		for (const char* cmd : settings)
+			if (LPCSTR v = Console->GetString(cmd))
+			{
+				string256 one;
+				xr_sprintf(one, " %s=%s;", cmd, v);
+				s_rec_settings += one;
+			}
 		s_samples.clear();
 		s_parts.clear();
 		s_parts.push_back(shared_str(""));
@@ -930,6 +937,9 @@ namespace frame_pacing
 		s_timer_tried = false;
 		s_fence_failed = false;
 		s_q_failed = false;
+		// A recording still on (the game quits, vid_restart): written with the frames it has so far
+		if (s_recording)
+			finish();
 		for (frame_info& f : s_frames)
 			f = frame_info();
 		frame(s_id).id = s_id;

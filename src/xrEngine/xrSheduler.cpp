@@ -337,6 +337,8 @@ void CSheduler::Pop()
 
 int SchedulerBatchSize = 128;
 BOOL SchedulerLog = FALSE;
+void (*g_sheduled_update_hook)(LPCSTR name) = nullptr;
+
 void CSheduler::ProcessStep()
 {
 	// Normal priority
@@ -405,7 +407,11 @@ void CSheduler::ProcessStep()
 			clamp(dwUpdate, u32(_max(dwMin, u32(20))), dwMax);
 
 			const u64 t0 = g_bEnableStatGather ? CPU::QPC() : 0;
+			if (g_sheduled_update_hook)
+				g_sheduled_update_hook(T.scheduled_name.c_str());
 			T.Object->shedule_Update(clampr(Elapsed, u32(1), u32(_max(u32(T.Object->shedule.t_max), u32(1000)))));
+			if (g_sheduled_update_hook)
+				g_sheduled_update_hook(nullptr);
 			// A long one to the log (stat_frame_pacing): which object
 			if (t0)
 			{

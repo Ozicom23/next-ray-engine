@@ -144,7 +144,8 @@ void CALifeUpdateManager::update()
 	update_switch();
 	const u64 t1 = CPU::QPC();
 	// The objects a budgeted update before didn't get to come first, then this update's
-	m_scheduled_left = scheduled().update(m_objects_per_update + m_scheduled_left, scheduled_deadline());
+	// The registry's count (alife():set_objects_per_update changes it), the ones a budgeted update before left first
+	m_scheduled_left = scheduled().update(scheduled().objects_per_update() + m_scheduled_left, scheduled_deadline());
 	const u64 t2 = CPU::QPC();
 	lua_sampler::update_end(lua_sampler::alife);
 	const double to_ms = 1000.0 / double(CPU::qpc_freq);
@@ -165,7 +166,8 @@ void CALifeUpdateManager::update_left()
 void CALifeUpdateManager::catch_up()
 {
 	CALifeUpdateManager* self = s_update_manager;
-	if (!self || !self->m_scheduled_left || !self->initialized() || self->m_pushed_frame == Device.dwFrame)
+	if (!self || !self->m_scheduled_left || !self->initialized() || self->m_pushed_frame == Device.dwFrame ||
+		Device.Paused())
 		return;
 	if (g_alife_scheduled_budget_ms <= 0.f)
 	{

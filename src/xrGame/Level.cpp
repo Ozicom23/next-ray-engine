@@ -61,6 +61,7 @@
 
 #include "alife_simulator.h"
 #include "alife_object_registry.h"
+#include "lua_sampler.h"
 
 #ifdef DEBUG
 #include "level_debug.h"
@@ -83,6 +84,9 @@ BOOL spawn_antifreeze_debug = FALSE;
 // spawn_frame_budget_ms: prefetched objects (an NPC and its items, ...) stop spawning after this long in a frame and the
 // ones left spawn in the next frames, so a squad that comes online no longer spawns in one frame (0: all at once)
 float g_spawn_frame_budget_ms = 4.f;
+// The objects the budget held back: when their turn comes they must still be online (switched offline meanwhile, the
+// server's destroy found no client object to remove)
+static xr_vector<u16> s_spawn_deferred;
 static HANDLE prefetch_thread_signal;
 
 static void unpausePrefetchThreadSignal()
@@ -296,6 +300,7 @@ extern CAI_Space* g_ai_space;
 CLevel::~CLevel()
 {
     PROF_EVENT("CLevel::~CLevel");
+    lua_sampler::shutdown();
     //crash_saving::save_impl = nullptr; // CLevel not available, disable crash save
     xr_delete(g_player_hud);
     delete_data(m_script_attachments);
@@ -687,10 +692,21 @@ void CLevel::ProcessSpawnEvents()
 		{
 			deferred.push_back(E);
 			deferred_ids.push_back(obj_id);
+			if (std::find(s_spawn_deferred.begin(), s_spawn_deferred.end(), obj_id) == s_spawn_deferred.end())
+				s_spawn_deferred.push_back(obj_id);
 			continue;
 		}
 		if (parent_id == 0xffff)
 			spawned_one = true;
+		bool was_deferred = false;
+		{
+			auto it = std::find(s_spawn_deferred.begin(), s_spawn_deferred.end(), obj_id);
+			if (it != s_spawn_deferred.end())
+			{
+				s_spawn_deferred.erase(it);
+				was_deferred = true;
+			}
+		}
 
 		if (spawn_antifreeze_debug) Msg("[ProcessSpawnEvents] spawning section %s, obj_id %d, parent_id %d, event_id %d", section.c_str(), obj_id, parent_id, dest);
 
@@ -708,7 +724,7 @@ void CLevel::ProcessSpawnEvents()
             if (spawn_data_it->second.hasAlifeObject)
             {
                 auto obj = ai().alife().objects().object(obj_id);
-                if (!obj)
+                if (!obj || (was_deferred && !obj->m_bOnline))
                 {
                     if (spawn_antifreeze_debug) Msg("![ProcessSpawnEvents] object was in alife, but now is not, do not spawn, section %s, obj_id %d, parent_id %d, event_id %d", section.c_str(), obj_id, parent_id, dest);
                     continue;

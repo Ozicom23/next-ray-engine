@@ -403,13 +403,15 @@ BOOL CInput::iGetAsyncKeyState(int dik)
 
 void CInput::inject_key(int dik, bool press)
 {
-	if (cbStack.empty())
-		return;
+	// The state first: a release while nothing receives input (a load, a menu switching) must still release it, or the
+	// key stays held for iGetAsyncKeyState (a reload's end then fires the weapon: CWeaponMagazined::OnAnimationEnd)
 	if (is_gamepad_key(dik))
 		padKeyState[dik - GP_FIRST] = press;
 	else if (dik >= 0 && dik < COUNT_KB_BUTTONS)
 		KBState[dik] = press;
 	else
+		return;
+	if (cbStack.empty())
 		return;
 	if (press)
 		cbStack.back()->IR_OnKeyboardPress(dik);
@@ -419,9 +421,11 @@ void CInput::inject_key(int dik, bool press)
 
 void CInput::inject_mouse_button(int btn, bool press)
 {
-	if (btn < 0 || btn >= COUNT_MOUSE_BUTTONS || cbStack.empty())
+	if (btn < 0 || btn >= COUNT_MOUSE_BUTTONS)
 		return;
-	mouseState[btn] = press;
+	mouseState[btn] = press; // as in inject_key: the state even with no receiver
+	if (cbStack.empty())
+		return;
 	if (press)
 		cbStack.back()->IR_OnMousePress(btn);
 	else

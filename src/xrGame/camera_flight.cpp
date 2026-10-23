@@ -94,7 +94,8 @@ namespace camera_flight
 			if (s.now == phase::holding || s.now == phase::flying)
 			{
 				psHUD_Flags.set(HUD_DRAW, s.hud);
-				Level().SetGameTimeFactor(s.time_factor);
+				if (g_pGameLevel) // gone when the game quits during a flight
+					Level().SetGameTimeFactor(s.time_factor);
 			}
 			psActorFlags.set(AF_GODMODE, s.god);
 			Msg("* Flight: %s ended", s.name);

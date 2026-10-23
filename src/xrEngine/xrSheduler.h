@@ -2,6 +2,9 @@
 
 #include "ISheduled.h"
 
+// Called around each scheduled object's update (its name, then nullptr): stat_lua_sample's "scheduled objects"
+ENGINE_API extern void (*g_sheduled_update_hook)(LPCSTR name);
+
 class ENGINE_API CSheduler
 {
 private:

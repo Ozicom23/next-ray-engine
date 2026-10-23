@@ -143,15 +143,18 @@ Without changing what the mods do, and without editing their files:
 - Deadlock at a save's load between texture loading threads and GPU memory accounting.
 - Recursive `file_list_open_ex` dropped loose files in subfolders.
 - Wine/macOS: ImGui windows scaled to the back buffer when the window's client area has another size.
+- Gamepad: a button or the menu cursor's click released while nothing took input (a load, a menu switching) stayed
+  held for the game, so a reload's end ("fire still held") started firing on its own.
 
 ## Tools
 - Performance overlay (`perf_overlay`): FPS over time windows, CPU/GPU/engine times, a CPU- or GPU-bound hint, VRAM and RAM.
 - Profilers: `stat_gpu_passes` (`r4_gpu_passes_split 1`: static geometry and shadow maps per pixel shader),
   `stat_cpu_passes`, `stat_next_load`, `stat_script_load`, `stat_gpu_memory`,
-  `stat_tex_stream`, `stat_hiz`, `stat_sun_casters`, `stat_frame_pacing <s>` (every frame to a CSV in `logs/`; while it
+  `stat_tex_stream`, `stat_hiz`, `stat_sun_casters`, `stat_frame_pacing <s>` (every frame to a CSV in `logs/`, also when the game quits first; while it
   records, slow work to the log: a frame callback or scheduled object over 20 ms, an object spawned over 10 ms, a HUD
   model made over 5 ms),
-  `stat_lua_sample <s>` (A-Life's, NPCs' and the actor's updates sampled: time by object, Lua function and C++ function,
+  `stat_lua_sample <s>` (A-Life's, NPCs', the actor's and every scheduled object's updates sampled: time by object, Lua
+  function and C++ function,
   `logs\lua_sample_<time>.txt`),
   `stat_luabind_objects 1/0` (the engine objects scripts make, by class).
 - Mod cost overlay (`perf_overlay_mods`): Lua time per frame and script load time for each MO2 mod.
