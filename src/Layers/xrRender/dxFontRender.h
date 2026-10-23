@@ -15,6 +15,7 @@ public:
 
 private:
 	ref_shader pShader;
+	ref_shader pGlyphShader; // gamepad button glyphs (xrEngine/gamepad_glyphs.h)
 	ref_geom pGeom;
 };
 

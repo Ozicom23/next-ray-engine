@@ -25,6 +25,10 @@ class CALifeUpdateManager :
 {
 private:
 	bool m_first_time;
+	// alife_scheduled_budget_ms: the scheduled objects an update didn't get to, done by follow-up passes in the next
+	// frames (catch_up)
+	u32 m_scheduled_left;
+	u32 m_pushed_frame; // the frame an update was pushed in
 
 protected:
 	u64 m_max_process_time;
@@ -34,6 +38,9 @@ protected:
 
 public:
 	void __stdcall update();
+	void __stdcall update_left();
+	// CLevel::OnFrame: a follow-up pass for the scheduled objects left, while there are any
+	static void catch_up();
 
 protected:
 	void new_game(LPCSTR save_name);

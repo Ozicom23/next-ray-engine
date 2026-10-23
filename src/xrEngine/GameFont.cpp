@@ -2,6 +2,7 @@
 #pragma hdrstop
 
 #include "GameFont.h"
+#include "gamepad_glyphs.h"
 #ifndef _EDITOR
 #include "Render.h"
 #endif
@@ -12,6 +13,7 @@ unsigned short int mbhMulti2Wide
 
 extern ENGINE_API BOOL g_bRendering;
 ENGINE_API Fvector2 g_current_font_scale = {1.0f, 1.0f};
+bool gamepad_glyphs::playstation = false;
 
 #include "../Include/xrAPI/xrAPI.h"
 #include "../Include/xrRender/RenderFactory.h"
@@ -185,6 +187,12 @@ void CGameFont::Initialize(LPCSTR cShader, LPCSTR cTextureName)
 				TCMap[i].set((i % cpl) * width, (i / cpl) * fHeight, width);
 		}
 	}
+
+	// Gamepad glyphs: a square of the text's height and a little space (x -1: the renderer draws the glyph instead)
+	if (!IsMultibyte())
+		for (int c = 1; c < 32; ++c)
+			if (gamepad_glyphs::from_char(u8(c)) >= 0)
+				TCMap[c].set(-1.f, 0.f, fHeight * 1.2f);
 
 	fCurrentHeight = fHeight;
 

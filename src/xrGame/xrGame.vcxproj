@@ -1847,6 +1847,7 @@
     <ClInclude Include="UICursor.h" />
     <ClInclude Include="gamepad.h" />
     <ClInclude Include="camera_flight.h" />
+    <ClInclude Include="lua_sampler.h" />
     <ClInclude Include="UIDialogHolder.h" />
     <ClInclude Include="UIDosimeter.h" />
     <ClInclude Include="UIGameAHunt.h" />
@@ -3930,6 +3931,7 @@
     <ClCompile Include="UICursor.cpp" />
     <ClCompile Include="gamepad.cpp" />
     <ClCompile Include="camera_flight.cpp" />
+    <ClCompile Include="lua_sampler.cpp" />
     <ClCompile Include="UIDialogHolder.cpp" />
     <ClCompile Include="UIDosimeter.cpp" />
     <ClCompile Include="UIGameAHunt.cpp" />

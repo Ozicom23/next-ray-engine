@@ -1045,6 +1045,8 @@ void CLevel::OnFrame()
 	if (psLua_ParallelGC && psLua_ParallelGC_Paced && Device.LuaGC)
 		lua_gc_finalize_step();
 
+	CALifeUpdateManager::catch_up();
+
     // demonized: update wallmarks before rendering
     ::Render->update_Wallmarks();
 

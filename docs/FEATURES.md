@@ -57,10 +57,22 @@ Modded Exes steps the Lua GC on a worker thread while the frame renders. `lua_pa
   thread no longer step it (unless the heap outgrows that pace, as during loads). The finalizers (`__gc`, game code)
   run on the main thread at the start of the level's frame, up to `lua_gc_finalize_us` (1000) a frame.
 - 2: also the userdata to be finalized are separated in steps after the atomic phase instead of in it (30-50 ms with
-  GAMMA). Being tested before it becomes the default.
+  GAMMA). On in the Steam Deck preset; being tested before it becomes the default.
 
 `lua_gc_pause` sets Lua's GC pause (0 leaves it to scripts). Village flight on the Deck, 0 -> 2: 49 -> 57 fps, 1% low
 17 -> 29 fps, longest frame ~190 -> 83 ms, stutters 126 -> 20.
+
+Fewer objects to collect: `device()`, `alife()`, `game_graph()`, `get_console()` and `get_hud()` return the same
+script object every call instead of a new one (each a userdata the GC finalizes). With GAMMA, a 3-minute flight: 9.0
+-> 5.8 million engine objects made by scripts, finalizers per GC cycle ~80k -> ~40k (~20 -> ~11 ms on the main thread).
+
+## A-Life
+A-Life updates its objects (squads and smart terrains, 20 at a time with GAMMA) on a worker thread while the frame
+renders, and the frame waits for it at its end; squads looking for a new target cost 3-10 ms each in Lua, so an update
+with several of them held a frame for 30-80 ms. `alife_scheduled_budget_ms` (0 off, 5 in the Steam Deck preset): an
+update starts no object after that long and the ones left are done in the next frames, before the next update's own,
+so every object is still updated as often. Village flight on the Deck, 0 -> 5: A-Life's longest 37 -> 21-24 ms, frames
+over 33 ms 34 -> 17-18.
 
 ## Memory
 - `texture_lod` really applied (D3DX11 ignored the mip skip), scope reticles always at full detail.
@@ -81,9 +93,10 @@ Texture memory at `texture_lod 0`: 6.25 GB -> 2.5-2.8 GB.
 Level transition Cordon -> Swamp on the Deck: ~26 s -> ~16.5 s.
 
 ## Controls
-- Gamepad (XInput): buttons bound like keys (`gp_bind`), a STALKER 2-like default layout, analog movement, a radial
-  menu for weapons and devices, a cursor in menus, prompts with the pad's buttons, rumble. Options > Modded Exes >
-  Controls > Gamepad.
+- Gamepad (XInput): buttons bound like keys (`gp_bind`), a STALKER 2-like default layout (LT + R3 the alternative
+  aim, the weapon's other sight), analog movement, a radial menu for weapons and devices, a cursor in menus, prompts
+  with the pad's button icons (`gp_glyphs`, 0 names them), rumble. Options > Modded Exes > Controls > Gamepad, with a
+  buttons overview (the controller and what each button does, pressed, held and with LT).
 - DualSense and DualShock 4 over USB and Bluetooth: gyro aiming (`gp_gyro` 0 off, 1 while aiming, 2 always,
   `gp_gyro_sens`), PlayStation button names, adaptive trigger resistance on firearms.
 
@@ -91,7 +104,8 @@ Level transition Cordon -> Swamp on the Deck: ~26 s -> ~16.5 s.
 Without changing what the mods do, and without editing their files:
 - In the engine's gamedata (`zzzz_nextray_perf.script`, `zzzz_nextray_load.script`): Dynamic Anomalies' per-frame
   closures through one dispatcher, Useful Idiots' emission cover cache built over the first frames, 3DSS marker shaders
-  normalized once per weapon after a load, story item lookups through the engine. Each applies only when the functions
+  normalized once per weapon after a load and not for weapons other characters hold (that loaded their HUD models,
+  never drawn: 7-45 ms each on the Deck), story item lookups through the engine. Each applies only when the functions
   it relies on are the known ones (their bytecode or source); otherwise it logs their fingerprints and stays off.
   `appdata\nextray_perf_off` turns them off.
 - The MO2 mod `mods/neXt-Ray performance patches` (shipped with the builds, at the bottom of the mod list): GAMMA's
@@ -106,7 +120,10 @@ Without changing what the mods do, and without editing their files:
 ## Tools
 - Performance overlay (`perf_overlay`): FPS over time windows, CPU/GPU/engine times, a CPU- or GPU-bound hint, VRAM and RAM.
 - Profilers: `stat_gpu_passes`, `stat_cpu_passes`, `stat_next_load`, `stat_script_load`, `stat_gpu_memory`,
-  `stat_tex_stream`, `stat_hiz`, `stat_sun_casters`, `stat_frame_pacing <s>` (every frame to a CSV in `logs/`).
+  `stat_tex_stream`, `stat_hiz`, `stat_sun_casters`, `stat_frame_pacing <s>` (every frame to a CSV in `logs/`),
+  `stat_lua_sample <s>` (A-Life's and NPCs' updates sampled: time by object and Lua function,
+  `logs\lua_sample_<time>.txt`),
+  `stat_luabind_objects 1/0` (the engine objects scripts make, by class).
 - Mod cost overlay (`perf_overlay_mods`): Lua time per frame and script load time for each MO2 mod.
 - Crash reports: `appdata\logs\crash_<date>.txt` with the probable cause (script and its mod, or the engine function),
   where the scripts run, the engine and Lua stacks and the log's end.

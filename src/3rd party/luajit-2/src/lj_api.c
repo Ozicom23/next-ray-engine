@@ -1171,6 +1171,61 @@ LUA_API int lua_xr_where(lua_State *L, char *buf, int size)
   return n;
 }
 
+LUA_API int lua_xr_sample(lua_State *L, lua_XRFrame *out, int max)
+{
+  /* The frames walked like lj_debug_frame, bounded: L's thread is held at any point, a frame half written must not
+  ** send the walk round (lua_getinfo's PC search follows cframes and can loop): each step goes down the stack, at most
+  ** 256 steps. A frame's line is from the return PC its callee keeps; unknown (0) for the innermost one */
+  int n = 0, steps = 0;
+  cTValue *bot = tvref(L->stack), *top = mref(L->maxstack, TValue);
+  cTValue *frame = L->base - 1, *nextframe = NULL;
+#if LJ_HASJIT
+  global_State *g = G(L);
+  int32_t st = g->vmstate;
+  if (st > 0 && n < max) {  /* Running a trace: its starting function. */
+    jit_State *J = G2J(g);
+    if ((MSize)st < J->sizetrace && gcref(J->trace[st]) != NULL) {
+      GCtrace *T = (GCtrace *)gcref(J->trace[st]);
+      GCproto *pt = gco2pt(gcref(T->startpt));
+      lj_debug_shortname(out[n].source, proto_chunkname(pt));
+      out[n].linedefined = (int)pt->firstline;
+      out[n].currentline = -2;
+      n++;
+    }
+  }
+#endif
+  while (frame > bot && frame < top && n < max && steps++ < 256) {
+    cTValue *prev;
+    if (frame_gc(frame) != obj2gco(L) && !frame_isvarg(frame)) {
+      GCfunc *fn = frame_func(frame);
+      if (fn->c.gct != ~LJ_TFUNC)
+        break;  /* Not a frame (yet). */
+      if (isluafunc(fn)) {
+        GCproto *pt = funcproto(fn);
+        lj_debug_shortname(out[n].source, proto_chunkname(pt));
+        out[n].linedefined = (int)pt->firstline;
+        out[n].currentline = 0;
+        if (nextframe && frame_islua(nextframe)) {
+          const BCIns *pc = frame_pc(nextframe);
+          if (pc > proto_bc(pt) && pc <= proto_bc(pt) + pt->sizebc)
+            out[n].currentline = (int)lj_debug_line(pt, proto_bcpos(pt, pc) - 1);
+        }
+      } else {
+        memcpy(out[n].source, "[C]", 4);
+        out[n].linedefined = -1;
+        out[n].currentline = -1;
+      }
+      n++;
+    }
+    nextframe = frame;
+    prev = frame_islua(frame) ? frame_prevl(frame) : frame_prevd(frame);
+    if (prev >= frame)
+      break;
+    frame = prev;
+  }
+  return n;
+}
+
 LUA_API int lua_gc(lua_State *L, int what, int data)
 {
   global_State *g = G(L);

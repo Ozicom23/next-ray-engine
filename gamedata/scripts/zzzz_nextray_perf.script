@@ -16,7 +16,10 @@
 --    normalizes the new weapon's scope marker shaders (about 25 ms each, 20 to 60 times per load, mostly the same few
 --    weapons, one per frame). While the load runs the requests are only noted; at the end of the load, before the
 --    first frame is shown (on_loading_screen_key_prompt), each weapon is normalized once by the mod's own function.
---    After that every call goes straight to the mod.
+--    After that every call goes straight to the mod, except for weapons other characters hold: normalizing one creates
+--    its HUD data, the HUD model loaded for nothing (7-45 ms on the Deck, a hitch each time an NPC's weapon comes
+--    through), as an NPC's weapon is only ever drawn as its world model. When the actor takes such a weapon, the slot
+--    change normalizes it as before.
 
 local log_prefix = "* [neXt-Ray perf] "
 
@@ -213,8 +216,14 @@ end
 
 local tdss_loading = true -- from the script load (the start of a load) to the end of the load
 local tdss_pending = {} -- weapon id -> true
-local tdss_calls, tdss_done = 0, 0
+local tdss_calls, tdss_done, tdss_others = 0, 0, 0
 local tdss_deadline = nil -- fallback when the end of the load isn't signalled: 10 s after the first update
+
+-- In someone's hands or inventory other than the actor's
+local function tdss_held_by_other(weapon)
+	local parent = weapon and weapon.parent and weapon:parent()
+	return parent ~= nil and parent:id() ~= 0
+end
 
 local function tdss_patch()
 	local m = z_3dss_shader_switcher
@@ -226,6 +235,10 @@ local function tdss_patch()
 	end
 	local normalize = m.normalize_marker_shaders
 	m.normalize_marker_shaders = function(weapon)
+		if tdss_held_by_other(weapon) then
+			tdss_others = tdss_others + 1
+			return
+		end
 		if tdss_loading and weapon and weapon.id then
 			tdss_pending[weapon:id()] = true
 			tdss_calls = tdss_calls + 1
@@ -245,7 +258,7 @@ local function tdss_flush()
 	local normalize = z_3dss_shader_switcher.nextray_normalize
 	for id in pairs(pending) do
 		local obj = level.object_by_id(id)
-		if obj then
+		if obj and not tdss_held_by_other(obj) then
 			normalize(obj)
 			tdss_done = tdss_done + 1
 		end
@@ -266,6 +279,9 @@ local function actor_on_update()
 		reported = true
 		if tdss_calls > 0 then
 			msg("3DSS: %d marker normalization requests done as %d", tdss_calls, tdss_done)
+		end
+		if tdss_others > 0 then
+			msg("3DSS: %d normalizations of other characters' weapons left out", tdss_others)
 		end
 		msg("Dynamic Anomalies dispatcher %s (%d anomalies), emission cover cache %s, 3DSS normalization after loads %s",
 			da_on and da_known and "on" or "off", da_count, surge_on and "spread over frames" or "off", tdss_on and "on" or "off")

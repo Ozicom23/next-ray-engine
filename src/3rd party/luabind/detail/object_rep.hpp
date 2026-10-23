@@ -31,6 +31,11 @@ namespace luabind { namespace detail
 
 	void finalize(lua_State* L, class_rep* crep);
 
+	// neXt-Ray (stat_luabind_objects): luabind objects made and collected per class while counting is on; the counts
+	// by class, reset when it is turned on
+	LUABIND_API void xr_count_objects(bool on);
+	LUABIND_API void xr_object_counts(void (*row)(const char* name, unsigned made, unsigned collected, void* ud), void* ud);
+
 	// this class is allocated inside lua for each pointer.
 	// it contains the actual c++ object-pointer.
 	// it also tells if it is const or not.

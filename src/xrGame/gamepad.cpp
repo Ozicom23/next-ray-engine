@@ -3,6 +3,7 @@
 #include "../xrEngine/xr_input.h"
 #include "../xrEngine/xr_ioconsole.h"
 #include "../xrEngine/xr_ioc_cmd.h"
+#include "../xrEngine/gamepad_glyphs.h"
 #include "xr_level_controller.h"
 #include "Level.h"
 #include "Actor.h"
@@ -29,6 +30,8 @@ extern ENGINE_API float psMouseSensVerticalK;
 extern ENGINE_API Flags32 psMouseInvert;
 extern ENGINE_API float psGamepadVibration;
 extern ENGINE_API int psGamepadSony;
+extern int g_gp_glyphs; // xr_level_controller.cpp
+void gamepad_layout_update();
 
 // Settings (Options > Modded Exes > Controls > Gamepad)
 int g_gp_enabled = 1;
@@ -523,12 +526,18 @@ void release_all(const gamepad_state& pad)
 void gamepad_frame(float dt)
 {
 	const gamepad_state& pad = pInput->pad();
+	gamepad_layout_update(); // a layout saved by an older version: the bindings added since
 	// Texts name the gamepad's buttons while it is the device in use, the keyboard's otherwise
 	const bool prompts = g_gp_enabled && pInput->pad_in_use();
-	if (prompts != g_gamepad_prompts || (prompts && pad.playstation != g_gamepad_playstation))
+	static int glyphs = g_gp_glyphs;
+	// The glyphs follow the pad connected, in use or not (the buttons overview shows them too)
+	if (pad.connected)
+		gamepad_glyphs::playstation = pad.playstation;
+	if (prompts != g_gamepad_prompts || (prompts && (pad.playstation != g_gamepad_playstation || glyphs != g_gp_glyphs)))
 	{
 		g_gamepad_prompts = prompts;
 		g_gamepad_playstation = pad.playstation;
+		glyphs = g_gp_glyphs;
 		CStringTable::ReparseKeyBindings();
 	}
 	EMode mode = mOff;
@@ -619,6 +628,16 @@ public:
 	}
 	virtual void Save(IWriter*) {}
 };
+
+// gp_playstation: 1 while the pad in use is a PlayStation one (its button names and glyphs), for scripts; not saved
+class CCC_GamepadPlaystation : public IConsole_Command
+{
+public:
+	CCC_GamepadPlaystation(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; }
+	virtual void Execute(LPCSTR args) {}
+	virtual void Status(TStatus& S) { xr_strcpy(S, gamepad_glyphs::playstation ? "1" : "0"); }
+	virtual void Save(IWriter*) {}
+};
 }
 
 void gamepad_register_commands()
@@ -641,7 +660,9 @@ void gamepad_register_commands()
 	CMD4(CCC_Float, "gp_gyro_sens", &g_gp_gyro_sens, 0.1f, 5.f);
 	CMD4(CCC_Integer, "gp_gyro_invert_y", &g_gp_gyro_invert_y, 0, 1);
 	CMD4(CCC_Integer, "gp_adaptive_triggers", &g_gp_adaptive_triggers, 0, 1);
+	CMD4(CCC_Integer, "gp_glyphs", &g_gp_glyphs, 0, 1);
 	CMD1(CCC_GamepadSim, "gp_sim");
+	CMD1(CCC_GamepadPlaystation, "gp_playstation");
 }
 
 void gamepad_start()

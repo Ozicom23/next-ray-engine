@@ -20,6 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE
 // OR OTHER DEALINGS IN THE SOFTWARE.
 #include "luabind_api.h"
+#include <cstring>
+#include <cstdint>
 #include <luabind/detail/class_rep.hpp>
 #include <luabind/detail/object_rep.hpp>
 #include <luabind/detail/method_rep.hpp>
@@ -36,6 +38,38 @@
 
 namespace luabind { namespace detail
 {
+	// stat_luabind_objects: an open hash by class (Lua runs on one thread at a time)
+	static bool s_count_on = false;
+	static const unsigned kCountSlots = 1024;
+	static struct { const class_rep* crep; unsigned made, collected; } s_counts[kCountSlots];
+
+	static void count(const class_rep* crep, bool made)
+	{
+		unsigned i = unsigned((reinterpret_cast<uintptr_t>(crep) >> 4) % kCountSlots);
+		for (unsigned n = 0; n < kCountSlots; ++n, i = (i + 1) % kCountSlots)
+		{
+			if (s_counts[i].crep == crep || !s_counts[i].crep)
+			{
+				s_counts[i].crep = crep;
+				++(made ? s_counts[i].made : s_counts[i].collected);
+				return;
+			}
+		}
+	}
+
+	void xr_count_objects(bool on)
+	{
+		if (on)
+			memset(s_counts, 0, sizeof(s_counts));
+		s_count_on = on;
+	}
+
+	void xr_object_counts(void (*row)(const char* name, unsigned made, unsigned collected, void* ud), void* ud)
+	{
+		for (unsigned i = 0; i < kCountSlots; ++i)
+			if (s_counts[i].crep)
+				row(s_counts[i].crep->name(), s_counts[i].made, s_counts[i].collected, ud);
+	}
 
 	// dest is a function that is called to delete the c++ object this struct holds
 	object_rep::object_rep(void* obj, class_rep* crep, int flags, void(*dest)(void*))
@@ -45,6 +79,8 @@ namespace luabind { namespace detail
 		, m_destructor(dest)
 		, m_dependency_cnt(1)
 	{
+		if (s_count_on)
+			count(crep, true);
 		// if the object is owned by lua, a valid destructor must be given
 		assert((((m_flags & owner) && dest) || !(m_flags & owner)) && "internal error, please report");
 #ifdef TEST_GARBAGE_COLLECTOR
@@ -62,6 +98,8 @@ namespace luabind { namespace detail
 		, m_destructor(0)
 		, m_dependency_cnt(1)
 	{
+		if (s_count_on)
+			count(crep, true);
 #ifdef TEST_GARBAGE_COLLECTOR
 		sprintf(debug_test_constructor,"%s %x %x",m_classrep->name(),m_object,this);
 		if (!sz_cmp(debug_class,m_classrep->name()))
@@ -128,6 +166,8 @@ namespace luabind { namespace detail
 	{
 		object_rep* obj = static_cast<object_rep*>(lua_touserdata(L, -1));
 
+		if (s_count_on)
+			count(obj->crep(), false);
 		finalize(L, obj->crep());
 
 		obj->~object_rep();

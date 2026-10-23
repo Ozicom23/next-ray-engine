@@ -24,6 +24,19 @@
 #include "mt_config.h"
 
 using namespace ALife;
+
+// alife_scheduled_budget_ms: an update's scheduled objects (objects_per_update of them) stop starting after this long
+// and the rest are done in the next frames, as the frame waits for A-Life's update at its end; 0: all at once
+float g_alife_scheduled_budget_ms = 0.f;
+static CALifeUpdateManager* s_update_manager = nullptr;
+
+static u64 scheduled_deadline()
+{
+	if (g_alife_scheduled_budget_ms <= 0.f)
+		return 0;
+	return CPU::QPC() + u64(double(g_alife_scheduled_budget_ms) * double(CPU::qpc_freq) / 1000.0);
+}
+
 #ifdef	ENGINE_LUA_ALIFE_UPDAGE_MANAGER_CALLBACKS
  //Alundaio
 #endif
@@ -71,15 +84,26 @@ CALifeUpdateManager::CALifeUpdateManager(xrServer* server, LPCSTR section) :
 	m_objects_per_update = pSettings->r_u32(section, "objects_per_update");
 	m_changing_level = false;
 	m_first_time = true;
+	m_scheduled_left = 0;
+	m_pushed_frame = u32(-1);
+	s_update_manager = this;
 }
 
 CALifeUpdateManager::~CALifeUpdateManager()
 {
+	if (s_update_manager == this)
+		s_update_manager = nullptr;
 	shedule_unregister();
 	Device.remove_from_seq_parallel(
 		xr_make_delegate(
 			this,
 			&CALifeUpdateManager::update
+		)
+	);
+	Device.remove_from_seq_parallel(
+		xr_make_delegate(
+			this,
+			&CALifeUpdateManager::update_left
 		)
 	);
 }
@@ -114,16 +138,45 @@ void CALifeUpdateManager::update()
 {
 	PROF_EVENT("AI: A-Life Update");
 	mt_timed_sum t(mt_t_alife);
+	lua_sampler::update_begin(lua_sampler::alife);
 	// A long update to the log (stat_frame_pacing): which half
 	const u64 t0 = CPU::QPC();
 	update_switch();
 	const u64 t1 = CPU::QPC();
-	update_scheduled(false);
+	// The objects a budgeted update before didn't get to come first, then this update's
+	m_scheduled_left = scheduled().update(m_objects_per_update + m_scheduled_left, scheduled_deadline());
 	const u64 t2 = CPU::QPC();
+	lua_sampler::update_end(lua_sampler::alife);
 	const double to_ms = 1000.0 / double(CPU::qpc_freq);
 	if (double(t2 - t0) * to_ms > 15.0 && g_bEnableStatGather)
 		Msg("* [A-Life] update %.1f ms: switch %.1f ms, scheduled %.1f ms", double(t2 - t0) * to_ms, double(t1 - t0) * to_ms,
 			double(t2 - t1) * to_ms);
+}
+
+void CALifeUpdateManager::update_left()
+{
+	PROF_EVENT("AI: A-Life Update (left)");
+	mt_timed_sum t(mt_t_alife);
+	lua_sampler::update_begin(lua_sampler::alife);
+	m_scheduled_left = scheduled().update(m_scheduled_left, scheduled_deadline());
+	lua_sampler::update_end(lua_sampler::alife);
+}
+
+void CALifeUpdateManager::catch_up()
+{
+	CALifeUpdateManager* self = s_update_manager;
+	if (!self || !self->m_scheduled_left || !self->initialized() || self->m_pushed_frame == Device.dwFrame)
+		return;
+	if (g_alife_scheduled_budget_ms <= 0.f)
+	{
+		self->m_scheduled_left = 0;
+		return;
+	}
+	self->m_pushed_frame = Device.dwFrame;
+	if (g_mt_config.test(mtALife))
+		Device.seqParallel.push_back(xr_make_delegate(self, &CALifeUpdateManager::update_left));
+	else
+		self->update_left();
 }
 
 void CALifeUpdateManager::shedule_Update(u32 dt)
@@ -135,6 +188,7 @@ void CALifeUpdateManager::shedule_Update(u32 dt)
 
 	if (!m_first_time && g_mt_config.test(mtALife))
 	{
+		m_pushed_frame = Device.dwFrame;
 		Device.seqParallel.push_back(
 			xr_make_delegate(
 				this,

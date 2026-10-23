@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+#include "script_cached_singleton.h"
 #include "script_engine.h"
 #include "ai_space.h"
 #include "script_debugger.h"
@@ -295,4 +296,7 @@ void CScriptEngine::script_register(lua_State* L)
 	//function(L, "device", get_device);
 	//function(L, "is_enough_address_space_available", is_enough_address_space_available_impl);
 	//#endif //-XRGAME_EXPORTS
+#ifdef XRGAME_EXPORTS
+	set_cached_singleton<&get_device>(L, "device");
+#endif
 }

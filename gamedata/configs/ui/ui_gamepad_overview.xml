@@ -1,0 +1,25 @@
+<w>
+	<overview>
+		<background x="0" y="0" width="1024" height="768" stretch="1">
+			<texture r="12" g="12" b="14" a="240">ui\ui_gamepad_fill</texture>
+		</background>
+		<title x="0" y="22" width="1024" height="30" stretch="1">
+			<text r="235" g="235" b="235" font="letterica18" align="c" vert_align="c">st_gp_overview_title</text>
+		</title>
+		<hint x="0" y="738" width="1024" height="24" stretch="1">
+			<text r="150" g="150" b="150" font="letterica16" align="c" vert_align="c">st_gp_overview_back</text>
+		</hint>
+		<picture x="192" y="60" width="640" height="320" stretch="1">
+			<texture>ui\ui_gamepad_xbox</texture>
+		</picture>
+		<picture_ps x="192" y="60" width="640" height="320" stretch="1">
+			<texture>ui\ui_gamepad_ps</texture>
+		</picture_ps>
+		<row x="0" y="0" width="470" height="20" stretch="1">
+			<text r="235" g="235" b="235" font="letterica18" align="l" vert_align="c"/>
+		</row>
+		<row_extra x="0" y="0" width="440" height="18" stretch="1">
+			<text r="150" g="150" b="150" font="letterica16" align="l" vert_align="c"/>
+		</row_extra>
+	</overview>
+</w>

@@ -248,6 +248,16 @@ LUA_API int  (lua_status) (lua_State *L);
 LUA_API int (lua_gc) (lua_State *L, int what, int data);
 /* neXt-Ray: where L runs (the compiled trace's function or the interpreter's frames), for crash and hang reports */
 LUA_API int (lua_xr_where) (lua_State *L, char *buf, int size);
+/* neXt-Ray: L's frames for a sampling profiler on another thread while L's thread is suspended: no allocation, no
+   locks, a bounded walk. The frames as of L's last call out of the VM (the interpreter keeps its base in a register),
+   innermost first; a compiled trace being run comes first as its start function with currentline -2. Returns the
+   frames written */
+typedef struct lua_XRFrame {
+  char source[LUA_IDSIZE];	/* the short source, "[C]" for a C function */
+  int linedefined;
+  int currentline;		/* 0 not known, -1 a C function */
+} lua_XRFrame;
+LUA_API int (lua_xr_sample) (lua_State *L, lua_XRFrame *out, int max);
 
 
 /*

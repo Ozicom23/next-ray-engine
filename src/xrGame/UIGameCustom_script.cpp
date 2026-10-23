@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include "script_cached_singleton.h"
 #include "UIGameCustom.h"
 #include "level.h"
 #include "ui/uistatic.h"
@@ -38,4 +39,5 @@ void CUIGameCustom::script_register(lua_State* L)
 		.def("enable_fake_indicators", &CUIGameCustom::enable_fake_indicators),
 		def("get_hud", &get_hud)
 	];
+	set_cached_singleton<&get_hud>(L, "get_hud");
 }

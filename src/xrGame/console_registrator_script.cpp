@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include "script_cached_singleton.h"
 #include "console_registrator.h"
 #include "../xrEngine/xr_ioconsole.h"
 #include "../xrEngine/xr_ioc_cmd.h"
@@ -104,4 +105,5 @@ void console_registrator::script_register(lua_State* L)
 		.def("get_token_list", &get_console_token_list)
 		.def("execute_deferred", &execute_console_command_deferred)
 	];
+	set_cached_singleton<&console>(L, "get_console");
 }

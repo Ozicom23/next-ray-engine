@@ -144,7 +144,7 @@
 		<text>Steam Deck Preset</text>
 	</string>
 	<string id="ui_mm_video_advanced_deck_preset_desc">
-		<text>Lowers settings whose loss is hard to see on a small 800p screen: ambient occlusion and screen space reflections at half resolution, fewer screen space shadow samples, far sun shadows to 140 m, middle and far sun shadow cascades at 3/4 and 1/2 resolution, point and spot light shadows at 3/4 size. Settings already lower stay as they are. Turning it off restores your previous values, so you can compare.</text>
+		<text>Lowers settings whose loss is hard to see on a small 800p screen: ambient occlusion and screen space reflections at half resolution, fewer screen space shadow samples, far sun shadows to 140 m, middle and far sun shadow cascades at 3/4 and 1/2 resolution, point and spot light shadows at 3/4 size, the Lua garbage collector's last long step split up and A-Life's object updates spread over frames (fewer hitches). Settings already lower stay as they are. Turning it off restores your previous values, so you can compare.</text>
 	</string>
 	<string id="ui_mm_lst_perf_overlay_off">
 		<text>Off</text>
@@ -873,6 +873,27 @@
 	<string id="ui_mm_modded_exes_control_gamepad_gp_sony">
 		<text>Read PlayStation Controllers Directly (gp_sony)</text>
 	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_overview">
+		<text>Buttons Overview</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_glyphs">
+		<text>Button Icons in Prompts (gp_glyphs)</text>
+	</string>
+	<string id="st_gp_overview_title">
+		<text>Gamepad Buttons</text>
+	</string>
+	<string id="st_gp_overview_back">
+		<text>B or Esc: back</text>
+	</string>
+	<string id="st_gp_overview_hold">
+		<text>hold:</text>
+	</string>
+	<string id="st_gp_overview_move">
+		<text>Move (a light push walks)</text>
+	</string>
+	<string id="st_gp_overview_look">
+		<text>Look</text>
+	</string>
 	<string id="ui_mm_modded_exes_control_gamepad_gp_default_layout">
 		<text>Default Layout (like S.T.A.L.K.E.R. 2)</text>
 	</string>
@@ -1060,7 +1081,7 @@
 		<text>Next Ammo Type</text>
 	</string>
 	<string id="st_gp_act_wpn_func">
-		<text>Weapon Function (Launcher)</text>
+		<text>Alternative Aim (the Other Sight)</text>
 	</string>
 	<string id="st_gp_act_wpn_firemode_next">
 		<text>Next Fire Mode</text>

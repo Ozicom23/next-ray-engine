@@ -3,6 +3,7 @@
 #include "../xrEngine/xr_ioconsole.h"
 #include "../xrEngine/xr_input.h"
 #include "../xrEngine/xr_ioc_cmd.h"
+#include "../xrEngine/gamepad_glyphs.h"
 #include "xr_level_controller.h"
 #include "string_table.h"
 
@@ -578,13 +579,22 @@ EGameActions get_binded_action(int _dik)
 }
 
 bool g_gamepad_prompts = false;
+int g_gp_glyphs = 1; // prompts show the buttons' glyphs (gamepad_glyphs.h), else their names
 
-// The gamepad key that does the action, as a prompt names it: "X", "Hold Y", "LT + LB". Buttons first, then while
-// aiming, then held, then the left stick; an action decided at the press counts for the actions it can be (use or
-// reload)
+// The gamepad key that does the action, as a prompt names it: "X", "Hold Y", "LT + LB" (or their glyphs). Buttons
+// first, then while aiming, then held, then the left stick; an action decided at the press counts for the actions it
+// can be (use or reload)
 static bool gamepad_action_prompt(EGameActions action, LPSTR dest, int dest_sz)
 {
-	auto names = [](int b) { return gamepad_button_name(b); };
+	static char glyph[GP_BUTTON_COUNT + 1][2];
+	auto names = [](int b) -> LPCSTR
+	{
+		if (!g_gp_glyphs)
+			return gamepad_button_name(b);
+		glyph[b][0] = gamepad_glyphs::to_char(b);
+		glyph[b][1] = 0;
+		return glyph[b];
+	};
 	auto does = [action](EGameActions bound)
 	{
 		return bound == action ||
@@ -595,13 +605,14 @@ static bool gamepad_action_prompt(EGameActions action, LPSTR dest, int dest_sz)
 			return xr_sprintf(dest, dest_sz, "%s", names(b)), true;
 	for (int b = 0; b < GP_BUTTON_COUNT; ++b)
 		if (does(gamepad_binding(GP_A + GP_AIM + b)))
-			return xr_sprintf(dest, dest_sz, "%s + %s", names(GP_LT - GP_A), names(b)), true;
+			return xr_sprintf(dest, dest_sz, g_gp_glyphs ? "%s+%s" : "%s + %s", names(GP_LT - GP_A), names(b)), true;
 	for (int b = 0; b < GP_BUTTON_COUNT; ++b)
 		if (does(gamepad_binding(GP_A + GP_HOLD + b)))
 			return xr_sprintf(dest, dest_sz, "Hold %s", names(b)), true;
 	for (int key = GP_LS_UP; key <= GP_LS_RIGHT; ++key)
 		if (does(gamepad_binding(key)))
-			return xr_sprintf(dest, dest_sz, "Left Stick"), true;
+			return g_gp_glyphs ? xr_sprintf(dest, dest_sz, "%c", gamepad_glyphs::to_char(gamepad_glyphs::left_stick)) :
+				xr_sprintf(dest, dest_sz, "Left Stick"), true;
 	return false;
 }
 
@@ -945,7 +956,22 @@ static void gamepad_unbind_all()
 		s_gamepad_bindings[i] = kNOTBINDED;
 }
 
-// Like STALKER 2's: the left stick moves (L3 sprints), the right one looks (R3 the knife), LT aims, RT fires, A jumps,
+// The layout's version: a layout saved by an older one gets the bindings added since, on keys left free
+// (gamepad_layout_update). 2: LT + R3 the alternative aim
+static const int kLayoutVersion = 2;
+static int s_layout_version = kLayoutVersion;
+
+void gamepad_layout_update()
+{
+	if (s_layout_version >= kLayoutVersion)
+		return;
+	if (s_layout_version < 2 && s_gamepad_bindings[GP_RS + GP_AIM - GP_FIRST] == kNOTBINDED)
+		s_gamepad_bindings[GP_RS + GP_AIM - GP_FIRST] = kWPN_FUNC;
+	s_layout_version = kLayoutVersion;
+}
+
+// Like STALKER 2's: the left stick moves (L3 sprints), the right one looks (R3 the knife, LT + R3 the alternative aim:
+// the weapon's other sight or aiming position), LT aims, RT fires, A jumps,
 // B crouches, X uses what's looked at or reloads (held: the next ammo type), Y swaps weapons (held: hides it), LB held
 // opens the radial menu (pressed: the detector), RB the torch (held: night vision), LT + LB / RB lean, the D-pad: up the
 // fire mode (held: the weapon's function), down the inventory, left / right the quick slots (held: the other two),
@@ -958,7 +984,7 @@ void gamepad_default_layout()
 		EGameActions action;
 	} layout[] = {
 		{GP_LS_UP, kFWD}, {GP_LS_DOWN, kBACK}, {GP_LS_LEFT, kL_STRAFE}, {GP_LS_RIGHT, kR_STRAFE},
-		{GP_LS, kSPRINT_TOGGLE}, {GP_RS, kWPN_1},
+		{GP_LS, kSPRINT_TOGGLE}, {GP_RS, kWPN_1}, {GP_RS + GP_AIM, kWPN_FUNC},
 		{GP_LT, kWPN_ZOOM}, {GP_RT, kWPN_FIRE},
 		{GP_A, kJUMP}, {GP_B, kCROUCH},
 		{GP_X, kUSE_OR_RELOAD}, {GP_X + GP_HOLD, kWPN_NEXT},
@@ -1027,7 +1053,19 @@ class CCC_GamepadUnbindAll : public IConsole_Command
 {
 public:
 	CCC_GamepadUnbindAll(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; }
-	virtual void Execute(LPCSTR args) { gamepad_unbind_all(); }
+	virtual void Execute(LPCSTR args)
+	{
+		gamepad_unbind_all();
+		s_layout_version = 1; // a saved layout follows; gp_layout_version after it says how old (none: 1)
+	}
+};
+
+class CCC_GamepadLayoutVersion : public IConsole_Command
+{
+public:
+	CCC_GamepadLayoutVersion(LPCSTR N) : IConsole_Command(N) {}
+	virtual void Execute(LPCSTR args) { s_layout_version = atoi(args); }
+	virtual void Save(IWriter* F) { F->w_printf("%s %d\r\n", cName, kLayoutVersion); }
 };
 
 class CCC_GamepadDefaultLayout : public IConsole_Command
@@ -1065,6 +1103,7 @@ void CCC_RegisterInput()
 	CMD1(CCC_GamepadUnbindAll, "gp_unbind_all");
 	CMD1(CCC_GamepadDefaultLayout, "gp_default_layout");
 	CMD1(CCC_GamepadGetBind, "gp_get_bind");
+	CMD1(CCC_GamepadLayoutVersion, "gp_layout_version");
 	CMD2(CCC_Bind, "bind", 0);
 	CMD2(CCC_Bind, "bind_sec", 1);
 	CMD2(CCC_UnBind, "unbind", 0);

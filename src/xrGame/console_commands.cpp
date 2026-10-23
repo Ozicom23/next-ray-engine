@@ -69,6 +69,7 @@
 
 #include "NewZoomFlag.h"
 #include "camera_flight.h"
+#include "lua_sampler.h"
 float n_zoom_step_count = 3.0f;
 
 string_path g_last_saved_game;
@@ -95,6 +96,7 @@ extern int psLua_ParallelGC_CallAmount;
 extern int psLua_ParallelGC_Paced;
 extern int psLua_GCPause;
 extern int psLua_GCFinalizeUs;
+extern float g_alife_scheduled_budget_ms;
 extern BOOL psLua_ParallelGC_debug;
 extern BOOL psLua_ParallelGC;
 extern BOOL lua_debug;
@@ -2798,6 +2800,7 @@ void CCC_RegisterCommands()
 	//#ifndef MASTER_GOLD
 	CMD1(CCC_DemoPlay, "demo_play");
 	camera_flight::register_commands();
+	lua_sampler::register_commands();
 	CMD1(CCC_DemoRecord, "demo_record");
 	CMD1(CCC_DemoRecordBlockedInput, "demo_record_blocked_input");
 	CMD1(CCC_DemoRecordStop, "demo_record_stop");
@@ -2854,6 +2857,7 @@ void CCC_RegisterCommands()
 	CMD4(CCC_Integer, "lua_parallel_gc_paced", &psLua_ParallelGC_Paced, 0, 2);
 	CMD4(CCC_Integer, "lua_gc_pause", &psLua_GCPause, 0, 1000);
 	CMD4(CCC_Integer, "lua_gc_finalize_us", &psLua_GCFinalizeUs, 100, 20000);
+	CMD4(CCC_Float, "alife_scheduled_budget_ms", &g_alife_scheduled_budget_ms, 0.f, 100.f);
 
 	CMD4(CCC_Integer, "lua_debug", &lua_debug, 0, 1);
 	CMD4(CCC_Integer, "lua_use_functor_cache", &lua_use_functor_cache, 0, 1);

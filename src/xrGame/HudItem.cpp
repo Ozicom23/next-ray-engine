@@ -948,10 +948,19 @@ attachable_hud_item* CHudItem::HudItemData()
 
 	if (!m_attachable)
 	{
+		const u64 t0 = g_bEnableStatGather ? CPU::QPC() : 0;
 		current_player_hud_sect = hud_sect;
 		m_attachable = xr_new<attachable_hud_item>(g_player_hud);
 		m_attachable->m_parent_hud_item = this;
 		m_attachable->load(hud_sect);
+		// A slow one to the log (stat_frame_pacing): its HUD model loaded, and whose item it is
+		if (t0)
+		{
+			const double ms = double(CPU::QPC() - t0) * 1000.0 / double(CPU::qpc_freq);
+			if (ms > 5.0 && has_object())
+				Msg("* [HUD] %.1f ms: %s's HUD data (%s), %s", ms, object().cNameSect().c_str(), hud_sect.c_str(),
+				    object().H_Parent() && object().H_Parent()->ID() == 0 ? "the actor's" : "not the actor's");
+		}
 	}
 
 	return m_attachable;

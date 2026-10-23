@@ -404,7 +404,15 @@ void CSheduler::ProcessStep()
 			u32 dwUpdate = dwMin + iFloor(float(dwMax - dwMin) * scale);
 			clamp(dwUpdate, u32(_max(dwMin, u32(20))), dwMax);
 
+			const u64 t0 = g_bEnableStatGather ? CPU::QPC() : 0;
 			T.Object->shedule_Update(clampr(Elapsed, u32(1), u32(_max(u32(T.Object->shedule.t_max), u32(1000)))));
+			// A long one to the log (stat_frame_pacing): which object
+			if (t0)
+			{
+				const double ms = double(CPU::QPC() - t0) * 1000.0 / double(CPU::qpc_freq);
+				if (ms > 20.0)
+					Msg("* [Scheduler] %.1f ms: %s", ms, T.scheduled_name.c_str());
+			}
 
 			// Fill item structure
 			Item TNext;

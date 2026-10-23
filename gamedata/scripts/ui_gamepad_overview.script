@@ -1,0 +1,133 @@
+--- Gamepad buttons overview (Options > Controls > Gamepad > Buttons Overview): the controller and what each of its
+--- buttons does in the current layout (pressed, held, with LT held), with the buttons' glyphs (the font draws them for
+--- characters 1-8 and 14-23, xrEngine/gamepad_glyphs.h)
+
+-- The glyph of a button by its index in GP_A order (A B X Y LB RB LT RT View Menu L3 R3 D-pad up down left right), 16
+-- and 17 the left and right stick
+local function glyph(i)
+	return string.char(i < 8 and 1 + i or 14 + i - 8)
+end
+
+-- The buttons as listed: gamepad key, glyph; the left column, then the right one
+local columns = {
+	{
+		{"LT", 6}, {"LB", 4}, {"BACK", 8}, {"LS", 10},
+		{"DPAD_UP", 12}, {"DPAD_DOWN", 13}, {"DPAD_LEFT", 14}, {"DPAD_RIGHT", 15},
+	},
+	{
+		{"RT", 7}, {"RB", 5}, {"START", 9}, {"Y", 3}, {"X", 2}, {"B", 1}, {"A", 0}, {"RS", 11},
+	},
+}
+
+local function bind_of(key)
+	exec_console_cmd("gp_get_bind " .. key)
+	local a = get_console():get_string("gp_get_bind")
+	if not a or a == "" or a == "none" then
+		return nil
+	end
+	return game.translate_string("st_gp_act_" .. a)
+end
+
+-- "Jump", then "hold: ...", "LT + ...: ..." in grey when bound
+local function describe(key, g)
+	local main = bind_of("gp" .. key) or "-"
+	local extra = {}
+	local hold = bind_of("gp" .. key .. "_hold")
+	if hold then
+		extra[#extra + 1] = game.translate_string("st_gp_overview_hold") .. " " .. hold
+	end
+	if key ~= "LT" then
+		local aim = bind_of("gp" .. key .. "_aim")
+		if aim then
+			extra[#extra + 1] = glyph(6) .. "+" .. glyph(g) .. " " .. aim
+		end
+	end
+	return main, table.concat(extra, "   ")
+end
+
+GUI = nil
+
+function show(owner)
+	GUI = UIGamepadOverview(owner)
+	GUI:ShowDialog(true)
+	if owner then
+		owner:HideDialog()
+		owner:Show(false)
+	end
+end
+
+class "UIGamepadOverview" (CUIScriptWnd)
+
+function UIGamepadOverview:__init(owner) super()
+	self.owner = owner
+	self:SetWndRect(Frect():set(0, 0, 1024, 768))
+	self:SetAutoDelete(true)
+	self:InitControls()
+end
+
+function UIGamepadOverview:InitControls()
+	local xml = CScriptXmlInit()
+	xml:ParseFile("ui_gamepad_overview.xml")
+	self.xml = xml
+	xml:InitStatic("overview:background", self)
+	xml:InitStatic("overview:title", self)
+	xml:InitStatic("overview:hint", self)
+
+	-- The picture keeps its proportions on a wide screen (UI x units are narrower there)
+	local kx = (device().height / device().width) / (768 / 1024)
+	local pic = xml:InitStatic("overview:picture", self)
+	local w, h = pic:GetWidth() * kx, pic:GetHeight()
+	pic:SetWndSize(vector2():set(w, h))
+	pic:SetWndPos(vector2():set((1024 - w) / 2, pic:GetWndPos().y))
+	self.pic = pic
+
+	-- The pad in use names its buttons the PlayStation way: the glyph font follows it; the picture too
+	self.ps_pic = xml:InitStatic("overview:picture_ps", self)
+	self.ps_pic:SetWndSize(vector2():set(w, h))
+	self.ps_pic:SetWndPos(vector2():set((1024 - w) / 2, pic:GetWndPos().y))
+	local playstation = get_console():get_string("gp_playstation") == "1"
+	self.pic:Show(not playstation)
+	self.ps_pic:Show(playstation)
+
+	local x0 = { 40, 532 }
+	local y0, dy = 388, 37
+	for c, list in ipairs(columns) do
+		for i, b in ipairs(list) do
+			local main, extra = describe(b[1], b[2])
+			local st = xml:InitStatic("overview:row", self)
+			st:SetWndPos(vector2():set(x0[c], y0 + (i - 1) * dy))
+			st:TextControl():SetText(glyph(b[2]) .. "  " .. main)
+			if extra ~= "" then
+				local ex = xml:InitStatic("overview:row_extra", self)
+				ex:SetWndPos(vector2():set(x0[c] + 34, y0 + (i - 1) * dy + 18))
+				ex:TextControl():SetText(extra)
+			end
+		end
+	end
+	-- The sticks
+	local st = xml:InitStatic("overview:row", self)
+	st:SetWndPos(vector2():set(x0[1], y0 + #columns[1] * dy))
+	st:TextControl():SetText(glyph(16) .. "  " .. game.translate_string("st_gp_overview_move"))
+	st = xml:InitStatic("overview:row", self)
+	st:SetWndPos(vector2():set(x0[2], y0 + #columns[2] * dy))
+	st:TextControl():SetText(glyph(17) .. "  " .. game.translate_string("st_gp_overview_look"))
+end
+
+function UIGamepadOverview:OnKeyboard(dik, keyboard_action)
+	local res = CUIScriptWnd.OnKeyboard(self, dik, keyboard_action)
+	if res == false and keyboard_action == ui_events.WINDOW_KEY_PRESSED then
+		if dik == DIK_keys.DIK_ESCAPE then
+			self:Close()
+		end
+	end
+	return res
+end
+
+function UIGamepadOverview:Close()
+	if self.owner then
+		self.owner:ShowDialog(true)
+		self.owner:Show(true)
+	end
+	self:HideDialog()
+	GUI = nil
+end

@@ -62,6 +62,7 @@ end
 
 local rows = {
 	{ id = "gamepad" },
+	button { id = "gp_overview", functor_ui = function(self) ui_gamepad_overview.show(self) end },
 	list_bool { id = "gp_enabled" },
 	track { id = "gp_look_sens_x", step = 0.05 },
 	track { id = "gp_look_sens_y", step = 0.05 },
@@ -80,6 +81,7 @@ local rows = {
 	list_bool { id = "gp_gyro_invert_y" },
 	list_bool { id = "gp_adaptive_triggers" },
 	list_bool { id = "gp_sony" },
+	list_bool { id = "gp_glyphs" },
 	button { id = "gp_default_layout", functor_ui = default_layout },
 	line {},
 }

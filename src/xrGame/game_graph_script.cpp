@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+#include "script_cached_singleton.h"
 #include "game_graph.h"
 #include "ai_space.h"
 
@@ -75,4 +76,5 @@ void CGameGraph::script_register(lua_State* L)
 		.def("level_id", &CVertex::level_id)
 		.def("level_vertex_id", &CVertex::level_vertex_id)
 	];
+	set_cached_singleton<&get_game_graph>(L, "game_graph");
 }

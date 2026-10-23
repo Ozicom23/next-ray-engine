@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+#include "script_cached_singleton.h"
 #include "alife_simulator.h"
 #include "ai_space.h"
 #include "alife_object_registry.h"
@@ -720,6 +721,7 @@ void CALifeSimulator::script_register(lua_State* L)
 
 		, def("alife", &alife)
 	];
+	set_cached_singleton<&alife>(L, "alife");
 
 	{
 		if (story_ids.empty())

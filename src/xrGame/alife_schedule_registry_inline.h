@@ -44,3 +44,12 @@ IC CSE_ALifeSchedulable* CALifeScheduleRegistry::object(const ALife::_OBJECT_ID&
 	}
 	return ((*I).second);
 }
+
+IC u32 CALifeScheduleRegistry::update(u32 count, u64 deadline)
+{
+	if (objects().empty() || !count)
+		return 0;
+	CUpdatePredicate predicate(count, deadline);
+	const u32 done = inherited::update(predicate, false);
+	return predicate.m_out_of_time ? count - done : 0;
+}

@@ -2,6 +2,7 @@
 #include "dxFontRender.h"
 
 #include "../../xrEngine/GameFont.h"
+#include "../../xrEngine/gamepad_glyphs.h"
 
 dxFontRender::dxFontRender()
 {
@@ -10,17 +11,30 @@ dxFontRender::dxFontRender()
 dxFontRender::~dxFontRender()
 {
 	pShader.destroy();
+	pGlyphShader.destroy();
 	pGeom.destroy();
 }
 
 void dxFontRender::Initialize(LPCSTR cShader, LPCSTR cTexture)
 {
 	pShader.create(cShader, cTexture);
+	pGlyphShader.create(cShader, "ui\\ui_gamepad_glyphs");
 	pGeom.create(FVF::F_TL, RCache.Vertex.Buffer(), RCache.QuadIB);
 }
 
 extern ENGINE_API xr_atomic_bool g_bRendering;
 extern ENGINE_API Fvector2 g_current_font_scale;
+
+namespace
+{
+	// A gamepad glyph to draw after the text of its batch: its square on the screen
+	struct glyph_quad
+	{
+		float x, y, size;
+		int glyph;
+		u32 color;
+	};
+}
 
 void dxFontRender::OnRender(CGameFont& owner)
 {
@@ -58,6 +72,9 @@ void dxFontRender::OnRender(CGameFont& owner)
 		u32 vOffset;
 		FVF::TL* v = (FVF::TL*)RCache.Vertex.Lock(length * 4, pGeom.stride(), vOffset);
 		FVF::TL* start = v;
+
+		glyph_quad glyphs[64];
+		u32 glyph_count = 0;
 
 		// fill vertices
 		u32 last = i + count;
@@ -117,7 +134,18 @@ void dxFontRender::OnRender(CGameFont& owner)
 
 					float fTCWidth = l.z / owner.vTS.x;
 
-					if (!fis_zero(l.z))
+					if (l.x < 0.f)
+					{
+						// A gamepad glyph: a square of the text's height in the middle of its width
+						const int g = owner.IsMultibyte() ? -1 : gamepad_glyphs::from_char((u8)PS.string[j]);
+						if (g >= 0 && glyph_count < sizeof(glyphs) / sizeof(glyphs[0]))
+						{
+							const float size = _min(S, scw / 1.2f);
+							glyphs[glyph_count++] = {X + (scw - size) * 0.5f, Y + (S - size) * 0.5f, size, g,
+								color_rgba(255, 255, 255, color_get_A(clr))};
+						}
+					}
+					else if (!fis_zero(l.z))
 					{
 						//						tu			= ( l.x / owner.vTS.x ) + ( 0.5f / owner.vTS.x );
 						//						tv			= ( l.y / owner.vTS.y ) + ( 0.5f / owner.vTS.y );
@@ -156,6 +184,34 @@ void dxFontRender::OnRender(CGameFont& owner)
 		{
 			RCache.set_Geometry(pGeom);
 			RCache.Render(D3DPT_TRIANGLELIST, vOffset, 0, vCount, 0, vCount / 2);
+		}
+
+		// The glyphs: cells of 64 in a 512 x 512 atlas, the PlayStation set from cell 32
+		if (glyph_count && pGlyphShader)
+		{
+			FVF::TL* g = (FVF::TL*)RCache.Vertex.Lock(glyph_count * 4, pGeom.stride(), vOffset);
+			FVF::TL* g0 = g;
+			for (u32 k = 0; k < glyph_count; ++k)
+			{
+				const glyph_quad& q = glyphs[k];
+				const int cell = q.glyph + (gamepad_glyphs::playstation ? 32 : 0);
+				const float tu = float(cell % 8) / 8.f, tv = float(cell / 8) / 8.f, t = 1.f / 8.f;
+				g->set(q.x, q.y + q.size, q.color, tu, tv + t);
+				g++;
+				g->set(q.x, q.y, q.color, tu, tv);
+				g++;
+				g->set(q.x + q.size, q.y + q.size, q.color, tu + t, tv + t);
+				g++;
+				g->set(q.x + q.size, q.y, q.color, tu + t, tv);
+				g++;
+			}
+			const u32 gCount = (u32)(g - g0);
+			RCache.Vertex.Unlock(gCount, pGeom.stride());
+			RCache.set_Shader(pGlyphShader);
+			RCache.set_Geometry(pGeom);
+			RCache.Render(D3DPT_TRIANGLELIST, vOffset, 0, gCount, 0, gCount / 2);
+			if (pShader)
+				RCache.set_Shader(pShader);
 		}
 	}
 }

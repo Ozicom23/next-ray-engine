@@ -61,6 +61,7 @@
 #include "smart_cover_animation_planner.h"
 #include "smart_cover_planner_target_selector.h"
 #include "../../../xrEngine/CameraBase.h"
+#include "../../lua_sampler.h"
 
 #ifdef DEBUG
 #	include "../../alife_simulator.h"
@@ -1119,6 +1120,7 @@ float NPCsLookAtActorMinDistance = 3.5f;
 void CAI_Stalker::shedule_Update(u32 DT)
 {
 	PROF_EVENT("CAI_Stalker::shedule_Update");
+	lua_sampler::npc_update sampled(cNameSect().c_str());
 	// Optimization update
 //	if (Device.dwFrame % 2) return;
 
