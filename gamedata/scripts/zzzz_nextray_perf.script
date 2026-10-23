@@ -24,6 +24,11 @@
 --    and squads, ~1000) for the id, called at every squad update for its target and smart terrain (~2 s of a 3-minute
 --    flight on the Deck). It looks the id up in an index of the registry instead, the same first entry the scan finds;
 --    the index is rebuilt after the registry changes (register, unregister, or its size or table changed).
+-- 5. Guards Spawner (guards_spawner): on_enemy_eval, called for every enemy check of every NPC, went through every
+--    guard squad's every member with level.object_by_id, both characters' communities and the factions' relations,
+--    and for each member a second pass over the guards of its smart (~10% of the NPCs' updates on the Deck). Only a
+--    member that is the checking NPC or the checked enemy can change the result: the same loops, with those lookups
+--    only for that member.
 
 local log_prefix = "* [neXt-Ray perf] "
 
@@ -48,6 +53,7 @@ local KNOWN = {
 	pos_snap = "74:1471059612", -- illish.lib.pos snap
 	tdss_normalize = "262:1173514111", -- z_3dss_shader_switcher.normalize_marker_shaders
 	sim_get = "102:1009438135", sim_register = "241:5271822", sim_unregister = "153:449143374", -- simulation_objects get_server_entity, register, unregister
+	guards_enemy_eval = "786:931259035", -- guards_spawner.on_enemy_eval
 }
 
 ---------------------------------------------------------------------------------------------------------------------
@@ -311,8 +317,80 @@ local function sim_patch()
 end
 
 ---------------------------------------------------------------------------------------------------------------------
+-- 5. Guards Spawner: on_enemy_eval's lookups only for the member that is one of the two characters
 
-local da_on, surge_on, tdss_on, sim_on = false, false, false, false
+local function guards_patch()
+	local m = guards_spawner
+	if not (m and type(m.on_enemy_eval) == "function" and debug and debug.getupvalue) then return false end
+	local fp = fingerprint(m.on_enemy_eval)
+	if fp ~= KNOWN.guards_enemy_eval then
+		msg("guards_spawner's on_enemy_eval is not the known one (%s), kept", fp)
+		return false
+	end
+	local guards_t -- the mod's smart -> settings table, a local of the script
+	for i = 1, 64 do
+		local name, value = debug.getupvalue(m.on_enemy_eval, i)
+		if not name then break end
+		if name == "guards_t" then guards_t = value end
+	end
+	if type(guards_t) ~= "table" then return false end
+
+	local original = m.on_enemy_eval
+	local function on_enemy_eval(obj, enemy, flags)
+		local obj_id, enemy_id = obj:id(), enemy:id()
+		for smart_name, t in pairs(m.guarded_smarts) do
+			for i = 1, #t do
+				local squad = alife_object(t[i])
+				if squad and squad.commander_id then
+					for se_npc in squad:squad_members() do
+						local id = se_npc.id
+						-- Another member's checks compared its id with both and changed nothing
+						if id == obj_id or id == enemy_id then
+							local npc = level.object_by_id(id)
+							local smarts_faction = guards_t[smart_name] and guards_t[smart_name].smart_faction
+							if npc and smarts_faction then
+								local is_enemy
+								if id == obj_id then
+									is_enemy = game_relations.is_factions_enemies(smarts_faction, character_community(enemy))
+								else
+									is_enemy = game_relations.is_factions_enemies(smarts_faction, character_community(obj))
+								end
+								if is_enemy ~= nil and is_enemy == false then
+									flags.override = true
+									flags.result = false
+								end
+								-- guard vs guard: the other one among this smart's guards
+								local other = id == obj_id and enemy_id or obj_id
+								local t2 = m.guarded_smarts[smart_name]
+								for ii = 1, #t2 do
+									local squad_2 = alife_object(t2[ii])
+									if squad_2 and squad_2.commander_id then
+										for se_npc_2 in squad_2:squad_members() do
+											local id_2 = se_npc_2.id
+											if (id_2 == other or (id == obj_id and id == enemy_id and id_2 == id))
+												and level.object_by_id(id_2) then
+												flags.override = true
+												flags.result = false
+											end
+										end
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+	m.on_enemy_eval = on_enemy_eval
+	UnregisterScriptCallback("on_enemy_eval", original)
+	RegisterScriptCallback("on_enemy_eval", on_enemy_eval)
+	return true
+end
+
+---------------------------------------------------------------------------------------------------------------------
+
+local da_on, surge_on, tdss_on, sim_on, guards_on = false, false, false, false, false
 local reported = false
 local reported_after = 0
 
@@ -328,9 +406,9 @@ local function actor_on_update()
 		if tdss_others > 0 then
 			msg("3DSS: %d normalizations of other characters' weapons left out", tdss_others)
 		end
-		msg("Dynamic Anomalies dispatcher %s (%d anomalies), emission cover cache %s, 3DSS normalization after loads %s, simulation index %s",
+		msg("Dynamic Anomalies dispatcher %s (%d anomalies), emission cover cache %s, 3DSS normalization after loads %s, simulation index %s, guards' enemy checks %s",
 			da_on and da_known and "on" or "off", da_count, surge_on and "spread over frames" or "off", tdss_on and "on" or "off",
-			sim_on and "on" or "off")
+			sim_on and "on" or "off", guards_on and "on" or "off")
 	end
 end
 
@@ -346,6 +424,7 @@ function on_game_start()
 	surge_on = surge_patch()
 	tdss_on = tdss_patch()
 	sim_on = sim_patch()
+	guards_on = guards_patch()
 	RegisterScriptCallback("actor_on_update", actor_on_update)
 	RegisterScriptCallback("actor_on_first_update", function()
 		reported_after = time_global() + 5000

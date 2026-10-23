@@ -907,6 +907,14 @@ function _G.get_object_squad(object,caller)
 	if not (object) then
 		return
 	end
+	-- neXt-Ray: a game object first (its id a method): it has no group_id, whose look-up only missed (the slowest
+	-- look-up on an engine object), and its server object's squad is the answer below
+	local id = type(object) == "userdata" and object.id
+	if type(id) == "function" then
+		local sim = alife()
+		local se_obj = sim:object(object:id())
+		return se_obj and se_obj.group_id ~= nil and se_obj.group_id ~= 65535 and sim:object(se_obj.group_id) or nil
+	end
 	if (object.group_id ~= nil and object.group_id ~= 65535) then
 		return alife_object(object.group_id)
 	end

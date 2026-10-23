@@ -18,7 +18,8 @@ IC void CALifeObjectRegistry::add(CSE_ALifeDynamicObject* object)
 		       "Object with the specified ID is already presented in the Object Registry!");
 	}
 
-	m_objects.insert(std::make_pair(object->ID, object));
+	if (m_objects.insert(std::make_pair(object->ID, object)).second)
+		m_by_id[object->ID] = object;
 }
 
 IC void CALifeObjectRegistry::remove(const ALife::_OBJECT_ID& id, bool no_assert)
@@ -31,14 +32,15 @@ IC void CALifeObjectRegistry::remove(const ALife::_OBJECT_ID& id, bool no_assert
 	}
 
 	m_objects.erase(I);
+	m_by_id[id] = nullptr;
 }
 
 IC CSE_ALifeDynamicObject* CALifeObjectRegistry::object(const ALife::_OBJECT_ID& id, bool no_assert) const
 {
 	START_PROFILE("ALife/objects::object")
-		OBJECT_REGISTRY::const_iterator I = objects().find(id);
+		CSE_ALifeDynamicObject* const found = m_by_id[id];
 
-		if (objects().end() == I)
+		if (!found)
 		{
 #ifdef DEBUG
 		if (!no_assert)
@@ -48,7 +50,7 @@ IC CSE_ALifeDynamicObject* CALifeObjectRegistry::object(const ALife::_OBJECT_ID&
 			return (0);
 		}
 
-		return ((*I).second);
+		return found;
 	STOP_PROFILE
 }
 

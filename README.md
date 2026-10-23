@@ -62,6 +62,8 @@ Some of GAMMA's own mods are made cheaper without changing what they do; their f
 - 3DSS no longer loads HUD models for the weapons NPCs carry (never drawn): no 7-45 ms hitch each time.
 - Squads find their targets through an index instead of scanning ~1000 simulation objects at every update: about
   0.25 ms less main-thread work per frame on the Deck.
+- Guards Spawner's check on every enemy evaluation looks only at the guard involved: ~10% less NPC update time once
+  its guards are out.
 - Cheaper versions of Screen Space Shaders' terrain, AO, fog, SSR and debanding, the same image: about 1.5 ms less GPU
   time per frame on the Steam Deck (terrain alone ~1 ms), more with a lot of sky in view.
 

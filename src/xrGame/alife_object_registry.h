@@ -24,6 +24,9 @@ public:
 
 protected:
 	OBJECT_REGISTRY m_objects;
+	// The same objects by id (ids are 16-bit): object() without a search of the map (alife():object, alife_object(),
+	// get_object_squad... thousands of times a frame with GAMMA's scripts); add, remove and load keep it in step
+	xr_vector<CSE_ALifeDynamicObject*> m_by_id;
 
 private:
 	void save(IWriter& memory_stream, CSE_ALifeDynamicObject* object, u32& object_count);

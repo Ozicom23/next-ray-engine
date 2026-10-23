@@ -88,6 +88,10 @@ Spawning a character picks its specific character from all character description
 data map at every spawn: the descriptions' data is now looked up once (the same picks), a quarter of the time a squad
 took to spawn.
 
+A server object by its id (`alife():object`, `alife_object`, `get_object_squad`, thousands of times a frame with GAMMA's
+scripts) comes from an array indexed by the id instead of a search of the object map. `get_object_squad` given a game
+object goes to its server object at once (its `group_id` look-up only missed, the slowest kind on an engine object).
+
 ## Memory
 - `texture_lod` really applied (D3DX11 ignored the mip skip), scope reticles always at full detail.
 - Weather sky textures loaded on demand (`r4_sky_on_demand`).
@@ -121,7 +125,9 @@ Without changing what the mods do, and without editing their files:
   normalized once per weapon after a load and not for weapons other characters hold (that loaded their HUD models,
   never drawn: 7-45 ms each on the Deck), story item lookups through the engine, `simulation_objects.get_server_entity`
   through an index instead of a scan of the ~1000 simulation objects (each squad update: ~2 s of a 3-minute flight on
-  the Deck's main thread). Each applies only when the functions
+  the Deck's main thread), Guards Spawner's check of every enemy check (it went through every guard with lookups and a
+  second pass over the guards; now only the guard that is one of the two characters: ~10% of the NPCs' update time
+  once guards are out). Each applies only when the functions
   it relies on are the known ones (their bytecode or source); otherwise it logs their fingerprints and stays off.
   `appdata\nextray_perf_off` turns them off.
 - Shaders, in the engine's gamedata (`shaders/nextray/r3`): cheaper paths in Screen Space Shaders' terrain, AO, fog

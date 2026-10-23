@@ -12,6 +12,7 @@
 
 CALifeObjectRegistry::CALifeObjectRegistry(LPCSTR section)
 {
+	m_by_id.assign(size_t(ALife::_OBJECT_ID(-1)) + 1, nullptr);
 }
 
 CALifeObjectRegistry::~CALifeObjectRegistry()
@@ -139,6 +140,7 @@ void CALifeObjectRegistry::load(IReader& file_stream)
 	R_ASSERT2(file_stream.find_chunk(OBJECT_CHUNK_DATA), "Can't find chunk OBJECT_CHUNK_DATA!");
 
 	m_objects.clear();
+	std::fill(m_by_id.begin(), m_by_id.end(), nullptr);
 
 	u32 count = file_stream.r_u32();
 	for (u32 I = 0; I < count; ++I)
