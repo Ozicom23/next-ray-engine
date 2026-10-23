@@ -87,7 +87,9 @@ the level's longest frame step 330 -> 36 ms.
 
 Spawning a character picks its specific character from all character descriptions, each one looked up in the shared
 data map at every spawn: the descriptions' data is now looked up once (the same picks), a quarter of the time a squad
-took to spawn.
+took to spawn. The first such spawn of a session loads every description, each found in GAMMA's character file by
+walking it from the start: the file's nodes are indexed instead (Deck 721 -> 230 ms, the smart terrain respawn
+stutter).
 
 A server object by its id (`alife():object`, `alife_object`, `get_object_squad`, thousands of times a frame with GAMMA's
 scripts) comes from an array indexed by the id instead of a search of the object map. `get_object_squad` given a game
