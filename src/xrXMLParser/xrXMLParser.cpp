@@ -18,7 +18,32 @@ XRXMLPARSER_API CXml::~CXml()
 
 void CXml::ClearInternal()
 {
+	{
+		xrCriticalSectionGuard guard(&m_child_index_lock);
+		m_child_index.clear();
+	}
 	m_Doc.Clear();
+}
+
+XML_NODE* CXml::IndexedChild(XML_NODE* parent, LPCSTR tag, int index)
+{
+	xrCriticalSectionGuard guard(&m_child_index_lock);
+	child_index* found = nullptr;
+	for (child_index& c : m_child_index)
+		if (c.parent == parent && c.tag == tag)
+		{
+			found = &c;
+			break;
+		}
+	if (!found)
+	{
+		m_child_index.push_back({ parent, tag, {} });
+		found = &m_child_index.back();
+		// The same walk as NavigateToNode's
+		for (XML_NODE* node = parent->FirstChild(tag); node; node = parent->IterateChildren(tag, node))
+			found->nodes.push_back(node);
+	}
+	return index < int(found->nodes.size()) ? found->nodes[index] : nullptr;
 }
 
 void ParseFile(LPCSTR path, CMemoryWriter& W, IReader* F, CXml* xml)
@@ -131,6 +156,10 @@ void CXml::Load(LPCSTR path, LPCSTR xml_filename)
 	W.w_stringZ("");
 	FS.r_close(F);
 
+	{
+		xrCriticalSectionGuard guard(&m_child_index_lock);
+		m_child_index.clear();
+	}
 	m_Doc.Parse(&m_Doc, (LPCSTR)W.pointer());
 	if (m_Doc.Error())
 	{
@@ -176,11 +205,16 @@ XML_NODE* CXml::NavigateToNode(XML_NODE* start_node, LPCSTR path, int node_index
 
 	if (token != NULL)
 	{
-		node = start_node->FirstChild(token);
-
-		while (tmp++ < node_index && node)
+		if (node_index >= 16)
+			node = IndexedChild(start_node, token, node_index);
+		else
 		{
-			node = start_node->IterateChildren(token, node);
+			node = start_node->FirstChild(token);
+
+			while (tmp++ < node_index && node)
+			{
+				node = start_node->IterateChildren(token, node);
+			}
 		}
 	}
 

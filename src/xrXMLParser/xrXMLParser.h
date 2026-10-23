@@ -102,6 +102,20 @@ private:
 
 	typedef TiXmlElement XML_ELEM;
 	TiXmlDocument m_Doc;
+
+	// neXt-Ray: a node's children of one tag in order, so NavigateToNode finds the n-th at once. Built at the first
+	// look-up past the first few (GAMMA's character file has thousands of specific characters, and each one's load
+	// walked to its own from the start: ~0.9 s at the first NPC spawn of a session). The documents don't change once
+	// parsed (DXML edits the text before), the index goes with the document
+	struct child_index
+	{
+		const XML_NODE* parent;
+		xr_string tag;
+		xr_vector<XML_NODE*> nodes;
+	};
+	xr_vector<child_index> m_child_index;
+	xrCriticalSection m_child_index_lock;
+	XML_NODE* IndexedChild(XML_NODE* parent, LPCSTR tag, int index);
 };
 
 #endif //xrXMLParserH
