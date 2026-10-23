@@ -252,7 +252,7 @@ struct Device::Impl
 	const u64* timestamp_data = nullptr;
 	std::vector<UINT> occlusion_free, timestamp_free;
 	static const UINT kOcclusionQueries = 8192;
-	static const UINT kTimestampQueries = 4096;
+	static const UINT kTimestampQueries = 16384; // the GPU pass profiler takes 8192 (stat_gpu_passes, r4_gpu_passes_split)
 	u64 timestamp_frequency = 1;
 
 	// Root signatures and pipeline states (shared with the warm-up thread)

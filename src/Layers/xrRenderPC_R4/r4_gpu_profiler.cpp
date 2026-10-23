@@ -8,7 +8,7 @@ namespace gpu_profiler
 namespace
 {
 	const u32 kSlots = 4;       // frames in flight before results are read back
-	const u32 kMaxEvents = 256; // per frame, later scopes are not timed
+	const u32 kMaxEvents = 1024; // per frame, later scopes are not timed
 	const u32 kMaxDepth = 32;
 	const u32 kNotTimed = u32(-1);
 

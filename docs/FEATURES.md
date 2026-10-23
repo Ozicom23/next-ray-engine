@@ -125,7 +125,8 @@ Without changing what the mods do, and without editing their files:
   it relies on are the known ones (their bytecode or source); otherwise it logs their fingerprints and stays off.
   `appdata\nextray_perf_off` turns them off.
 - The MO2 mod `mods/neXt-Ray performance patches` (shipped with the builds, at the bottom of the mod list): GAMMA's
-  post-process shaders with cheaper paths, each behind a bit of `r4_shader_patches`.
+  post-process shaders with cheaper paths, each behind a bit of `r4_shader_patches`. Deck, village flight: GPU per frame
+  ~1.5 ms less, the terrain 2.3 -> 1.1 ms (layers of weight 0: no height, base or bump fetched).
 
 ## Fixes
 - Freeze with `mt_calc_bones_parallel 1` in crowded places (foot IK of two models deadlocked).
@@ -135,7 +136,8 @@ Without changing what the mods do, and without editing their files:
 
 ## Tools
 - Performance overlay (`perf_overlay`): FPS over time windows, CPU/GPU/engine times, a CPU- or GPU-bound hint, VRAM and RAM.
-- Profilers: `stat_gpu_passes`, `stat_cpu_passes`, `stat_next_load`, `stat_script_load`, `stat_gpu_memory`,
+- Profilers: `stat_gpu_passes` (`r4_gpu_passes_split 1`: static geometry and shadow maps per pixel shader),
+  `stat_cpu_passes`, `stat_next_load`, `stat_script_load`, `stat_gpu_memory`,
   `stat_tex_stream`, `stat_hiz`, `stat_sun_casters`, `stat_frame_pacing <s>` (every frame to a CSV in `logs/`; while it
   records, slow work to the log: a frame callback or scheduled object over 20 ms, an object spawned over 10 ms, a HUD
   model made over 5 ms),

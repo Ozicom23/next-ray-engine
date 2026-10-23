@@ -100,6 +100,7 @@ private:
 	void LS_Unload();
 public:
 	const map_Texture& textures() const { return m_textures; } // stat_tex_stream
+	const map_PS& pixel_shaders() const { return m_ps; } // r4_gpu_passes_split
 	// Miscelaneous
 	void _ParseList(sh_list& dest, LPCSTR names);
 	IBlender* _GetBlender(LPCSTR Name);

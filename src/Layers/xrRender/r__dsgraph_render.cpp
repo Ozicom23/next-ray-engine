@@ -35,6 +35,36 @@ ICF float calcLOD(float ssa/*fDistSq*/, float R)
 #ifdef USE_DX11
 #include "FTreeVisual.h"
 #include "dxRenderDeviceRender.h"
+#ifdef USE_DX11
+#include "../xrRenderPC_R4/r4_gpu_profiler.h"
+
+extern int ps_r4_gpu_passes_split;
+
+// r4_gpu_passes_split: the main view's static geometry and the shadow maps timed per pixel shader (stat_gpu_passes), by
+// the shader's name
+static LPCWSTR gpu_scope_name(ID3DPixelShader* ps)
+{
+	// The profiler keeps the names until the frame's results arrive: never freed
+	static xr_unordered_map<ID3DPixelShader*, LPCWSTR> names;
+	auto it = names.find(ps);
+	if (it != names.end())
+		return it->second;
+	LPCSTR name = "ps_unknown";
+	for (const auto& it_ps : DEV->pixel_shaders())
+		if (it_ps.second->ps == ps)
+		{
+			name = it_ps.first;
+			break;
+		}
+	const u32 n = _min(u32(xr_strlen(name)), 60u);
+	wchar_t* wide = xr_alloc<wchar_t>(n + 1);
+	for (size_t i = 0; i < n; ++i)
+		wide[i] = wchar_t(u8(name[i]));
+	wide[n] = 0;
+	names.emplace(ps, wide);
+	return wide;
+}
+#endif
 
 extern int ps_r4_tree_instancing;
 
@@ -243,6 +273,10 @@ void CDSGraphManager::r_dsgraph_render_graph(RenderQueueArray& queues, u32 _prio
 		tree_instancing::variant* inst_cached = nullptr;
 #endif
 		STextureList* pTextures = nullptr;
+#ifdef USE_DX11
+		const bool split = ps_r4_gpu_passes_split && (RImplementation.phase == CRender::PHASE_NORMAL ? static_geometry : RImplementation.phase == CRender::PHASE_SMAP);
+		ps_type split_ps = nullptr;
+#endif
 
         u64 high = 0;
 
@@ -315,6 +349,16 @@ void CDSGraphManager::r_dsgraph_render_graph(RenderQueueArray& queues, u32 _prio
                 RCache.set_VS(pVS);
             }
 
+#ifdef USE_DX11
+			if (split && packet.pPS != split_ps)
+			{
+				if (split_ps)
+					gpu_profiler::event_end();
+				split_ps = packet.pPS;
+				gpu_profiler::event_begin(gpu_scope_name(split_ps));
+			}
+#endif
+
             if (packet.pPS != pPS)
             {
                 pPS = packet.pPS;
@@ -374,6 +418,10 @@ void CDSGraphManager::r_dsgraph_render_graph(RenderQueueArray& queues, u32 _prio
 #endif
 			item.pVisual->Render(LOD);
 		}
+#ifdef USE_DX11
+		if (split_ps)
+			gpu_profiler::event_end();
+#endif
 
 		if (_clear)
 			queue.clear();

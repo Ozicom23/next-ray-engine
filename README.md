@@ -67,8 +67,8 @@ Each patch applies only to the exact version of the mod it was made for. After t
 itself off and the mod runs as it is. A file named `nextray_perf_off` in `appdata` turns them all off.
 
 **The `neXt-Ray performance patches` MO2 mod** (the `mods` folder of the build): cheaper versions of GAMMA's
-post-process shaders (AO, fog, SSR, debanding, terrain), the same image: about 0.5 ms less GPU time per frame, more
-with a lot of sky in view. Copy it into MO2's mods folder, enable it and move it to the bottom of the mod list (highest
+post-process shaders (AO, fog, SSR, debanding, terrain), the same image: about 1.5 ms less GPU time per frame on the
+Steam Deck (terrain alone ~1 ms), more with a lot of sky in view. Copy it into MO2's mods folder, enable it and move it to the bottom of the mod list (highest
 priority, so its shaders win). Everything else works without it.
 
 ## More

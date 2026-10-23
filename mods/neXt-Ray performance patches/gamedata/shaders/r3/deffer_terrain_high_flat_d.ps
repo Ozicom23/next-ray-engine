@@ -1,4 +1,4 @@
-// neXt-Ray performance patches: terrain: layers with weight 0 not fetched. Bit 0x100 of r4_shader_patches (NEXTRAY_PATCHES) picks the
+// neXt-Ray performance patches: terrain: layers with weight 0 not fetched (their height, base and bump). Bit 0x100 of r4_shader_patches (NEXTRAY_PATCHES) picks the
 // changed code, kept next to the original; engines without the define use it
 #ifndef NEXTRAY_PATCHES
 #define NEXTRAY_PATCHES 0xFFF
@@ -53,7 +53,11 @@ struct surface
 	float2 tc;
 };
 
-surface Terrain_InitSurfaces(Texture2D height_tex, float2 tc, float mask, int idx)
+surface Terrain_InitSurfaces(Texture2D height_tex, float2 tc, float mask, int idx
+#if (NEXTRAY_PATCHES & 0x100)
+	, float2 tc_dx, float2 tc_dy
+#endif
+	)
 {
 	surface S;
 
@@ -61,10 +65,24 @@ surface Terrain_InitSurfaces(Texture2D height_tex, float2 tc, float mask, int id
 	S.gloss = 0;
 	S.normal = 0;
 
+#if (NEXTRAY_PATCHES & 0x100)
+	// neXt-Ray: a layer of weight 0 has no use for its height (the mix weighs it by 0, its parallax and textures are
+	// skipped): not fetched, with the gradients taken before the branch
+	S.height = 0;
+	[branch] if (mask > 0)
+	{
+#ifdef TERRAIN_GTR_COMPATIBILITY
+		S.height = saturate(height_tex.SampleGrad(smp_base, tc, tc_dx, tc_dy).a + ssfx_terrain_offset[idx]);
+#else
+		S.height = saturate(height_tex.SampleGrad(smp_base, tc, tc_dx, tc_dy).r + ssfx_terrain_offset[idx]);
+#endif
+	}
+#else
 #ifdef TERRAIN_GTR_COMPATIBILITY
 	S.height = saturate(height_tex.Sample(smp_base, tc).a + ssfx_terrain_offset[idx]);
 #else
 	S.height = saturate(height_tex.Sample(smp_base, tc).r + ssfx_terrain_offset[idx]);
+#endif
 #endif
 	
 	S.AO = TERRAIN_POM_AO - S.height * S.height * TERRAIN_POM_AO; // Use the height as AO
@@ -248,16 +266,23 @@ f_deffer main(p_bumped I)
 
 // Init Surfaces --------------------------------------------------
 
-#ifdef TERRAIN_GTR_COMPATIBILITY
-	surface Sr = Terrain_InitSurfaces(s_dt_r, I.tcdbump.xy, mask.x, 0);
-	surface Sg = Terrain_InitSurfaces(s_dt_g, I.tcdbump.xy, mask.y, 1);
-	surface Sb = Terrain_InitSurfaces(s_dt_b, I.tcdbump.xy, mask.z, 2);
-	surface Sa = Terrain_InitSurfaces(s_dt_a, I.tcdbump.xy, mask.w, 3);
+#if (NEXTRAY_PATCHES & 0x100)
+	float2 tc_dx = ddx_fine(I.tcdbump.xy);
+	float2 tc_dy = ddy_fine(I.tcdbump.xy);
+	#define NEXTRAY_GRADIENTS , tc_dx, tc_dy
 #else
-	surface Sr = Terrain_InitSurfaces(s_height_r, I.tcdbump.xy, mask.x, 0);
-	surface Sg = Terrain_InitSurfaces(s_height_g, I.tcdbump.xy, mask.y, 1);
-	surface Sb = Terrain_InitSurfaces(s_height_b, I.tcdbump.xy, mask.z, 2);
-	surface Sa = Terrain_InitSurfaces(s_height_a, I.tcdbump.xy, mask.w, 3);
+	#define NEXTRAY_GRADIENTS
+#endif
+#ifdef TERRAIN_GTR_COMPATIBILITY
+	surface Sr = Terrain_InitSurfaces(s_dt_r, I.tcdbump.xy, mask.x, 0 NEXTRAY_GRADIENTS);
+	surface Sg = Terrain_InitSurfaces(s_dt_g, I.tcdbump.xy, mask.y, 1 NEXTRAY_GRADIENTS);
+	surface Sb = Terrain_InitSurfaces(s_dt_b, I.tcdbump.xy, mask.z, 2 NEXTRAY_GRADIENTS);
+	surface Sa = Terrain_InitSurfaces(s_dt_a, I.tcdbump.xy, mask.w, 3 NEXTRAY_GRADIENTS);
+#else
+	surface Sr = Terrain_InitSurfaces(s_height_r, I.tcdbump.xy, mask.x, 0 NEXTRAY_GRADIENTS);
+	surface Sg = Terrain_InitSurfaces(s_height_g, I.tcdbump.xy, mask.y, 1 NEXTRAY_GRADIENTS);
+	surface Sb = Terrain_InitSurfaces(s_height_b, I.tcdbump.xy, mask.z, 2 NEXTRAY_GRADIENTS);
+	surface Sa = Terrain_InitSurfaces(s_height_a, I.tcdbump.xy, mask.w, 3 NEXTRAY_GRADIENTS);
 #endif
 
 	// Texture splatting ( TODO: Improve Texture Splatting )

@@ -664,6 +664,7 @@ extern int ps_r4_shader_precompile;
 // Mac DX12, Cordon: 5131 draws -> 3548, the static geometry's CPU time 1.88 -> 1.82 ms, the same image; Deck (GPU-bound):
 // the same GPU time
 int ps_r4_tree_instancing = 1;
+int ps_r4_gpu_passes_split = 0; // stat_gpu_passes: static geometry and shadow maps timed per pixel shader
 // stat_shader_stalls: the main thread's time waiting for shaders since the last call (to the log)
 class CCC_ShaderStalls : public IConsole_Command
 {
@@ -1691,6 +1692,7 @@ void xrRender_initconsole()
 	CMD4(CCC_Integer, "perf_overlay_mods", &mod_cost::enabled, 0, 1);
 	CMD4(CCC_Integer, "r4_shader_precompile", &ps_r4_shader_precompile, 0, 1);
 	CMD4(CCC_Integer, "r4_tree_instancing", &ps_r4_tree_instancing, 0, 1);
+	CMD4(CCC_Integer, "r4_gpu_passes_split", &ps_r4_gpu_passes_split, 0, 1);
 	CMD1(CCC_ShaderStalls, "stat_shader_stalls");
 	CMD1(CCC_UpscalerAvailable, "r4_upscaler_available");
 	CMD1(CCC_GpuMemoryStats,    "stat_gpu_memory");
