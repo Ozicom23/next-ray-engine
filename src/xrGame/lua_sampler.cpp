@@ -2,6 +2,7 @@
 #include "lua_sampler.h"
 #include "../xrEngine/xr_ioconsole.h"
 #include "../xrEngine/xr_ioc_cmd.h"
+#include "../xrCore/crash_report.h"
 #include "ai_space.h"
 #include "script_engine.h"
 #include <luabind/detail/object_rep.hpp>
@@ -16,6 +17,8 @@ namespace lua_sampler
 		const u32 kDepth = 24;		 // Lua frames kept per sample
 		const u32 kStackFrames = 10; // innermost frames in a stack's key
 		const u32 kRing = 4096;
+		const u32 kNative = 40;			  // C++ frames kept per sample
+		const u32 kStackCopy = 64 * 1024; // of the sampled thread's stack, unwound after it runs again
 		const float kLongMs[kinds] = {30.f, 15.f, 20.f}; // a long update
 		LPCSTR const kTitles[kinds] = {"A-Life updates", "NPC updates", "The actor's updates"};
 
@@ -27,7 +30,7 @@ namespace lua_sampler
 			u32 updates = 0;
 			double update_ms = 0, sampled_ms = 0;
 			float longest = 0;
-			xr_map<xr_string, double> sections, self, total, lines, stacks;
+			xr_map<xr_string, double> sections, self, total, lines, stacks, native_self, native_total;
 		};
 
 		// An updating thread's side, one per kind (the sampler reads it while that thread is suspended, so whole)
@@ -38,6 +41,7 @@ namespace lua_sampler
 			std::atomic<u32> done_serial{0};
 			u64 start = 0;
 			DWORD thread_id = 0;
+			u64 stack_base = 0; // the updating thread's
 			char section[64] = {};
 			u32 objects = 0;
 			float update_ms[kRing] = {}; // by serial % kRing
@@ -63,7 +67,80 @@ namespace lua_sampler
 			char section[64];
 			int n;
 			lua_XRFrame frames[kDepth];
+			u32 native_n;
+			u64 native[kNative];
 		};
+
+		// The sampled thread's stack as it was, unwound with the modules' unwind data once it runs again (looking unwind
+		// data up may take the loader's lock, which the suspended thread may hold)
+		u8 s_stack_copy[kStackCopy];
+
+		u32 copy_stack(u64 rsp, u64 base)
+		{
+			if (base <= rsp)
+				return 0;
+			const u32 n = u32(_min(u64(kStackCopy), base - rsp));
+			__try
+			{
+				memcpy(s_stack_copy, reinterpret_cast<const void*>(rsp), n);
+				return n;
+			}
+			__except (EXCEPTION_EXECUTE_HANDLER)
+			{
+				return 0;
+			}
+		}
+
+		u32 unwind(const CONTEXT& from, u32 copied, u64* out)
+		{
+			CONTEXT ctx = from;
+			const u64 lo = ctx.Rsp, hi = ctx.Rsp + copied;
+			const u64 copy_lo = u64(s_stack_copy), copy_hi = copy_lo + copied;
+			// Registers pointing into the stack point into the copy
+			DWORD64* const regs[] = {&ctx.Rsp, &ctx.Rbp, &ctx.Rbx, &ctx.Rsi, &ctx.Rdi, &ctx.R12, &ctx.R13, &ctx.R14, &ctx.R15};
+			u32 n = 0;
+			__try
+			{
+				for (DWORD64* r : regs)
+					if (*r >= lo && *r < hi)
+						*r = *r - lo + copy_lo;
+				while (n < kNative && ctx.Rip && ctx.Rsp >= copy_lo && ctx.Rsp + 8 <= copy_hi)
+				{
+					out[n++] = ctx.Rip;
+					DWORD64 image = 0;
+					PRUNTIME_FUNCTION fn = RtlLookupFunctionEntry(ctx.Rip, &image, nullptr);
+					if (!fn)
+					{
+						// A leaf function: the return address is on top of the stack
+						ctx.Rip = *reinterpret_cast<const DWORD64*>(ctx.Rsp);
+						ctx.Rsp += 8;
+						continue;
+					}
+					void* handler_data = nullptr;
+					DWORD64 establisher = 0;
+					RtlVirtualUnwind(UNW_FLAG_NHANDLER, image, ctx.Rip, fn, &ctx, &handler_data, &establisher, nullptr);
+					for (DWORD64* r : regs)
+						if (*r >= lo && *r < hi)
+							*r = *r - lo + copy_lo;
+				}
+			}
+			__except (EXCEPTION_EXECUTE_HANDLER)
+			{
+			}
+			return n;
+		}
+
+		// A C++ function's name, looked up once per address
+		const xr_string& native_name(u64 address)
+		{
+			static xr_unordered_map<u64, xr_string> names;
+			auto it = names.find(address);
+			if (it != names.end())
+				return it->second;
+			string512 name;
+			crash_report::function_name(address, name, sizeof(name));
+			return names.emplace(address, name).first->second;
+		}
 
 		xr_string frame_key(const lua_XRFrame& f)
 		{
@@ -83,6 +160,20 @@ namespace lua_sampler
 		void add(group& g, const sample& s)
 		{
 			g.sampled_ms += s.ms;
+			if (s.native_n)
+			{
+				g.native_self[native_name(s.native[0])] += s.ms;
+				xr_vector<const xr_string*> seen;
+				for (u32 i = 0; i < s.native_n; ++i)
+				{
+					const xr_string* k = &native_name(s.native[i]);
+					if (std::find(seen.begin(), seen.end(), k) == seen.end())
+					{
+						seen.push_back(k);
+						g.native_total[*k] += s.ms;
+					}
+				}
+			}
 			g.sections[s.section[0] ? s.section : "[none: A-Life's switch or between objects]"] += s.ms;
 			if (s.n <= 0)
 			{
@@ -170,6 +261,8 @@ namespace lua_sampler
 			print(w, "Lua functions, their own time (a C function they call included):", g.self, g.sampled_ms, 60);
 			print(w, "Lines:", g.lines, g.sampled_ms, 40);
 			print(w, "Stacks (outermost first):", g.stacks, g.sampled_ms, 40);
+			print(w, "C++ functions, with what they call:", g.native_total, g.sampled_ms, 80);
+			print(w, "C++ functions, their own time:", g.native_self, g.sampled_ms, 50);
 		}
 
 		void write_report()
@@ -189,7 +282,8 @@ namespace lua_sampler
 			}
 			w->w_printf("A-Life's, NPCs' and the actor's updates, sampled about once a millisecond. Lua frames as of Lua's last call out "
 			            "of the VM: a pure Lua loop is counted in the function that last called the engine. A line 0: a C "
-			            "function not called by a line (a metamethod: a field of an engine object).\r\n");
+			            "function not called by a line (a metamethod: a field of an engine object). C++ functions from the "
+			            "exe's .sym file (inlined ones counted in their caller).\r\n");
 			for (int k = 0; k < kinds; ++k)
 			{
 				string128 title;
@@ -214,13 +308,16 @@ namespace lua_sampler
 			{
 				if (r.th)
 					CloseHandle(r.th);
-				r.th = OpenThread(THREAD_SUSPEND_RESUME, FALSE, id);
+				r.th = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, id);
 				r.th_id = id;
 			}
 			if (!r.th || SuspendThread(r.th) == DWORD(-1))
 				return;
 			// Nothing that may take a lock while the thread is held: no allocation, no log
 			bool have = false;
+			CONTEXT ctx = {};
+			ctx.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
+			u32 copied = 0;
 			if (r.in_update.load())
 			{
 				const u64 now = CPU::QPC();
@@ -230,13 +327,18 @@ namespace lua_sampler
 				memcpy(s.section, r.section, sizeof(s.section));
 				s.section[sizeof(s.section) - 1] = 0;
 				s.n = read_stack(L, s.frames);
+				if (GetThreadContext(r.th, &ctx))
+					copied = copy_stack(ctx.Rsp, r.stack_base);
 				r.last_serial = s.serial;
 				r.last_qpc = now;
 				have = true;
 			}
 			ResumeThread(r.th);
 			if (have)
+			{
+				s.native_n = copied ? unwind(ctx, copied, s.native) : 0;
 				pending.push_back(s);
+			}
 		}
 
 		void run()
@@ -375,6 +477,7 @@ namespace lua_sampler
 			return;
 		region& r = s_regions[k];
 		r.thread_id = GetCurrentThreadId();
+		r.stack_base = u64(reinterpret_cast<const NT_TIB*>(NtCurrentTeb())->StackBase);
 		r.section[0] = 0;
 		r.objects = 0;
 		r.start = CPU::QPC();

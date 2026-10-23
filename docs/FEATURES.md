@@ -73,10 +73,20 @@ objects 2.4 million). Two lookups of the same object now give the same script ob
 ## A-Life
 A-Life updates its objects (squads and smart terrains, 20 at a time with GAMMA) on a worker thread while the frame
 renders, and the frame waits for it at its end; squads looking for a new target cost 3-10 ms each in Lua, so an update
-with several of them held a frame for 30-80 ms. `alife_scheduled_budget_ms` (0 off, 5 in the Steam Deck preset): an
+with several of them held a frame for 30-80 ms. `alife_scheduled_budget_ms` (5, 0 off): an
 update starts no object after that long and the ones left are done in the next frames, before the next update's own,
 so every object is still updated as often. Village flight on the Deck, 0 -> 5: A-Life's longest 37 -> 21-24 ms, frames
 over 33 ms 34 -> 17-18.
+
+Characters coming online: their models are prefetched on a thread (Modded Exes' `spawn_antifreeze`), and then every
+prefetched object was created in one frame: a squad and its gear, up to 330 ms on the Deck. `spawn_frame_budget_ms` (4, 0
+off): after that long in a frame the next characters wait for the following frames, each
+with its items in the same frame (at least one a frame). Deck, a second flight in a session (squads coming online):
+the level's longest frame step 330 -> 36 ms.
+
+Spawning a character picks its specific character from all character descriptions, each one looked up in the shared
+data map at every spawn: the descriptions' data is now looked up once (the same picks), a quarter of the time a squad
+took to spawn.
 
 ## Memory
 - `texture_lod` really applied (D3DX11 ignored the mip skip), scope reticles always at full detail.
@@ -127,8 +137,9 @@ Without changing what the mods do, and without editing their files:
 - Performance overlay (`perf_overlay`): FPS over time windows, CPU/GPU/engine times, a CPU- or GPU-bound hint, VRAM and RAM.
 - Profilers: `stat_gpu_passes`, `stat_cpu_passes`, `stat_next_load`, `stat_script_load`, `stat_gpu_memory`,
   `stat_tex_stream`, `stat_hiz`, `stat_sun_casters`, `stat_frame_pacing <s>` (every frame to a CSV in `logs/`; while it
-  records, slow work to the log: a frame callback or scheduled object over 20 ms, a HUD model made over 5 ms),
-  `stat_lua_sample <s>` (A-Life's, NPCs' and the actor's updates sampled: time by object and Lua function,
+  records, slow work to the log: a frame callback or scheduled object over 20 ms, an object spawned over 10 ms, a HUD
+  model made over 5 ms),
+  `stat_lua_sample <s>` (A-Life's, NPCs' and the actor's updates sampled: time by object, Lua function and C++ function,
   `logs\lua_sample_<time>.txt`),
   `stat_luabind_objects 1/0` (the engine objects scripts make, by class).
 - Mod cost overlay (`perf_overlay_mods`): Lua time per frame and script load time for each MO2 mod.

@@ -349,18 +349,37 @@ shared_str CSE_ALifeTraderAbstract::specific_character()
 		m_CheckedCharacters.clear();
 		m_DefaultCharacters.clear();
 
-		for (int i = 0; i <= CSpecificCharacter::GetMaxIndex(); i++)
+		// The specific characters' shared data by index, looked up once (it stays until the game closes): looking each
+		// one up in the shared data map at every NPC's spawn was about a quarter of a squad's spawn with GAMMA (the
+		// same characters are picked)
+		static xrCriticalSection s_lock;
+		static xr_vector<const SSpecificCharacterData*> s_all;
 		{
-			CSpecificCharacter spec_char;
-			shared_str id = CSpecificCharacter::IndexToId(i);
-			spec_char.Load(id);
+			xrCriticalSectionGuard guard(&s_lock);
+			const int count = CSpecificCharacter::GetMaxIndex() + 1;
+			if (int(s_all.size()) != count)
+			{
+				s_all.clear();
+				s_all.reserve(count);
+				for (int i = 0; i < count; i++)
+				{
+					CSpecificCharacter spec_char;
+					spec_char.Load(CSpecificCharacter::IndexToId(i));
+					s_all.push_back(spec_char.data());
+				}
+			}
+		}
 
-			if (spec_char.data()->m_bNoRandom) continue;
+		for (int i = 0; i < int(s_all.size()); i++)
+		{
+			const SSpecificCharacterData* spec_char = s_all[i];
+
+			if (spec_char->m_bNoRandom) continue;
 
 			bool class_found = false;
-			for (std::size_t j = 0; j < spec_char.data()->m_Classes.size(); j++)
+			for (std::size_t j = 0; j < spec_char->m_Classes.size(); j++)
 			{
-				if (char_info.data()->m_Class == spec_char.data()->m_Classes[j])
+				if (char_info.data()->m_Class == spec_char->m_Classes[j])
 				{
 					class_found = true;
 					break;
@@ -369,15 +388,16 @@ shared_str CSE_ALifeTraderAbstract::specific_character()
 			if (!char_info.data()->m_Class.size() || class_found)
 			{
 				//запомнить пподходящий персонаж с флажком m_bDefaultForCommunity
-				if (spec_char.data()->m_bDefaultForCommunity)
-					m_DefaultCharacters.push_back(id);
+				if (spec_char->m_bDefaultForCommunity)
+					m_DefaultCharacters.push_back(CSpecificCharacter::IndexToId(i));
 
-				if (char_info.data()->m_Rank == NO_RANK || _abs(spec_char.Rank() - char_info.data()->m_Rank) <
+				if (char_info.data()->m_Rank == NO_RANK || _abs(spec_char->m_Rank - char_info.data()->m_Rank) <
 					RANK_DELTA)
 				{
 					if (char_info.data()->m_Reputation == NO_REPUTATION || _abs(
-						spec_char.Reputation() - char_info.data()->m_Reputation) < REPUTATION_DELTA)
+						spec_char->m_Reputation - char_info.data()->m_Reputation) < REPUTATION_DELTA)
 					{
+						shared_str id = CSpecificCharacter::IndexToId(i);
 #ifdef XRGAME_EXPORTS
 						int* count = NULL;
 						if(ai().get_alife())

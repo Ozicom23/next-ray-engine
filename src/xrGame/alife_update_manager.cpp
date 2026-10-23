@@ -27,7 +27,7 @@ using namespace ALife;
 
 // alife_scheduled_budget_ms: an update's scheduled objects (objects_per_update of them) stop starting after this long
 // and the rest are done in the next frames, as the frame waits for A-Life's update at its end; 0: all at once
-float g_alife_scheduled_budget_ms = 0.f;
+float g_alife_scheduled_budget_ms = 5.f;
 static CALifeUpdateManager* s_update_manager = nullptr;
 
 static u64 scheduled_deadline()

@@ -253,6 +253,34 @@ bool started() { return s_started.load(); }
 void beat() { s_beats.fetch_add(1, std::memory_order_relaxed); }
 u32 beats() { return s_beats.load(std::memory_order_relaxed); }
 
+bool function_name(u64 address, char* out, u32 size)
+{
+	const HMODULE exe = GetModuleHandle(nullptr);
+	u32 time = 0, image = 0;
+	if (image_stamp(exe, time, image) && address >= u64(exe) && address < u64(exe) + image)
+	{
+		const u32 rva = u32(address - u64(exe));
+		if (const symbols::entry* s = s_symbols.find(rva))
+		{
+			xr_strcpy(out, size, s->name);
+			return true;
+		}
+		xr_sprintf(out, size, "exe+0x%x", rva);
+		return false;
+	}
+	HMODULE mod = nullptr;
+	char name[MAX_PATH];
+	if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+	                       reinterpret_cast<LPCSTR>(address), &mod) && mod && GetModuleFileNameA(mod, name, sizeof(name)))
+	{
+		const char* base = strrchr(name, '\\');
+		xr_sprintf(out, size, "%s+0x%llx", base ? base + 1 : name, (unsigned long long)(address - u64(mod)));
+	}
+	else
+		xr_sprintf(out, size, "0x%llx", (unsigned long long)address);
+	return false;
+}
+
 LPCSTR write(LPCSTR what, const void* exception_context, void* thread)
 {
 	static string_path s_path = "";

@@ -32,7 +32,8 @@ batches: about 13% less GPU time per frame and a fifth fewer draw calls.
 <!-- screenshot: frame time graph, before / after -->
 Lua's garbage collector, GAMMA's biggest source of hitches, now works in the background while the frame renders. With
 its last step in testing (`lua_parallel_gc_paced 2`), a benchmark flight gets 16% more fps, a 70% higher 1% low, and
-the longest frame less than half as long.
+the longest frame less than half as long. A-Life's updates and squads coming online are spread over several
+frames: a squad no longer freezes the game for up to a third of a second when it appears.
 
 ### Less memory
 Textures stream in as they are needed: texture memory at full quality 6.25 GB -> about 2.6 GB.

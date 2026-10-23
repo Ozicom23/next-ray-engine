@@ -19,6 +19,9 @@ XRCORE_API bool started();
 XRCORE_API void beat();
 XRCORE_API u32 beats();
 
+// The function an address in the exe is in, from the .sym file ("module+0x..." for other modules or no name; false then)
+XRCORE_API bool function_name(u64 address, char* out, u32 size);
+
 // -dump_symbols <file>: the exe's functions (address, size, name) from its PDB, for the reports. Called before the engine
 // starts; false when the PDB isn't there
 XRCORE_API bool dump_symbols(LPCSTR out);

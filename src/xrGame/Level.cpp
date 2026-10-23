@@ -80,6 +80,9 @@ u32 lvInterpSteps = 0;
 #ifdef SPAWN_ANTIFREEZE
 BOOL spawn_antifreeze = TRUE;
 BOOL spawn_antifreeze_debug = FALSE;
+// spawn_frame_budget_ms: prefetched objects (an NPC and its items, ...) stop spawning after this long in a frame and the
+// ones left spawn in the next frames, so a squad that comes online no longer spawns in one frame (0: all at once)
+float g_spawn_frame_budget_ms = 4.f;
 static HANDLE prefetch_thread_signal;
 
 static void unpausePrefetchThreadSignal()
@@ -658,6 +661,13 @@ void CLevel::ProcessSpawnEvents()
         }
 	}
 
+	// Over the budget, objects without a parent wait for the next frame, and so do their items; the items of the ones
+	// spawned spawn with them (the queue has the objects first, then the items)
+	const u64 deadline = g_spawn_frame_budget_ms > 0.f ? CPU::QPC() + u64(double(g_spawn_frame_budget_ms) * double(CPU::qpc_freq) / 1000.0) : 0;
+	bool spawned_one = false;
+	xr_vector<NET_Event> deferred;
+	xr_vector<u16> deferred_ids;
+
 	for (const auto& E : events_to_process)
 	{
 		auto data = make_intrusive<ProcessNetPacket>();
@@ -671,6 +681,16 @@ void CLevel::ProcessSpawnEvents()
 		u16 parent_id;
 		shared_str section;
 		u16 obj_id = GetSpawnInfo(P, parent_id, section);
+
+		if (deadline && (parent_id == 0xffff ? spawned_one && CPU::QPC() > deadline
+		                                     : std::find(deferred_ids.begin(), deferred_ids.end(), parent_id) != deferred_ids.end()))
+		{
+			deferred.push_back(E);
+			deferred_ids.push_back(obj_id);
+			continue;
+		}
+		if (parent_id == 0xffff)
+			spawned_one = true;
 
 		if (spawn_antifreeze_debug) Msg("[ProcessSpawnEvents] spawning section %s, obj_id %d, parent_id %d, event_id %d", section.c_str(), obj_id, parent_id, dest);
 
@@ -710,7 +730,29 @@ void CLevel::ProcessSpawnEvents()
 	spawn:
 		u16 dummy16;
 		P.r_begin(dummy16);
+		const u64 t0 = g_bEnableStatGather ? CPU::QPC() : 0;
 		cl_Process_Spawn(P);
+		// A long one to the log (stat_frame_pacing)
+		if (t0)
+		{
+			const double ms = double(CPU::QPC() - t0) * 1000.0 / double(CPU::qpc_freq);
+			if (ms > 10.0)
+				Msg("* [Spawn] %.1f ms: %s", ms, section.c_str());
+		}
+	}
+
+	if (!deferred.empty())
+	{
+		// Before the ones prefetched since, with their prefetch data
+		xrSRWLockGuard g(prefetch_lock);
+		auto& queue = spawn_events->queue;
+		queue.insert(queue.begin(), deferred.begin(), deferred.end());
+		for (u16 id : deferred_ids)
+		{
+			auto it = spawn_events_data_copy.find(id);
+			if (it != spawn_events_data_copy.end())
+				spawn_events_data->emplace(id, it->second);
+		}
 	}
 }
 #endif
