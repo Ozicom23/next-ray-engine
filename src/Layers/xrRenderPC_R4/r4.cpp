@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "r4_vrs.h"
+#include "../xrRender/shader_patches.h"
 #include "r4.h"
 #include "../xrRender/fbasicvisual.h"
 #include "../../xrEngine/xr_object.h"
@@ -901,7 +902,7 @@ namespace shader_precompile
 			const Job& job = s_jobs[i];
 			string_path cname;
 			strconcat(sizeof(cname), cname, ::Render->getShaderPath(), job.source.c_str());
-			IReader* file = FS.r_open("$game_shaders$", cname);
+			IReader* file = shader_patches::open(cname);
 			if (!file)
 				continue;
 			const u32 size = file->length();
@@ -1740,11 +1741,11 @@ public:
 	{
 		string_path pname;
 		strconcat(sizeof(pname), pname, ::Render->getShaderPath(), pFileName);
-		IReader* R = FS.r_open("$game_shaders$", pname);
+		IReader* R = shader_patches::open(pname);
 		if (0 == R)
 		{
 			// possibly in shared directory or somewhere else - open directly
-			R = FS.r_open("$game_shaders$", pFileName);
+			R = shader_patches::open(pFileName);
 			if (0 == R) return E_FAIL;
 		}
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "shader_patches.h"
+
 #ifdef USE_DX11
 
 #	include "ResourceManager.h"
@@ -105,10 +107,9 @@ inline T* CResourceManager::CreateShader(const char* name)
 		// Open file
 		string_path cname;
 		strconcat(sizeof(cname), cname, ::Render->getShaderPath(),/*name*/shName, ShaderTypeTraits<T>::GetShaderExt());
-		FS.update_path(cname, "$game_shaders$", cname);
 
 		// duplicate and zero-terminate
-		IReader* file = FS.r_open(cname);
+		IReader* file = shader_patches::open(cname);
 		R_ASSERT2(file, cname);
 
 		// Select target

@@ -29,7 +29,7 @@ tools/vm-build/build.sh --rebuild       # full rebuild
 - The tree is pushed as a snapshot commit; your index and branches are untouched.
 - `build.ps1` does the CI steps on the VM: it fetches the DLSS SDK and recompiles the FSR shaders only when they changed.
 - Install: the exes and `nvngx_dlss.dll` to `anomaly/bin` (the replaced ones go to `backup-nextray-exes-prev/`),
-  `gamedata/` to `anomaly/gamedata`, the patch mod to `gamma/mods`. Close the game first.
+  `gamedata/` to `anomaly/gamedata` (the old patch mod in `gamma/mods` is emptied). Close the game first.
 - Environment: `NEXTRAY_VM` (default `windows@192.168.64.4`), `NEXTRAY_VM_DIR` (`C:/nr`), `NEXTRAY_DECK`.
 - `--quick` builds without LTCG in its own checkout on the VM (a one-file change in under a minute): for test builds only, never benchmarks or releases.
 
@@ -68,5 +68,7 @@ dump (`logs/hang_*.txt`).
 ## Rules for changes
 - No visual or behaviour change from GAMMA without an option; new optimizations must give the same image.
 - Mods are not edited. Script fixes for them go into the engine's gamedata and apply only to the mod's known version
-  (fingerprints); shader fixes go into the patch mod.
+  (fingerprints); shader fixes go into `gamedata/shaders/nextray/<path>`, the whole patched file with the original's
+  CRC32 on its first line (`CRC32 <zlib crc32 of the mod's file>`, `group <name>` for files that only work together).
+  A changed shader A/Bs in separate game sessions on D3D12 (`vid_restart` keeps the compiled shaders).
 - Don't name variables `far` / `near` (Windows macros).

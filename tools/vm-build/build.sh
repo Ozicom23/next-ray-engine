@@ -8,14 +8,15 @@
 #                    little slower: never for benchmarks or releases), in its own checkout on the VM ($NEXTRAY_VM_DIR
 #                    with -quick appended) so neither build recompiles everything when switching. Give it to
 #                    --no-build too, to fetch/install the quick build
-#   --package        also stage the CI artifact layout (bin, db/mods, mods) on the VM
+#   --package        also stage the CI artifact layout (bin, db/mods) on the VM
 #   --no-build       no snapshot and no build: fetch/install what the VM built last (build while the game runs,
 #                    then close it and install in seconds; a change relinks both exes, 5-16 min with LTCG)
 #   --fetch          copy the result back to _build/vm/ (package/ with --package, else the exes, their .sym files
 #                    (crash reports), nvngx_dlss.dll and the XeSS DLLs)
 #   --install DEST   --fetch, then install into the game folder DEST (the one with anomaly/ and gamma/), a local
 #                    path or user@host:/path over SSH: the exes and DLLs (DLSS, XeSS) to anomaly/bin (the replaced ones
-#                    kept in backup-nextray-exes-prev/), gamedata/ to anomaly/gamedata, the MO2 mod to gamma/mods.
+#                    kept in backup-nextray-exes-prev/), gamedata/ to anomaly/gamedata (the shader patches in it too:
+#                    the neXt-Ray performance patches MO2 mod of earlier builds is emptied, its shaders now stale).
 #                    Can be given more than once (--install-to is the same)
 #   --deck           --install $NEXTRAY_DECK (default deck@192.168.0.230:/home/deck/Games/gamma)
 # Env: NEXTRAY_VM (default windows@192.168.64.4), NEXTRAY_VM_DIR (default C:/nr), NEXTRAY_DECK
@@ -25,7 +26,7 @@ set -euo pipefail
 VM=${NEXTRAY_VM:-windows@192.168.64.4}
 DIR=${NEXTRAY_VM_DIR:-C:/nr}
 QUICK=0
-MOD="neXt-Ray performance patches"
+OLD_MOD="neXt-Ray performance patches" # its shaders moved to gamedata/shaders/nextray
 CONF=DX11-AVX
 PS_ARGS=()
 FETCH=0
@@ -121,6 +122,6 @@ for t in ${TARGETS[@]+"${TARGETS[@]}"}; do
     on_target "$t" "cd anomaly/bin && chmod 644 $names"
     echo "bin: $names"
     rsync -rct --itemize-changes gamedata/ "$(at "$t" anomaly/gamedata/)" | sed 's/^/gamedata: /'
-    rsync -rct --itemize-changes --delete --exclude meta.ini "mods/$MOD/" "$(at "$t" "gamma/mods/$MOD/")" | sed 's/^/mod: /'
+    on_target "$t" "if [ -d 'gamma/mods/$OLD_MOD/gamedata' ]; then rm -rf 'gamma/mods/$OLD_MOD/gamedata'; echo 'old patch mod: emptied (its shaders are in gamedata now)'; fi"
     echo "Installed to $t (replaced exes in backup-nextray-exes-prev/)"
 done

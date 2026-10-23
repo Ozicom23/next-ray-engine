@@ -1,7 +1,7 @@
 # Builds the engine on the Windows VM the way the dev build CI does (.github/workflows/dev-build.yml), started by
 # tools/vm-build/build.sh from the Mac after it has checked out the snapshot to build.
 # Usage: powershell -File build.ps1 [-Conf DX11-AVX] [-Package] [-Rebuild] [-Quick]
-#   -Package: also packs gamedata and stages package/ (bin, db/mods, mods) like the CI artifact
+#   -Package: also packs gamedata and stages package/ (bin, db/mods) like the CI artifact
 #   -Rebuild: msbuild /t:Rebuild instead of an incremental build
 #   -Quick: without whole program optimization and link-time code generation (quick.props), for test builds
 # The DLSS and XeSS SDKs and the FSR shaders are fetched/compiled only when missing or when their inputs changed.
@@ -104,12 +104,11 @@ if ($Package) {
 
     Step "Stage package"
     Remove-Item -Recurse -Force package, package_pdb -ErrorAction SilentlyContinue
-    New-Item -ItemType Directory -Force -Path "package\bin\dlss_dev", "package\db\mods", "package\mods", "package_pdb\bin" | Out-Null
+    New-Item -ItemType Directory -Force -Path "package\bin\dlss_dev", "package\db\mods", "package_pdb\bin" | Out-Null
     Copy-Item "_build\_game\bin_dbg\*.exe" "package\bin"
     Copy-Item "_build\_game\bin_dbg\*.sym" "package\bin" -ErrorAction SilentlyContinue
     Copy-Item "_build\_game\bin_dbg\*.pdb" "package_pdb\bin"
     Move-Item "compressor\$db" "package\db\mods"
-    Copy-Item "mods\neXt-Ray performance patches" "package\mods" -Recurse
     Copy-Item "$dlss\lib\Windows_x86_64\rel\nvngx_dlss.dll" "package\bin"
     Copy-Item "$dlss\LICENSE.txt" "package\bin\nvngx_dlss_LICENSE.txt"
     Copy-Item "$dlss\lib\Windows_x86_64\dev\nvngx_dlss.dll" "package\bin\dlss_dev"

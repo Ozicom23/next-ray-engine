@@ -62,14 +62,13 @@ Some of GAMMA's own mods are made cheaper without changing what they do; their f
 - 3DSS no longer loads HUD models for the weapons NPCs carry (never drawn): no 7-45 ms hitch each time.
 - Squads find their targets through an index instead of scanning ~1000 simulation objects at every update: about
   0.25 ms less main-thread work per frame on the Deck.
+- Cheaper versions of Screen Space Shaders' terrain, AO, fog, SSR and debanding, the same image: about 1.5 ms less GPU
+  time per frame on the Steam Deck (terrain alone ~1 ms), more with a lot of sky in view.
 
 Each patch applies only to the exact version of the mod it was made for. After that mod updates, the patch switches
-itself off and the mod runs as it is. A file named `nextray_perf_off` in `appdata` turns them all off.
-
-**The `neXt-Ray performance patches` MO2 mod** (the `mods` folder of the build): cheaper versions of GAMMA's
-post-process shaders (AO, fog, SSR, debanding, terrain), the same image: about 1.5 ms less GPU time per frame on the
-Steam Deck (terrain alone ~1 ms), more with a lot of sky in view. Copy it into MO2's mods folder, enable it and move it to the bottom of the mod list (highest
-priority, so its shaders win). Everything else works without it.
+itself off and the mod runs as it is. A file named `nextray_perf_off` in `appdata` turns the script patches off,
+`r4_shader_patches 0` the shader ones. The `neXt-Ray performance patches` MO2 mod of earlier builds is no longer needed
+and can be removed.
 
 ## More
 - [Features](docs/FEATURES.md): everything added, with the console variables.

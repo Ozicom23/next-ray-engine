@@ -9,6 +9,7 @@
 #include "CSCompiler.h"
 #include "ComputeShader.h"
 #include "..\xrRender\dxRenderDeviceRender.h"
+#include "../xrRender/shader_patches.h"
 
 CSCompiler::CSCompiler(ComputeShader& target):
 	m_Target(target), m_cs(0)
@@ -187,9 +188,8 @@ void CSCompiler::compile(const char* name)
 
 	string_path cname;
 	strconcat(sizeof(cname), cname, ::Render->getShaderPath(), name, ".cs");
-	FS.update_path(cname, "$game_shaders$", cname);
 
-	IReader* file = FS.r_open(cname);
+	IReader* file = shader_patches::open(cname);
 	R_ASSERT2(file, cname);
 
 	// Select target

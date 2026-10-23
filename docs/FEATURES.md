@@ -124,9 +124,13 @@ Without changing what the mods do, and without editing their files:
   the Deck's main thread). Each applies only when the functions
   it relies on are the known ones (their bytecode or source); otherwise it logs their fingerprints and stays off.
   `appdata\nextray_perf_off` turns them off.
-- The MO2 mod `mods/neXt-Ray performance patches` (shipped with the builds, at the bottom of the mod list): GAMMA's
-  post-process shaders with cheaper paths, each behind a bit of `r4_shader_patches`. Deck, village flight: GPU per frame
-  ~1.5 ms less, the terrain 2.3 -> 1.1 ms (layers of weight 0: no height, base or bump fetched).
+- Shaders, in the engine's gamedata (`shaders/nextray/r3`): cheaper paths in Screen Space Shaders' terrain, AO, fog
+  scattering, SSR, debanding, far sun fade, SSS extra lights and tree benders, each behind a bit of `r4_shader_patches`.
+  A patched file is read in place of the mod's only while that one is the exact version it was made from (its CRC32 on
+  the patch's first line; files that depend on each other only together), otherwise the mod's file as it is, with a
+  log line. Deck, village flight: GPU per frame ~1.5 ms less, the terrain 2.3 -> 1.1 ms (layers of weight 0: no
+  height, base or bump fetched). The `neXt-Ray performance patches` MO2 mod of earlier builds held them: no longer
+  needed (its copies are recognised and left out).
 
 ## Fixes
 - Freeze with `mt_calc_bones_parallel 1` in crowded places (foot IK of two models deadlocked).

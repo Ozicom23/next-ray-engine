@@ -12,6 +12,7 @@
 #include <D3DX10Core.h>
 
 #include "../xrRender/ResourceManager.h"
+#include "../xrRender/shader_patches.h"
 #include "../xrRender/tss.h"
 #include "../xrRender/blenders/blender.h"
 #include "../xrRender/blenders/blender_recorder.h"
@@ -348,11 +349,12 @@ SVS* CResourceManager::_CreateVS(LPCSTR _name)
 
 		string_path cname;
 		strconcat(sizeof(cname), cname, ::Render->getShaderPath(),/*_name*/shName, ".vs");
+		const xr_string source = cname; // under $game_shaders$
 		FS.update_path(cname, "$game_shaders$", cname);
 		//		LPCSTR						target		= NULL;
 
 		// duplicate and zero-terminate
-		IReader* file = FS.r_open(cname);
+		IReader* file = shader_patches::open(source.c_str());
 		//	TODO: DX10: HACK: Implement all shaders. Remove this for PS
 		if (!file)
 		{
@@ -410,7 +412,7 @@ SVS* CResourceManager::_CreateVS(LPCSTR _name)
 					break;
 				string_path inc_name;
 				strconcat(sizeof(inc_name), inc_name, ::Render->getShaderPath(), expanded.substr(inc + 10, end - inc - 10).c_str());
-				IReader* R = FS.r_open("$game_shaders$", inc_name);
+				IReader* R = shader_patches::open(inc_name);
 				if (!R)
 					break;
 				expanded.replace(inc, end + 1 - inc, xr_string((LPCSTR)R->pointer(), R->length()));
@@ -566,10 +568,11 @@ SPS* CResourceManager::_CreatePS(LPCSTR _name)
 		// Open file
 		string_path cname;
 		strconcat(sizeof(cname), cname, ::Render->getShaderPath(),/*_name*/shName, ".ps");
+		const xr_string source = cname; // under $game_shaders$
 		FS.update_path(cname, "$game_shaders$", cname);
 
 		// duplicate and zero-terminate
-		IReader* file = FS.r_open(cname);
+		IReader* file = shader_patches::open(source.c_str());
 		//	TODO: DX10: HACK: Implement all shaders. Remove this for PS
 		if (!file)
 		{
@@ -684,10 +687,11 @@ SGS* CResourceManager::_CreateGS(LPCSTR name)
 		// Open file
 		string_path cname;
 		strconcat(sizeof(cname), cname, ::Render->getShaderPath(), name, ".gs");
+		const xr_string source = cname; // under $game_shaders$
 		FS.update_path(cname, "$game_shaders$", cname);
 
 		// duplicate and zero-terminate
-		IReader* file = FS.r_open(cname);
+		IReader* file = shader_patches::open(source.c_str());
 		//	TODO: DX10: HACK: Implement all shaders. Remove this for PS
 		if (!file)
 		{
