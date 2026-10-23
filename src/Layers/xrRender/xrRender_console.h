@@ -227,6 +227,7 @@ extern ECORE_API int   ps_r4_hdr10_pda;  			// r4-only (NOTE: this is a hack to 
 extern ECORE_API int   ps_r4_hdr10_on; 			  	// r4-only
 extern int ps_r4_hdr_output;
 extern float ps_r4_hdr_paper_white, ps_r4_hdr_peak, ps_r4_hdr_expand;
+extern int ps_r4_hdr_debug_split;
 extern ECORE_API float ps_r4_hdr10_pda_intensity; 	// r4-only
 
 /* --- Upscaler (DLSS / FSR) parameters --- */

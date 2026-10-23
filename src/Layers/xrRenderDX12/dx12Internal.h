@@ -230,7 +230,7 @@ struct Device::Impl
 	D3D12_CPU_DESCRIPTOR_HANDLE sdr_rtv = {};
 	ID3D12RootSignature* hdr_signature = nullptr;
 	ID3D12PipelineState* hdr_pipeline = nullptr;
-	float hdr_params[4] = { 200.f, 1000.f, 0.f, 0.f }; // SDR white nits, peak nits, highlight expansion
+	float hdr_params[4] = { 200.f, 1000.f, 0.f, 0.f }; // SDR white nits, peak nits, highlight expansion, split view
 	std::mutex hdr_lock;
 	std::unordered_map<ID3D12Resource*, std::pair<UINT, D3D12_CPU_DESCRIPTOR_HANDLE>> hdr_rtvs; // other targets
 	bool CreateHdrPipeline(ID3D12Device* d3d);

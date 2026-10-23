@@ -3,7 +3,7 @@
 
 int ps_r4_sun_cascade_cache = 2;
 float ps_r4_sun_cascade_cache_drift = 0.5f;
-int ps_r4_sun_cascade_cache_trees = 0;
+int ps_r4_sun_cascade_cache_trees = 2;
 
 namespace sun_cache
 {

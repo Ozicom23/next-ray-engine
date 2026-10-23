@@ -2190,15 +2190,17 @@ HRESULT Device::AttachSwapChain(IDXGISwapChain1* swap_chain)
 	return S_OK;
 }
 
-// The conversion: the SDR frame as an SDR display shows it (gamma 2.2), SDR white at hdr_params[0] nits, highlights
-// above the knee raised toward the peak (hdr_params[1] nits) by hdr_params[2] (0: none), Rec.709 to Rec.2020, PQ
+// The conversion: the SDR frame as an SDR display shows it (gamma 2.2), SDR white at hdr_params[0] nits; above
+// mid-grey the brightness raised toward the peak (hdr_params[1] nits) by hdr_params[2] (0: none, 1: SDR white at the
+// peak), the colour's ratios kept; Rec.709 to Rec.2020, PQ. hdr_params[3], the right half against the left as it is:
+// 1 the raise, 2 red where the raise applies, 3 everything at the peak's ratio (does brighter output show at all)
 bool Device::Impl::CreateHdrPipeline(ID3D12Device* d3d)
 {
 	if (hdr_pipeline)
 		return true;
 	static const char kShader[] = R"(
 Texture2D<float4> sdr : register(t0);
-cbuffer P : register(b0) { float paper_white; float peak; float expand; float pad; };
+cbuffer P : register(b0) { float paper_white; float peak; float expand; float split; };
 float4 vs(uint id : SV_VertexID) : SV_Position
 {
 	float2 uv = float2((id << 1) & 2, id & 2);
@@ -2213,9 +2215,24 @@ float3 pq(float3 nits)
 float4 ps(float4 pos : SV_Position) : SV_Target
 {
 	float3 c = pow(saturate(sdr.Load(int3(pos.xy, 0)).rgb), 2.2);
-	const float knee = 0.5;
+	float w, h;
+	sdr.GetDimensions(w, h);
+	const bool left = split > 0.5 && pos.x < w * 0.5;
+	if (split > 0.5 && abs(pos.x - w * 0.5) < 1.0)
+		return float4(pq(float3(1, 1, 1) * paper_white), 1);
+	// Inverse tone mapping: luminance above mid-grey scaled up smoothly, SDR white reaching the peak at expand 1
+	const float knee = 0.18;
+	const float gain = max(peak / paper_white, 1.0);
 	float t = saturate((dot(c, float3(0.2126, 0.7152, 0.0722)) - knee) / (1.0 - knee));
-	c *= lerp(1.0, max(peak / paper_white, 1.0), expand * t * t);
+	if (!left)
+	{
+		if (split > 2.5)
+			c *= gain;
+		else if (split > 1.5)
+			c = lerp(c, float3(1, 0, 0), saturate(expand * pow(t, 1.25) * 2.0));
+		else
+			c *= lerp(1.0, gain, expand * pow(t, 1.25));
+	}
 	c = mul(float3x3(0.6274040, 0.3292820, 0.0433136, 0.0690970, 0.9195400, 0.0113612, 0.0163916, 0.0880132, 0.8955950), c);
 	return float4(pq(c * paper_white), 1);
 }
@@ -2294,12 +2311,13 @@ void Device::SetHdrOutput(bool on) { m_impl->hdr_output = on; }
 bool Device::HdrOutput() const { return m_impl->hdr_output && m_impl->sdr_target; }
 DXGI_FORMAT Device::SwapChainFormat() const { return m_impl->swap_chain_format; }
 
-void Device::SetHdrParams(float paper_white, float peak, float expand)
+void Device::SetHdrParams(float paper_white, float peak, float expand, int split)
 {
 	float* p = m_impl->hdr_params;
 	p[0] = paper_white;
 	p[1] = peak;
 	p[2] = expand;
+	p[3] = float(split);
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE Device::HdrTargetRTV(Resource* target)

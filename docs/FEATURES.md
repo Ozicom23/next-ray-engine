@@ -25,16 +25,17 @@ highlights are in the [README](../README.md).
 - FSR frame generation's interpolation on the async compute queue (`r4_framegen_async`, on): Deck +5% fps, half the
   queued time.
 - **HDR output** (`r4_hdr_output`, Video > Basic "HDR" and "HDR Brightness"): the frame is drawn in SDR as before and
-  converted to HDR10 at Present, so GAMMA's look stays (`r4_hdr_paper_white`, `r4_hdr_peak`, `r4_hdr_expand`). Steam
-  Deck OLED: HDR on in Display settings and `DXVK_HDR=1` in the launch options.
+  converted to HDR10 at Present, so GAMMA's look stays (`r4_hdr_paper_white`, `r4_hdr_peak`). `r4_hdr_expand` (0..1)
+  raises what is brighter than mid-grey toward the display's peak (SDR white at the peak at 1); `r4_hdr_debug_split 1`
+  shows the left half without it (2: red where it applies, 3: the right half all at the peak's ratio). Steam Deck OLED: HDR on in Display settings and `DXVK_HDR=1` in the launch options.
 - Variable rate shading for sun and lamp lighting where the image is flat (`r4_vrs`, on, tier 2 GPUs; `r4_vrs_debug`).
 - Shaders a level uses compiled ahead on worker threads after a settings change (`r4_shader_precompile`).
 
 ## Frame time (same image, on by default)
 - Hi-Z occlusion culling on the GPU (`r4_hiz_cull`): hidden trees, statics and dynamic objects skipped.
 - Sun shadow caster culling (`r4_sun_caster_cull`), the three sun cascades culled in parallel (`r4_sun_parallel_cull`),
-  far sun cascades kept between frames (`r4_sun_cascade_cache`, with their trees: `r4_sun_cascade_cache_trees`, Deck
-  -4.5 ms GPU), shadow map draw order (`r4_smap_order`).
+  far sun cascades kept between frames (`r4_sun_cascade_cache`, with their trees: `r4_sun_cascade_cache_trees`, on,
+  Deck -4.5 ms GPU; tree shadows beyond 20 m don't sway), shadow map draw order (`r4_smap_order`).
 - Tree instancing (`r4_tree_instancing`): trees of the same model share one draw in the view and the shadow maps.
 - Lamp shadow maps kept between frames for lamps that nothing moves through (`r4_light_smap_keep`), lamp queries in
   parallel (`r4_lights_parallel_query`).

@@ -430,7 +430,7 @@ public:
 	// highlights raised toward peak nits by expand, 0: none) into the swap chain's buffer. Off when it can't be set up
 	void SetHdrOutput(bool on);
 	bool HdrOutput() const;
-	void SetHdrParams(float paper_white, float peak, float expand);
+	void SetHdrParams(float paper_white, float peak, float expand, int split);
 	DXGI_FORMAT SwapChainFormat() const;
 
 	// Variable rate shading with a shading rate image (tier 2): its tile size in pixels, 0 without
