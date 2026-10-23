@@ -13,29 +13,6 @@ and `AnomalyDX12AVX.exe`. A plain `msbuild` silently leaves out DLSS and FSR; th
 
 Every push to `master` runs the dev build in GitHub Actions (~38 min) and uploads the package and the PDBs.
 
-### Local build on a Windows VM: `tools/vm-build/build.sh`
-
-From macOS or Linux, the working tree is built on a Windows machine over SSH, incrementally (a one-line change
-relinks in ~5 min, mostly LTCG):
-
-```sh
-tools/vm-build/build.sh                 # build the tree as it is (uncommitted files included)
-tools/vm-build/build.sh --install /path/to/gamma   # build, then install into that game folder (local or user@host:/path); repeatable
-tools/vm-build/build.sh --deck          # build, then install on the Steam Deck over SSH
-tools/vm-build/build.sh --package --fetch   # the CI artifact layout, copied to _build/vm/package
-tools/vm-build/build.sh --rebuild       # full rebuild
-```
-
-- The tree is pushed as a snapshot commit; your index and branches are untouched.
-- `build.ps1` does the CI steps on the VM: it fetches the DLSS SDK and recompiles the FSR shaders only when they changed.
-- Install: the exes and `nvngx_dlss.dll` to `anomaly/bin` (the replaced ones go to `backup-nextray-exes-prev/`),
-  `gamedata/` to `anomaly/gamedata` (the old patch mod in `gamma/mods` is emptied). Close the game first.
-- Environment: `NEXTRAY_VM` (default `windows@192.168.64.4`), `NEXTRAY_VM_DIR` (`C:/nr`), `NEXTRAY_DECK`.
-- `--quick` builds without LTCG in its own checkout on the VM (a one-file change in under a minute): for test builds only, never benchmarks or releases.
-
-VM setup (once): Windows 11 (ARM64 works, it builds x64 with the cross compilers), OpenSSH server, Git, VS 2022 Build
-Tools with the C++ workload, FidelityFX SDK v1.1.4 in `C:\nr-deps\ffx-sdk`, and an SSH key for the Mac.
-
 ## Testing: remote console
 
 Start the game with `-dbg -remote_console` (MO2: the executable's arguments). The engine then reads console commands

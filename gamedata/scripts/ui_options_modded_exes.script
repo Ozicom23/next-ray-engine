@@ -8,7 +8,7 @@
 --   index: position in a vector setting (1-based), nil for a plain value
 --   value: the preset value; mode "max" keeps the larger of current and preset (resolution divisors),
 --          "min" the smaller (sample counts, distances, quality scales)
---   default: the engine's default of that value
+--   default: GAMMA's value of it (the engine's default where GAMMA leaves it)
 local deck_preset = {
 	{ cmd = "ssfx_ao",              index = 1, value = 2,    mode = "max", default = 1 }, -- ambient occlusion at half resolution
 	{ cmd = "ssfx_ssr",             index = 1, value = 2,    mode = "max", default = 1 }, -- screen space reflections at half resolution
@@ -16,8 +16,11 @@ local deck_preset = {
 	{ cmd = "ssfx_sss_quality",     index = 2, value = 3,    mode = "min", default = 4 }, -- screen space shadow samples, other lights
 	{ cmd = "ssfx_shadow_cascades", index = 3, value = 140,  mode = "min", default = 160 }, -- far sun shadow cascade, metres
 	{ cmd = "r2_ls_squality",                  value = 0.75, mode = "min", default = 1 }, -- point and spot light shadow map size
+	{ cmd = "r4_sun_smap_scale",    index = 1, value = 0.75, mode = "min", default = 1 }, -- near sun cascade at 3/4 resolution
 	{ cmd = "r4_sun_smap_scale",    index = 2, value = 0.75, mode = "min", default = 1 }, -- middle sun cascade at 3/4 resolution
 	{ cmd = "r4_sun_smap_scale",    index = 3, value = 0.5,  mode = "min", default = 1 }, -- far sun cascade at half resolution
+	{ cmd = "r__tf_aniso",                     value = 8,    mode = "min", default = 16 }, -- anisotropic filtering x8
+	{ cmd = "ssfx_il_quality",                 value = 16,   mode = "min", default = 32 }, -- indirect light samples
 	{ cmd = "lua_parallel_gc_paced",           value = 2,    mode = "max", default = 1 }, -- Lua GC's atomic phase split up (fewer hitches)
 }
 local deck_preset_section = "deck_preset"
@@ -91,7 +94,7 @@ function apply_deck_preset()
 			else
 				local current = con:get_string(e.cmd)
 				if current then
-					local value = deck_preset_value({ index = e.index, value = e.default, mode = "set" }, current)
+					local value = e.token and e.default or deck_preset_value({ index = e.index, value = e.default, mode = "set" }, current)
 					printf("! Steam Deck preset: no value of %s remembered, set to the default: %s", e.cmd, value)
 					exec_console_cmd(e.cmd .. " " .. value)
 				end
