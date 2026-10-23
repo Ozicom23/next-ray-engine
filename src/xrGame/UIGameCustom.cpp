@@ -23,10 +23,12 @@
 
 EGameIDs ParseStringToGameType(const char* str);
 
+// The name made a shared string once: compared with a const char* each element made one (a lookup in the string
+// container under its lock) per static, and HUD scripts look statics up many times a frame
 struct predicate_find_stat
 {
-	const char* id;
-	predicate_find_stat(const char* id) { this->id = id; }
+	shared_str id;
+	predicate_find_stat(const char* id) : id(id) {}
 
 	bool operator()(StaticDrawableWrapper* s)
 	{

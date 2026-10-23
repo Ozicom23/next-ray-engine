@@ -101,7 +101,7 @@ namespace xr_prof
 			shown = 0;
 			for (const sum& s : sums)
 			{
-				if (!s.other_calls || shown >= (s_totals ? 50 : 25) || double(s.other_total) * ms < 0.05)
+				if (!s.other_calls || shown >= 50 || double(s.other_total) * ms < 0.05)
 					continue;
 				Msg("*     %-42s %8.3f %6.1f", s.name.c_str(), double(s.other_total) * ms, double(s.other_calls) * per_frame);
 				shown++;

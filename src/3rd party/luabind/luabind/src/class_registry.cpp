@@ -26,6 +26,8 @@
 #include <luabind/detail/class_rep.hpp>
 #include <luabind/detail/operator_id.hpp>
 #include <luabind/detail/garbage_collector.hpp>
+#include <shared_mutex>
+#include <cstdint>
 
 namespace luabind { namespace detail {
 
@@ -183,6 +185,23 @@ namespace luabind { namespace detail {
 
     class class_rep;
 
+    // neXt-Ray: the map compares type_infos by name (a strcmp of their decorated names on MSVC), ~8 compares a
+    // look-up, and every C++ object pushed to scripts looks its class up (~5% of GAMMA's NPC updates). A type_info is
+    // one object per type (one module), so its address finds the same class: a direct-mapped cache of the map's
+    // answers, emptied when a class is added
+    struct class_registry::find_cache
+    {
+        struct entry
+        {
+            LUABIND_TYPE_INFO info = nullptr;
+            class_rep* crep = nullptr;
+        };
+        entry entries[512];
+        std::shared_mutex lock;
+
+        static unsigned slot(LUABIND_TYPE_INFO info) { return unsigned(reinterpret_cast<std::uintptr_t>(info) >> 4) & 511u; }
+    };
+
     class_registry::class_registry(lua_State* L)
         : m_cpp_instance_metatable(create_cpp_instance_metatable(L))
         , m_cpp_class_metatable(create_cpp_class_metatable(L))
@@ -190,6 +209,7 @@ namespace luabind { namespace detail {
         , m_lua_class_metatable(create_lua_class_metatable(L))
         , m_lua_function_metatable(create_lua_function_metatable(L))
     {
+        m_find_cache = new find_cache;
     }
 
     class_registry* class_registry::get_registry(lua_State* L)
@@ -229,14 +249,34 @@ namespace luabind { namespace detail {
 
         assert((m_classes.find(info) == m_classes.end()) && "you are trying to register a class twice");
         m_classes[info] = crep;
+        std::unique_lock<std::shared_mutex> write(m_find_cache->lock);
+        for (find_cache::entry& e : m_find_cache->entries)
+            e = find_cache::entry();
+    }
+
+    class_registry::~class_registry()
+    {
+        delete m_find_cache;
     }
 
     class_rep* class_registry::find_class(LUABIND_TYPE_INFO info) const
     {
+        find_cache& c = *m_find_cache;
+        const unsigned s = find_cache::slot(info);
+        {
+            std::shared_lock<std::shared_mutex> read(c.lock);
+            if (c.entries[s].info == info)
+                return c.entries[s].crep;
+        }
+
         map_class<LUABIND_TYPE_INFO, class_rep*, cmp>::const_iterator i(
             m_classes.find(info));
 
-        return (i == m_classes.end()) ? nullptr /* the type is not registered */ : i->second /* else */;
+        class_rep* crep = (i == m_classes.end()) ? nullptr /* the type is not registered */ : i->second /* else */;
+        std::unique_lock<std::shared_mutex> write(c.lock);
+        c.entries[s].info = info;
+        c.entries[s].crep = crep;
+        return crep;
     }
 
 }} // namespace luabind::detail

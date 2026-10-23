@@ -35,6 +35,7 @@ namespace luabind { namespace detail
 	struct LUABIND_API class_registry
 	{
 		class_registry(lua_State* L);
+		~class_registry();
 
 		static class_registry* get_registry(lua_State* L);
 
@@ -79,6 +80,10 @@ namespace luabind { namespace detail
 #pragma warning(disable:4251)
 		CLASS_REGISTRY m_classes;
 #pragma warning(pop)
+
+		// neXt-Ray: find_class by the type_info's address first (class_registry.cpp)
+		struct find_cache;
+		find_cache* m_find_cache;
 
 		// this is a lua reference that points to the lua table
 		// that is to be used as meta table for all C++ class 
