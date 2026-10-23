@@ -1120,7 +1120,7 @@ float NPCsLookAtActorMinDistance = 3.5f;
 void CAI_Stalker::shedule_Update(u32 DT)
 {
 	PROF_EVENT("CAI_Stalker::shedule_Update");
-	lua_sampler::npc_update sampled(cNameSect().c_str());
+	lua_sampler::scoped_update sampled(lua_sampler::npc, cNameSect().c_str());
 	// Optimization update
 //	if (Device.dwFrame % 2) return;
 

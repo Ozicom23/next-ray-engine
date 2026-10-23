@@ -666,6 +666,9 @@ namespace luabind { namespace detail
 			// trying to use an unregistered type
 			assert(crep && "you are trying to use an unregistered type");
 
+			if (crep->xr_cached() && xr_pointer_cache_push(L, (void*)ptr, crep))
+				return;
+
 			// create the struct to hold the object
 			void* obj = lua_newuserdata(L, sizeof(object_rep));
 			//new(obj) object_rep(ptr, crep, object_rep::owner, destructor_s<T>::apply);
@@ -674,6 +677,9 @@ namespace luabind { namespace detail
 			// set the meta table
 			detail::getref(L, crep->metatable_ref());
 			lua_setmetatable(L, -2);
+
+			if (crep->xr_cached())
+				xr_pointer_cache_store(L, (void*)ptr);
 
 //			make_instance(L, ptr, (pointer_holder<T, T*>*)0);
 		}

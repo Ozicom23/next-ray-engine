@@ -20,6 +20,10 @@
 --    its HUD data, the HUD model loaded for nothing (7-45 ms on the Deck, a hitch each time an NPC's weapon comes
 --    through), as an NPC's weapon is only ever drawn as its world model. When the actor takes such a weapon, the slot
 --    change normalizes it as before.
+-- 4. Simulation objects (simulation_objects): get_server_entity(id) scans the whole simulation registry (smart terrains
+--    and squads, ~1000) for the id, called at every squad update for its target and smart terrain (~2 s of a 3-minute
+--    flight on the Deck). It looks the id up in an index of the registry instead, the same first entry the scan finds;
+--    the index is rebuilt after the registry changes (register, unregister, or its size or table changed).
 
 local log_prefix = "* [neXt-Ray perf] "
 
@@ -43,6 +47,7 @@ local KNOWN = {
 	surge_build = "766:1699894902", surge_nearby = "445:1118901213", -- illish.lib.surge buildCovers, nearbyCovers
 	pos_snap = "74:1471059612", -- illish.lib.pos snap
 	tdss_normalize = "262:1173514111", -- z_3dss_shader_switcher.normalize_marker_shaders
+	sim_get = "102:1009438135", sim_register = "241:5271822", sim_unregister = "153:449143374", -- simulation_objects get_server_entity, register, unregister
 }
 
 ---------------------------------------------------------------------------------------------------------------------
@@ -266,8 +271,48 @@ local function tdss_flush()
 end
 
 ---------------------------------------------------------------------------------------------------------------------
+-- 4. Simulation objects: get_server_entity by an index of the registry
 
-local da_on, surge_on, tdss_on = false, false, false
+local sim_index = nil -- id -> server entity; nil after the registry changed
+local sim_index_of, sim_index_size = nil, -1 -- the registry table and size it was built from
+
+local function sim_patch()
+	local m = simulation_objects
+	if not (m and type(m.get_server_entity) == "function" and type(m.register) == "function"
+		and type(m.unregister) == "function") then return false end
+	local fg, fr, fu = fingerprint(m.get_server_entity), fingerprint(m.register), fingerprint(m.unregister)
+	if fg ~= KNOWN.sim_get or fr ~= KNOWN.sim_register or fu ~= KNOWN.sim_unregister then
+		msg("simulation_objects is not the known one (%s %s %s), kept", fg, fr, fu)
+		return false
+	end
+	local register, unregister = m.register, m.unregister
+	m.register = function(se_obj)
+		sim_index = nil
+		return register(se_obj)
+	end
+	m.unregister = function(se_obj)
+		sim_index = nil
+		return unregister(se_obj)
+	end
+	m.get_server_entity = function(id)
+		local registry, size = m.object_registry, m.object_registry_size
+		if not sim_index or registry ~= sim_index_of or size ~= sim_index_size then
+			local index = {}
+			for i = 1, size do
+				local se_obj = registry[i]
+				local key = se_obj.id
+				if index[key] == nil then index[key] = se_obj end
+			end
+			sim_index, sim_index_of, sim_index_size = index, registry, size
+		end
+		return sim_index[id]
+	end
+	return true
+end
+
+---------------------------------------------------------------------------------------------------------------------
+
+local da_on, surge_on, tdss_on, sim_on = false, false, false, false
 local reported = false
 local reported_after = 0
 
@@ -283,8 +328,9 @@ local function actor_on_update()
 		if tdss_others > 0 then
 			msg("3DSS: %d normalizations of other characters' weapons left out", tdss_others)
 		end
-		msg("Dynamic Anomalies dispatcher %s (%d anomalies), emission cover cache %s, 3DSS normalization after loads %s",
-			da_on and da_known and "on" or "off", da_count, surge_on and "spread over frames" or "off", tdss_on and "on" or "off")
+		msg("Dynamic Anomalies dispatcher %s (%d anomalies), emission cover cache %s, 3DSS normalization after loads %s, simulation index %s",
+			da_on and da_known and "on" or "off", da_count, surge_on and "spread over frames" or "off", tdss_on and "on" or "off",
+			sim_on and "on" or "off")
 	end
 end
 
@@ -299,6 +345,7 @@ function on_game_start()
 	da_on = da_patch()
 	surge_on = surge_patch()
 	tdss_on = tdss_patch()
+	sim_on = sim_patch()
 	RegisterScriptCallback("actor_on_update", actor_on_update)
 	RegisterScriptCallback("actor_on_first_update", function()
 		reported_after = time_global() + 5000

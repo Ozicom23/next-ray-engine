@@ -290,7 +290,11 @@ void CEffect_Rain::UpdateItems()
 
 	// born _new_ if needed
 	// owner.items.reserve		(desired_items);
-	while (items.size() < desired_items)
+	// At most a 16th of them a frame, as each casts a ray: when the rain starts or gets heavier at once (a weather set
+	// at once, a load) the drops fill in over ~16 frames instead of ~2500 rays in one frame (20-25 ms on the Deck).
+	// (a drop takes 0.25-0.5 s to fall from the source plane anyway); a gradual weather change stays under the limit
+	const u32 born_max = _max(desired_items / 16, 64u);
+	for (u32 born = 0; items.size() < desired_items && born < born_max; ++born)
 	{
 		Born(items.emplace_back(), rain_radius, _drop_speed);
 	}

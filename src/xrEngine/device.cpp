@@ -749,6 +749,16 @@ void CRenderDevice::Run()
 u32 app_inactive_time = 0;
 u32 app_inactive_time_start = 0;
 
+// A long one to the log (stat_frame_pacing): whose OnFrame
+static void __fastcall rp_Frame_timed(void* p)
+{
+	const u64 t0 = CPU::QPC();
+	static_cast<pureFrame*>(p)->OnFrame();
+	const double ms = double(CPU::QPC() - t0) * 1000.0 / double(CPU::qpc_freq);
+	if (ms > 20.0)
+		Msg("* [Frame] %.1f ms: %s's OnFrame", ms, typeid(*static_cast<pureFrame*>(p)).name());
+}
+
 void CRenderDevice::FrameMove()
 {
 	PROF_EVENT("Render: Frame Move");
@@ -817,7 +827,7 @@ void CRenderDevice::FrameMove()
 	Statistic->EngineTOTAL.Begin();
 
 	START_PROFILE("Process seqFrame");
-	Device.seqFrame.Process(rp_Frame);
+	Device.seqFrame.Process(g_bEnableStatGather ? rp_Frame_timed : rp_Frame);
 	STOP_PROFILE;
 	
 	g_bLoaded = TRUE;

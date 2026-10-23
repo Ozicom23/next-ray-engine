@@ -59,6 +59,8 @@ Some of GAMMA's own mods are made cheaper without changing what they do; their f
 - Useful Idiots' emission cover cache, 3DSS's scope marker shaders and story item lookups no longer slow down loads:
   about 10% faster level changes.
 - 3DSS no longer loads HUD models for the weapons NPCs carry (never drawn): no 7-45 ms hitch each time.
+- Squads find their targets through an index instead of scanning ~1000 simulation objects at every update: about
+  0.25 ms less main-thread work per frame on the Deck.
 
 Each patch applies only to the exact version of the mod it was made for. After that mod updates, the patch switches
 itself off and the mod runs as it is. A file named `nextray_perf_off` in `appdata` turns them all off.

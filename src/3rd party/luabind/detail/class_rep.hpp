@@ -157,6 +157,10 @@ namespace luabind { namespace detail
 		// the lua reference to the metatable for this class' instances
 		int metatable_ref() const throw() { return m_instance_metatable; }
 
+		// neXt-Ray: one script object per C++ object of this class (pointer_converter, xr_pointer_cache_*)
+		bool xr_cached() const throw() { return m_xr_cached; }
+		void xr_set_cached() throw() { m_xr_cached = true; }
+
 		void get_table(lua_State* L) const { m_table_ref.get(L); }
 		void get_default_table(lua_State* L) const { m_default_table_ref.get(L); }
 
@@ -426,6 +430,8 @@ namespace luabind { namespace detail
 		// that is to be used as meta table for all instances
 		// of this class.
 		int m_instance_metatable;
+
+		bool m_xr_cached = false;
 
 		void(*m_destructor)(void*);
 		void(*m_const_holder_destructor)(void*);

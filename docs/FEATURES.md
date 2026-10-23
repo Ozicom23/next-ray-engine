@@ -46,6 +46,8 @@ highlights are in the [README](../README.md).
 - Shader warm-up at the start (`r4_shader_warmup`) with a progress window (`r4_shader_progress`), and a counter while
   shaders compile during the game.
 - Shader fixes (`r4_shader_patches`): early-outs and cheaper sampling in GAMMA's post-process shaders, same image.
+- Rain drops born at most a 16th of them a frame (each casts a ray): a weather set at once no longer casts ~2500 rays
+  in one frame (20-25 ms on the Deck); the drops fill in over ~16 frames, and a gradual weather change stays under it.
 
 Steam Deck, Cordon, FSR balanced: GPU ~22.6 -> ~19.7 ms per frame, main thread ~20.5 -> ~18.5 ms, draw calls
 ~5,600 -> ~4,400.
@@ -63,8 +65,10 @@ Modded Exes steps the Lua GC on a worker thread while the frame renders. `lua_pa
 17 -> 29 fps, longest frame ~190 -> 83 ms, stutters 126 -> 20.
 
 Fewer objects to collect: `device()`, `alife()`, `game_graph()`, `get_console()` and `get_hud()` return the same
-script object every call instead of a new one (each a userdata the GC finalizes). With GAMMA, a 3-minute flight: 9.0
--> 5.8 million engine objects made by scripts, finalizers per GC cycle ~80k -> ~40k (~20 -> ~11 ms on the main thread).
+script object every call instead of a new one (each a userdata the GC finalizes), and a game object has one script
+object while it exists (callbacks, `level.object_by_id` and the like made a new one each time). With GAMMA, a 3-minute
+flight: 9.0 -> 3.3-3.5 million engine objects made by scripts (`device()` 1.7 million, `alife()` 1 million, game
+objects 2.4 million). Two lookups of the same object now give the same script object (`==` true).
 
 ## A-Life
 A-Life updates its objects (squads and smart terrains, 20 at a time with GAMMA) on a worker thread while the frame
@@ -105,7 +109,9 @@ Without changing what the mods do, and without editing their files:
 - In the engine's gamedata (`zzzz_nextray_perf.script`, `zzzz_nextray_load.script`): Dynamic Anomalies' per-frame
   closures through one dispatcher, Useful Idiots' emission cover cache built over the first frames, 3DSS marker shaders
   normalized once per weapon after a load and not for weapons other characters hold (that loaded their HUD models,
-  never drawn: 7-45 ms each on the Deck), story item lookups through the engine. Each applies only when the functions
+  never drawn: 7-45 ms each on the Deck), story item lookups through the engine, `simulation_objects.get_server_entity`
+  through an index instead of a scan of the ~1000 simulation objects (each squad update: ~2 s of a 3-minute flight on
+  the Deck's main thread). Each applies only when the functions
   it relies on are the known ones (their bytecode or source); otherwise it logs their fingerprints and stays off.
   `appdata\nextray_perf_off` turns them off.
 - The MO2 mod `mods/neXt-Ray performance patches` (shipped with the builds, at the bottom of the mod list): GAMMA's
@@ -120,8 +126,9 @@ Without changing what the mods do, and without editing their files:
 ## Tools
 - Performance overlay (`perf_overlay`): FPS over time windows, CPU/GPU/engine times, a CPU- or GPU-bound hint, VRAM and RAM.
 - Profilers: `stat_gpu_passes`, `stat_cpu_passes`, `stat_next_load`, `stat_script_load`, `stat_gpu_memory`,
-  `stat_tex_stream`, `stat_hiz`, `stat_sun_casters`, `stat_frame_pacing <s>` (every frame to a CSV in `logs/`),
-  `stat_lua_sample <s>` (A-Life's and NPCs' updates sampled: time by object and Lua function,
+  `stat_tex_stream`, `stat_hiz`, `stat_sun_casters`, `stat_frame_pacing <s>` (every frame to a CSV in `logs/`; while it
+  records, slow work to the log: a frame callback or scheduled object over 20 ms, a HUD model made over 5 ms),
+  `stat_lua_sample <s>` (A-Life's, NPCs' and the actor's updates sampled: time by object and Lua function,
   `logs\lua_sample_<time>.txt`),
   `stat_luabind_objects 1/0` (the engine objects scripts make, by class).
 - Mod cost overlay (`perf_overlay_mods`): Lua time per frame and script load time for each MO2 mod.

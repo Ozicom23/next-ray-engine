@@ -146,4 +146,8 @@ void CScriptGameObject::script_register(lua_State* L)
 		def("sell_condition", (void (*)(float, float))(&::sell_condition)),
 		def("show_condition", &::show_condition)
 	];
+
+	// One script object per game object instead of a new one at every push (callbacks, level.object_by_id, db
+	// lookups; 2.4 million in a 3-minute flight with GAMMA), so fewer for the GC to finalize; forgotten in the destructor
+	luabind::detail::get_class_rep<CScriptGameObject>(L)->xr_set_cached();
 }

@@ -16,8 +16,8 @@ namespace lua_sampler
 		const u32 kDepth = 24;		 // Lua frames kept per sample
 		const u32 kStackFrames = 10; // innermost frames in a stack's key
 		const u32 kRing = 4096;
-		const float kLongMs[kinds] = {30.f, 15.f}; // a long update
-		LPCSTR const kTitles[kinds] = {"A-Life updates", "NPC updates"};
+		const float kLongMs[kinds] = {30.f, 15.f, 20.f}; // a long update
+		LPCSTR const kTitles[kinds] = {"A-Life updates", "NPC updates", "The actor's updates"};
 
 		double qpc_ms(u64 d) { return double(d) * 1000.0 / double(CPU::qpc_freq); }
 
@@ -187,7 +187,7 @@ namespace lua_sampler
 				Msg("! [Lua sampler] can't write %s", path);
 				return;
 			}
-			w->w_printf("A-Life's and NPCs' updates, sampled about once a millisecond. Lua frames as of Lua's last call out "
+			w->w_printf("A-Life's, NPCs' and the actor's updates, sampled about once a millisecond. Lua frames as of Lua's last call out "
 			            "of the VM: a pure Lua loop is counted in the function that last called the engine. A line 0: a C "
 			            "function not called by a line (a metamethod: a field of an engine object).\r\n");
 			for (int k = 0; k < kinds; ++k)
@@ -198,8 +198,9 @@ namespace lua_sampler
 				report(s_regions[k].long_ones, w, title);
 			}
 			FS.w_close(w);
-			Msg("* [Lua sampler] A-Life %u updates (%u long), NPCs %u (%u long), written to %s", s_regions[alife].all.updates,
-			    s_regions[alife].long_ones.updates, s_regions[npc].all.updates, s_regions[npc].long_ones.updates, path);
+			Msg("* [Lua sampler] A-Life %u updates (%u long), NPCs %u (%u long), the actor %u (%u long), written to %s",
+			    s_regions[alife].all.updates, s_regions[alife].long_ones.updates, s_regions[npc].all.updates,
+			    s_regions[npc].long_ones.updates, s_regions[actor].all.updates, s_regions[actor].long_ones.updates, path);
 		}
 
 		// One sample of the region's update, if one runs
@@ -316,7 +317,7 @@ namespace lua_sampler
 				s_thread = std::thread(run);
 				Msg("* [Lua sampler] %.0f s", seconds);
 			}
-			virtual void Info(TInfo& I) { xr_strcpy(I, "seconds to sample A-Life's and NPCs' updates for, a report to logs (0 ends it)"); }
+			virtual void Info(TInfo& I) { xr_strcpy(I, "seconds to sample A-Life's, NPCs' and the actor's updates for, a report to logs (0 ends it)"); }
 		};
 	}
 

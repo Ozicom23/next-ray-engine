@@ -22,6 +22,9 @@
 #include "luabind_api.h"
 #include <cstring>
 #include <cstdint>
+#include <atomic>
+#include <mutex>
+#include <vector>
 #include <luabind/detail/class_rep.hpp>
 #include <luabind/detail/object_rep.hpp>
 #include <luabind/detail/method_rep.hpp>
@@ -69,6 +72,72 @@ namespace luabind { namespace detail
 		for (unsigned i = 0; i < kCountSlots; ++i)
 			if (s_counts[i].crep)
 				row(s_counts[i].crep->name(), s_counts[i].made, s_counts[i].collected, ud);
+	}
+
+	// registry[&s_cache_key] = {[lightuserdata pointer] = object}; the pointers of destroyed objects wait in s_dead
+	static char s_cache_key;
+	static std::mutex s_dead_lock;
+	static std::vector<void*> s_dead;
+	static std::atomic<bool> s_dead_any{false};
+
+	// Pushes the cache table, without the entries of objects destroyed since
+	static void push_cache(lua_State* L)
+	{
+		lua_pushlightuserdata(L, &s_cache_key);
+		lua_rawget(L, LUA_REGISTRYINDEX);
+		if (!lua_istable(L, -1))
+		{
+			lua_pop(L, 1);
+			lua_newtable(L);
+			lua_pushlightuserdata(L, &s_cache_key);
+			lua_pushvalue(L, -2);
+			lua_rawset(L, LUA_REGISTRYINDEX);
+		}
+		if (!s_dead_any.load(std::memory_order_acquire))
+			return;
+		std::vector<void*> dead;
+		{
+			std::lock_guard<std::mutex> lock(s_dead_lock);
+			dead.swap(s_dead);
+			s_dead_any.store(false, std::memory_order_relaxed);
+		}
+		for (void* ptr : dead)
+		{
+			lua_pushlightuserdata(L, ptr);
+			lua_pushnil(L);
+			lua_rawset(L, -3);
+		}
+	}
+
+	bool xr_pointer_cache_push(lua_State* L, void* ptr, const class_rep* crep)
+	{
+		push_cache(L);
+		lua_pushlightuserdata(L, ptr);
+		lua_rawget(L, -2);
+		const object_rep* obj = static_cast<const object_rep*>(lua_touserdata(L, -1));
+		if (obj && obj->crep() == crep && obj->flags() == 0)
+		{
+			lua_remove(L, -2);
+			return true;
+		}
+		lua_pop(L, 2);
+		return false;
+	}
+
+	void xr_pointer_cache_store(lua_State* L, void* ptr)
+	{
+		push_cache(L);
+		lua_pushlightuserdata(L, ptr);
+		lua_pushvalue(L, -3);
+		lua_rawset(L, -3);
+		lua_pop(L, 1);
+	}
+
+	void xr_pointer_cache_forget(void* ptr)
+	{
+		std::lock_guard<std::mutex> lock(s_dead_lock);
+		s_dead.push_back(ptr);
+		s_dead_any.store(true, std::memory_order_release);
 	}
 
 	// dest is a function that is called to delete the c++ object this struct holds

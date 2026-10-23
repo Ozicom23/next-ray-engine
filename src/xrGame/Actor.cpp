@@ -1,5 +1,6 @@
 #include "pch_script.h"
 #include "gamepad.h"
+#include "lua_sampler.h"
 #include "Actor_Flags.h"
 #include "hudmanager.h"
 #ifdef DEBUG
@@ -1774,6 +1775,7 @@ void CActor::set_state_box(u32 mstate)
 void CActor::shedule_Update(u32 DT)
 {
 	PROF_EVENT("CActor shedule_Update");
+	lua_sampler::scoped_update sampled(lua_sampler::actor, "actor");
 	setSVU(OnServer());
 	//.	UpdateInventoryOwner			(DT);
 

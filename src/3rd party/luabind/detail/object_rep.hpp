@@ -36,6 +36,13 @@ namespace luabind { namespace detail
 	LUABIND_API void xr_count_objects(bool on);
 	LUABIND_API void xr_object_counts(void (*row)(const char* name, unsigned made, unsigned collected, void* ud), void* ud);
 
+	// neXt-Ray: the script objects of a class set xr_set_cached() made once per C++ object (pointer_converter): kept in
+	// the registry by pointer and pushed again, until the object's destructor calls xr_pointer_cache_forget (any thread;
+	// the entry goes at the next push). Scripts see the same object for the same C++ object, no userdata per push
+	LUABIND_API bool xr_pointer_cache_push(lua_State* L, void* ptr, const class_rep* crep);
+	LUABIND_API void xr_pointer_cache_store(lua_State* L, void* ptr);
+	LUABIND_API void xr_pointer_cache_forget(void* ptr);
+
 	// this class is allocated inside lua for each pointer.
 	// it contains the actual c++ object-pointer.
 	// it also tells if it is const or not.

@@ -492,13 +492,26 @@ void CSheduler::ProcessStep()
 	psShedulerTarget -= psShedulerReaction;
 }
 
+// A long one to the log (stat_frame_pacing)
+void CSheduler::internal_Registration_timed()
+{
+	const u64 t0 = g_bEnableStatGather ? CPU::QPC() : 0;
+	internal_Registration();
+	if (t0)
+	{
+		const double ms = double(CPU::QPC() - t0) * 1000.0 / double(CPU::qpc_freq);
+		if (ms > 20.0)
+			Msg("* [Scheduler] %.1f ms: registration", ms);
+	}
+}
+
 void CSheduler::UpdateInit()
 {
 	PROF_EVENT();
 	R_ASSERT(Device.Statistic);
 	// Initialize
 	Device.Statistic->Sheduler.Begin();
-	internal_Registration();
+	internal_Registration_timed();
 }
 
 void CSheduler::UpdateRT()
@@ -523,7 +536,14 @@ void CSheduler::UpdateRT()
 		VERIFY(T.Object->dbg_startframe != Device.dwFrame);
 		T.Object->dbg_startframe = Device.dwFrame;
 #endif
+		const u64 t0 = g_bEnableStatGather ? CPU::QPC() : 0;
 		T.Object->shedule_Update(Elapsed);
+		if (t0)
+		{
+			const double ms = double(CPU::QPC() - t0) * 1000.0 / double(CPU::qpc_freq);
+			if (ms > 20.0)
+				Msg("* [Scheduler] %.1f ms: %s (realtime)", ms, T.scheduled_name.c_str());
+		}
 		T.dwTimeOfLastExecute = dwTime;
 	}
 	m_processing_nowRT = false;
@@ -551,7 +571,7 @@ void CSheduler::UpdateFinalize()
 	Device.Statistic->fShedulerLoad = psShedulerCurrent;
 
 	// Finalize
-	internal_Registration();
+	internal_Registration_timed();
 	Device.Statistic->Sheduler.End();
 }
 

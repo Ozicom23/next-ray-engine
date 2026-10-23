@@ -69,6 +69,9 @@ CScriptGameObject::CScriptGameObject(CGameObject* game_object) :
 
 CScriptGameObject::~CScriptGameObject()
 {
+	// Its script object (one per object, script_register) no longer pushed
+	luabind::detail::xr_pointer_cache_forget(this);
+
 	if (!m_door)
 		return;
 
