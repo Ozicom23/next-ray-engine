@@ -32,7 +32,8 @@ highlights are in the [README](../README.md).
   Shaders 23) also writes the scene's brightness before its tonemap, and Present raises the scene's pixels above
   `r4_hdr_knee` (SDR brightness, 0.5) toward the peak by it, the pixel's graded colour kept (`r4_hdr_highlights` 0..1,
   `r4_hdr_expand` unused). Below the knee the image is GAMMA's SDR one; the UI stays at paper white (pixels that differ
-  from the frame before the UI are left as they are). The post-process buffers are 16-bit floats in this mode.
+  from the frame before the UI are left as they are). The scene's brightness comes from the 8-bit image (16-bit float
+  post-process buffers darken GAMMA's image), so it steps near white.
 - Variable rate shading for sun and lamp lighting where the image is flat (`r4_vrs`, on, tier 2 GPUs; `r4_vrs_debug`).
 - Shaders a level uses compiled ahead on worker threads after a settings change (`r4_shader_precompile`).
 
