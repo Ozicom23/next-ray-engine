@@ -194,21 +194,23 @@ void CActor::g_cl_CheckControls(u32 mstate_wf, Fvector& vControlAccel, float& Ju
 	if (mstate_wf & mcBack) vControlAccel.z += -1;
 	if (mstate_wf & mcLStrafe) mstate_wf & mcSprint ? vControlAccel.x += -0.5 : vControlAccel.x += -1;
 	if (mstate_wf & mcRStrafe) mstate_wf & mcSprint ? vControlAccel.x += 0.5 : vControlAccel.x += 1;
-	// Gamepad: the stick's direction instead of the keys' eight; pushed less than gp_walk_threshold walks, slower the
-	// less it is pushed (down to a third of the walk)
+	// Gamepad: the stick's direction instead of the keys' eight; its push sets the speed (below). The walk's state once
+	// pushed less than gp_walk_threshold for 0.15 s: starting and stopping pass through it in a few frames, and its
+	// animations and camera bob came and went
 	Fvector2 pad_move;
-	float pad_speed = 1.f;
+	float pad_speed = 1.f, pad_push = -1.f;
+	m_pad_walks = 0.f;
 	if ((mstate_wf & mcAnyMove) && gamepad_move(pad_move))
 	{
-		const float push = pad_move.magnitude();
-		if (push < g_gp_walk_threshold)
-		{
+		pad_push = pad_move.magnitude();
+		m_pad_walk_time = pad_push < g_gp_walk_threshold ? m_pad_walk_time + dt : 0.f;
+		if (pad_push < g_gp_walk_threshold && (m_pad_walk_time >= 0.15f || (mstate_real & mcAccel)))
 			mstate_wf |= mcAccel;
-			pad_speed = clampr(push / _max(g_gp_walk_threshold, EPS), 0.35f, 1.f);
-		}
 		vControlAccel.x = pad_move.x * ((mstate_wf & mcSprint) ? 0.5f : 1.f);
 		vControlAccel.z = pad_move.y;
 	}
+	else
+		m_pad_walk_time = 0.f;
 
 	CPHMovementControl::EEnvironment curr_env = character_physics_support()->movement()->Environment();
 	if (curr_env == CPHMovementControl::peOnGround || curr_env == CPHMovementControl::peAtWall)
@@ -303,32 +305,58 @@ void CActor::g_cl_CheckControls(u32 mstate_wf, Fvector& vControlAccel, float& Ju
 			float scale = vControlAccel.magnitude();
 			if (scale > EPS)
 			{
-				scale = m_fWalkAccel / scale;
-				if (bAccelerated && !IsZoomAimingMode())
-					if (mstate_real & mcBack)
-						scale *= m_fRunBackFactor;
-					else
-						scale *= m_fRunFactor;
-				else if (mstate_real & mcBack)
-					scale *= m_fWalkBackFactor;
-
-
-				if (mstate_real & mcCrouch) scale *= m_fCrouchFactor;
-				if (mstate_real & mcClimb) scale *= m_fClimbFactor;
-				if (mstate_real & mcSprint) scale *= m_fSprintFactor;
-
-				if (mstate_real & (mcLStrafe | mcRStrafe) && !(mstate_real & mcCrouch))
+				// The speed of the walk (accelerated FALSE) or the run in this direction and posture
+				const float base = m_fWalkAccel / scale;
+				auto state_scale = [&](BOOL accelerated)
 				{
+					float s = base;
+					if (accelerated && !IsZoomAimingMode())
+						if (mstate_real & mcBack)
+							s *= m_fRunBackFactor;
+						else
+							s *= m_fRunFactor;
+					else if (mstate_real & mcBack)
+						s *= m_fWalkBackFactor;
+
+
+					if (mstate_real & mcCrouch) s *= m_fCrouchFactor;
+					if (mstate_real & mcClimb) s *= m_fClimbFactor;
+					if (mstate_real & mcSprint) s *= m_fSprintFactor;
+
+					if (mstate_real & (mcLStrafe | mcRStrafe) && !(mstate_real & mcCrouch))
+					{
+						if (mstate_real & mcSprint)
+							s *= m_fSprint_StrafeFactor;
+						else if (accelerated)
+							s *= m_fRun_StrafeFactor;
+						else
+							s *= m_fWalk_StrafeFactor;
+					}
+					return s;
+				};
+				scale = state_scale(bAccelerated);
+
+				// Gamepad: pushed less than gp_walk_threshold a walk, slower the less it is pushed (down to 0.35 of
+				// it), past it from the walk's speed up to the run's (it went from the walk's to the run's at once);
+				// the same speed for a push in either state. Sprinting at the sprint's
+				if (pad_push >= 0.f)
+				{
+					const float walk = state_scale(FALSE), run = bAccelerated ? scale : walk;
+					const float threshold = _max(g_gp_walk_threshold, EPS);
+					float want = run;
+					if (pad_push < threshold)
+						want = walk * clampr(pad_push / threshold, 0.35f, 1.f);
+					else if (threshold < 1.f)
+						want = walk + (run - walk) * _min((pad_push - threshold) / (1.f - threshold), 1.f);
 					if (mstate_real & mcSprint)
-						scale *= m_fSprint_StrafeFactor;
-					else if (bAccelerated)
-						scale *= m_fRun_StrafeFactor;
-					else
-						scale *= m_fWalk_StrafeFactor;
+						want = scale;
+					pad_speed = want / scale;
+					m_pad_walks = want / walk;
+					m_pad_run_walks = run / walk;
 				}
 
 				vControlAccel.mul(scale * pad_speed);
-				cam_eff_factor = scale;
+				cam_eff_factor = scale * pad_speed;
 			} //scale>EPS
 		} //(mstate_real&mcAnyMove)
 	} //peOnGround || peAtWall
@@ -619,6 +647,20 @@ bool isActorAccelerated(u32 mstate, bool ZoomMode)
 	if (mstate & mcLookout || ZoomMode)
 		return false;
 	return res;
+}
+
+float CActor::PadMoveAnimRate() const
+{
+	if (m_pad_walks <= 0.f)
+		return 1.f;
+	// The walk's down to half its rate at the slowest walk; the run's (anm_idle_moving a third faster than the walk's)
+	// from the walk's rate at the walk's speed to its own
+	const float slow = 0.5f + 0.5f * _min(m_pad_walks, 1.f);
+	if (m_pad_run_walks <= 1.f + EPS)
+		return slow;
+	if (m_pad_walks < 1.f)
+		return 0.75f * slow;
+	return 0.75f + 0.25f * _min((m_pad_walks - 1.f) / (m_pad_run_walks - 1.f), 1.f);
 }
 
 bool CActor::CanAccelerate()

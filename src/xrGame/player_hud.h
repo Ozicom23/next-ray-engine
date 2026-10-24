@@ -311,6 +311,12 @@ struct attachable_hud_item
 
 	player_hud_motion_container* m_hand_motions;
 
+	// A walk or run cycle playing (anm_idle_moving...): the hands' and the item's motions and their speed, set to the
+	// pace of the gamepad stick's speed each frame (0 none)
+	MotionID m_moving_mid, m_moving_mid2;
+	float m_moving_speed = 0.f;
+	void update_moving_speed(float rate);
+
 	attachable_hud_item(player_hud* pparent) : m_parent(pparent), m_upd_firedeps_frame(u32(-1)), m_parent_hud_item(nullptr),
 		m_model(nullptr), m_attach_place_idx(0) {
 	}

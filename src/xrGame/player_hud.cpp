@@ -625,6 +625,30 @@ player_hud_motion* attachable_hud_item::find_motion(const shared_str& anm_name)
 	return anm;
 }
 
+// The cycles of a motion playing on a model at another speed
+static void set_cycle_speed(IKinematicsAnimated* ka, const MotionID& mid, float speed)
+{
+	if (!ka || !mid.valid())
+		return;
+	for (u16 part = 0, parts = ka->partitions().count(); part < parts; ++part)
+		for (u32 i = 0, n = ka->LL_PartBlendsCount(part); i < n; ++i)
+		{
+			CBlend* B = ka->LL_PartBlend(part, i);
+			if (B && B->motionID == mid && B->blend_state() != CBlend::eFalloff)
+				B->speed = speed;
+		}
+}
+
+void attachable_hud_item::update_moving_speed(float rate)
+{
+	if (m_moving_speed <= 0.f)
+		return;
+	const float speed = m_moving_speed * rate;
+	set_cycle_speed(m_parent->m_model, m_moving_mid, speed);
+	set_cycle_speed(m_parent->m_model_2, m_moving_mid, speed);
+	set_cycle_speed(m_model ? m_model->dcast_PKinematicsAnimated() : nullptr, m_moving_mid2, speed);
+}
+
 u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, const CMotionDef*& md, u8& rnd_idx,
 	float speed, bool bMixIn2)
 {
@@ -638,6 +662,10 @@ u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, co
 	if (m_attach_place_idx != SCOPE_ATTACH_IDX) {
 		ret = g_player_hud->anim_play(m_attach_place_idx, M.mid, bMixIn, md, speed);
 	}
+
+	m_moving_speed = strstr(anm_name_b.c_str(), "idle_moving") ? speed : 0.f;
+	m_moving_mid = M.mid;
+	m_moving_mid2 = MotionID();
 
 	if (m_model->dcast_PKinematicsAnimated())
 	{
@@ -669,6 +697,7 @@ u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, co
 		u16 pc = ka->partitions().count();
 		for (u16 pid = 0; pid < pc; ++pid)
 			CBlend* B = ka->PlayCycle(pid, M2, (!!bMixIn && bMixIn2), 0, 0, 0, speed);
+		m_moving_mid2 = M2;
 
 		m_model->CalculateBones_Invalidate();
 	}
@@ -1279,6 +1308,12 @@ void player_hud::update(const Fmatrix& cam_trans)
 	need_blend[0] = ((script_anim_part == 0 || script_anim_part == 2) || (m_attached_items[0] && m_attached_items[0]->m_parent_hud_item->NeedBlendAnm()));
 	need_blend[1] = ((script_anim_part == 1 || script_anim_part == 2) || (m_attached_items[1] && m_attached_items[1]->m_parent_hud_item->NeedBlendAnm()));
 
+	// Gamepad: the walk's and run's layers and animations at the pace of the stick's speed (1 with keys)
+	const float move_rate = Actor() ? Actor()->PadMoveAnimRate() : 1.f;
+	for (u8 i = 0; i < 2; ++i)
+		if (m_attached_items[i])
+			m_attached_items[i]->update_moving_speed(move_rate);
+
 	for (movement_layer* anm : m_movement_layers)
 	{
 		if (!anm || !anm->anm || (!anm->active && anm->blend_amount[0] == 0.f && anm->blend_amount[1] == 0.f))
@@ -1321,7 +1356,9 @@ void player_hud::update(const Fmatrix& cam_trans)
 			continue;
 		}
 
-		anm->anm->Update(Device.fTimeDelta);
+		const bool moving = anm != m_movement_layers[eIdle] && anm != m_movement_layers[eAimIdle] &&
+			anm != m_movement_layers[eSprint];
+		anm->anm->Update(Device.fTimeDelta * (moving ? move_rate : 1.f));
 
 		if (anm->blend_amount[0] == anm->blend_amount[1])
 		{

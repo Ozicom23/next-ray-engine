@@ -16,6 +16,10 @@ class CEffectorBobbing : public CEffectorCam
 	float fReminderFactor;
 	bool is_limping;
 	bool m_bZoomMode;
+	float m_fPadWalks; // the gamepad's speed in walks (CActor::m_pad_walks), 0 with keys
+	float m_fPadRunWalks;
+	float fPhase; // the swing's, advanced by the rate
+	float fCurAmplitude, fCurSpeed; // eased toward the state's
 
 	float m_fAmplitudeRun;
 	float m_fAmplitudeWalk;
@@ -29,7 +33,7 @@ public:
 	CEffectorBobbing();
 	virtual ~CEffectorBobbing();
 	virtual BOOL ProcessCam(SCamEffectorInfo& info);
-	void SetState(u32 st, bool limping, bool ZoomMode);
+	void SetState(u32 st, bool limping, bool ZoomMode, float pad_walks = 0.f, float pad_run_walks = 1.f);
 };
 
 #endif //_EFFECTOR_BOBBING_H

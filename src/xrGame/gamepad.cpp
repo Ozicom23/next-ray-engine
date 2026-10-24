@@ -325,14 +325,25 @@ void update_game(const gamepad_state& pad, float dt)
 		}
 	}
 
-	// Left stick: its directions' keys just past the dead zone (diagonals press two), the vector for the actor (its
-	// direction and how far it's pushed set the speed)
+	// Left stick: its directions' keys just past the dead zone by the eight sectors of its direction (a key on when its
+	// axis takes over 42% of the push, off under 34%; diagonals press two), kept while the stick is near the centre
+	// (a key coming and going there, as the stick is pushed or springs back, started the actor's lurch of a new
+	// direction just before moving and before stopping); the vector for the actor (its direction and how far it's
+	// pushed set the speed)
 	s_move = s_rebound_left.filter(dead_zone(pad.lx, pad.ly, g_gp_deadzone_left), dt);
-	const float on = 0.08f;
-	set_stick_key(0, s_move.y > on);
-	set_stick_key(1, s_move.y < -on);
-	set_stick_key(2, s_move.x < -on);
-	set_stick_key(3, s_move.x > on);
+	const float on = 0.08f, push = s_move.magnitude();
+	const bool any_key = s_stick_keys[0] || s_stick_keys[1] || s_stick_keys[2] || s_stick_keys[3];
+	if (push <= on)
+	{
+		for (int i = 0; i < 4; ++i)
+			set_stick_key(i, false);
+	}
+	else if (push >= 0.25f || !any_key)
+	{
+		const float axis[4] = {s_move.y / push, -s_move.y / push, -s_move.x / push, s_move.x / push};
+		for (int i = 0; i < 4; ++i)
+			set_stick_key(i, axis[i] > (s_stick_keys[i] ? 0.34f : 0.42f));
+	}
 	if (s_sprint_key && s_move.y < 0.3f)
 	{
 		pInput->inject_key(s_sprint_key, false);

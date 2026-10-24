@@ -25,6 +25,11 @@ CEffectorBobbing::CEffectorBobbing() : CEffectorCam(eCEBobbing, 10000.f)
 	fTime = 0;
 	fReminderFactor = 0;
 	is_limping = false;
+	m_fPadWalks = 0.f;
+	m_fPadRunWalks = 1.f;
+	fPhase = 0.f;
+	fCurAmplitude = -1.f;
+	fCurSpeed = 0.f;
 
 	m_fAmplitudeRun = pSettings->r_float(BOBBING_SECT, "run_amplitude");
 	m_fAmplitudeWalk = pSettings->r_float(BOBBING_SECT, "walk_amplitude");
@@ -39,11 +44,13 @@ CEffectorBobbing::~CEffectorBobbing()
 {
 }
 
-void CEffectorBobbing::SetState(u32 mstate, bool limping, bool ZoomMode)
+void CEffectorBobbing::SetState(u32 mstate, bool limping, bool ZoomMode, float pad_walks, float pad_run_walks)
 {
 	dwMState = mstate;
 	is_limping = limping;
 	m_bZoomMode = ZoomMode;
+	m_fPadWalks = pad_walks;
+	m_fPadRunWalks = pad_run_walks;
 }
 
 extern float g_head_bob_factor;
@@ -73,23 +80,57 @@ BOOL CEffectorBobbing::ProcessCam(SCamEffectorInfo& info)
 		Fvector dangle;
 		float k = ((dwMState & ACTOR_DEFS::mcCrouch) ? CROUCH_FACTOR : 1.f);
 
-		float A, ST;
+		float A, S;
 
-		if (isActorAccelerated(dwMState, m_bZoomMode))
+		const bool accelerated = isActorAccelerated(dwMState, m_bZoomMode);
+		if (m_fPadWalks > 0.f && (accelerated || !is_limping))
 		{
-			A = m_fAmplitudeRun * k;
-			ST = m_fSpeedRun * fTime * k;
+			// Gamepad: by the stick's speed, a slower walk's bob smaller and slower, from the walk's to the run's
+			// between their speeds
+			if (m_fPadWalks <= 1.f || m_fPadRunWalks <= 1.f + EPS)
+			{
+				const float v = _min(m_fPadWalks, 1.f);
+				A = m_fAmplitudeWalk * (0.4f + 0.6f * v);
+				S = m_fSpeedWalk * (0.6f + 0.4f * v);
+			}
+			else
+			{
+				const float t = _min((m_fPadWalks - 1.f) / (m_fPadRunWalks - 1.f), 1.f);
+				A = m_fAmplitudeWalk + (m_fAmplitudeRun - m_fAmplitudeWalk) * t;
+				S = m_fSpeedWalk + (m_fSpeedRun - m_fSpeedWalk) * t;
+			}
+		}
+		else if (accelerated)
+		{
+			A = m_fAmplitudeRun;
+			S = m_fSpeedRun;
 		}
 		else if (is_limping)
 		{
-			A = m_fAmplitudeLimp * k;
-			ST = m_fSpeedLimp * fTime * k;
+			A = m_fAmplitudeLimp;
+			S = m_fSpeedLimp;
 		}
 		else
 		{
-			A = m_fAmplitudeWalk * k;
-			ST = m_fSpeedWalk * fTime * k;
+			A = m_fAmplitudeWalk;
+			S = m_fSpeedWalk;
 		}
+		A *= k;
+		S *= k;
+
+		// Eased toward the state's in about a quarter of a second, the swing's phase advanced by the rate (it was the
+		// rate times the time since the start: a switch between walk and run jumped to another point of the swing)
+		if (fCurAmplitude < 0.f)
+		{
+			fCurAmplitude = A;
+			fCurSpeed = S;
+		}
+		const float ease = _min(1.f, 8.f * Device.fTimeDelta);
+		fCurAmplitude += (A - fCurAmplitude) * ease;
+		fCurSpeed += (S - fCurSpeed) * ease;
+		fPhase = fmodf(fPhase + fCurSpeed * Device.fTimeDelta, PI_MUL_2);
+		A = fCurAmplitude;
+		const float ST = fPhase;
 
 		float _sinA = _abs(_sin(ST) * A) * fReminderFactor * g_head_bob_factor;
 		float _cosA = _cos(ST) * A * fReminderFactor * g_head_bob_factor;

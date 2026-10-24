@@ -1938,7 +1938,7 @@ void CActor::shedule_Update(u32 DT)
 		pCamBobbing = xr_new<CEffectorBobbing>();
 		Cameras().AddCamEffector(pCamBobbing);
 	}
-	pCamBobbing->SetState(mstate_real, conditions().IsLimping(), IsZoomAimingMode());
+	pCamBobbing->SetState(mstate_real, conditions().IsLimping(), IsZoomAimingMode(), m_pad_walks, m_pad_run_walks);
 
 	// Звук тяжелого дыхания при усталости и хромании (Heavy breathing sound when tired or limping)
 	if (this == Level().CurrentControlEntity() && !g_dedicated_server)

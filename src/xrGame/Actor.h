@@ -495,6 +495,14 @@ public:
 	// demonized: lookout modifier
 	float m_fLookoutFactor = 1;
 
+	// Gamepad: the speed the stick sets, in walks of the current posture and direction (0 with keys), the run's speed
+	// in them (1 in the walk's state), how long the stick has been pushed less than a run
+	float m_pad_walks = 0.f;
+	float m_pad_run_walks = 1.f;
+	float m_pad_walk_time = 0.f;
+	// The rate the walk and run animations play at for the stick's speed, of their own (1 with keys)
+	float PadMoveAnimRate() const;
+
 public:
 	Fvector GetMovementSpeed() { return NET_SavedAccel; };
 	//////////////////////////////////////////////////////////////////////////
