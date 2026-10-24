@@ -2198,11 +2198,13 @@ HRESULT Device::AttachSwapChain(IDXGISwapChain1* swap_chain)
 // Rec.2020, PQ. Highlights toward the peak (hdr_params[1] nits):
 // - scene highlights (hdr_params[6], a scene map this frame): the scene's brightness s in blend_soft's terms (GAMMA's
 //   combine_2 shows s / (1 + s) before its grading). Up to the knee (hdr_params[5]) the HDR curve is that one, above
-//   it rises with the same slope toward the peak's ratio; the pixel's colour, as graded, scaled by the curves' ratio,
-//   by hdr_params[4] (0: none). Only where the frame is as it was before the UI (the UI stays at SDR white)
+//   it blends into s / (1 + s / peak's ratio), which reaches the peak where SDR reaches white; the pixel's colour, as
+//   graded, scaled by the curves' ratio, by hdr_params[4] (0: none). The sky (its textures hold nothing above white)
+//   at hdr_params[7] times its SDR brightness, a dark sky left as it is. Only where the frame is as it was before the
+//   UI (the UI stays at SDR white)
 // - otherwise the frame's own brightness above mid-grey raised by hdr_params[2] (0: none, 1: SDR white at the peak)
-// hdr_params[3], the right half against the left as it is: 1 the raise, 2 red where the raise applies, 3 everything at
-// the peak's ratio (does brighter output show at all)
+// hdr_params[3], the right half against the left as it is: 1 the raise, 2 red where highlights are raised (blue: the
+// sky), 3 everything at the peak's ratio (does brighter output show at all)
 bool Device::Impl::CreateHdrPipeline(ID3D12Device* d3d)
 {
 	if (hdr_pipeline)
@@ -2210,10 +2212,10 @@ bool Device::Impl::CreateHdrPipeline(ID3D12Device* d3d)
 	static const char kShader[] = R"(
 Texture2D<float4> sdr : register(t0);
 Texture2D<float4> pre_ui : register(t1);
-Texture2D<float> scene : register(t2);
+Texture2D<float2> scene : register(t2);
 cbuffer P : register(b0)
 {
-	float paper_white; float peak; float expand; float split; float highlights; float knee; float scene_on; float unused;
+	float paper_white; float peak; float expand; float split; float highlights; float knee; float scene_on; float sky;
 };
 float4 vs(uint id : SV_VertexID) : SV_Position
 {
@@ -2228,10 +2230,8 @@ float3 pq(float3 nits)
 }
 float hdr_curve(float s, float k, float g)
 {
-	const float sk = k / (1.0 - k);
-	if (s <= sk)
-		return s / (1.0 + s);
-	return k + (g - k) * (1.0 - exp(-(1.0 - k) * (1.0 - k) * (s - sk) / (g - k)));
+	const float y = s / (1.0 + s);
+	return lerp(y, s / (1.0 + s / g), smoothstep(k, 1.0, y));
 }
 float4 ps(float4 pos : SV_Position) : SV_Target
 {
@@ -2244,24 +2244,30 @@ float4 ps(float4 pos : SV_Position) : SV_Target
 		return float4(pq(float3(1, 1, 1) * paper_white), 1);
 	const float gain = max(peak / paper_white, 1.0);
 	const float lum = dot(c, float3(0.2126, 0.7152, 0.0722));
-	float raise = 1.0;
+	float raise = 1.0, raise_sky = 1.0;
 	if (scene_on > 0.5)
 	{
 		const float3 d = abs(c0 - pre_ui.Load(int3(pos.xy, 0)).rgb);
 		if (max(d.r, max(d.g, d.b)) < 0.5 / 255.0 && gain > 1.0)
 		{
-			// The least of the four scene texels around: no raise spilling onto darker pixels next to bright ones
 			float sw, sh;
 			scene.GetDimensions(sw, sh);
-			const int2 i = int2(floor(pos.xy * float2(sw / w, sh / h) - 0.5));
+			const float2 p = pos.xy * float2(sw / w, sh / h) - 0.5;
+			const int2 i = int2(floor(p));
+			const float2 f = p - i;
 			const int2 m = int2(sw, sh) - 1;
-			const float s = max(0.0, min(min(scene.Load(int3(clamp(i, 0, m), 0)), scene.Load(int3(clamp(i + int2(1, 0), 0, m), 0))),
-				min(scene.Load(int3(clamp(i + int2(0, 1), 0, m), 0)), scene.Load(int3(clamp(i + 1, 0, m), 0)))));
+			const float2 t00 = scene.Load(int3(clamp(i, 0, m), 0)), t10 = scene.Load(int3(clamp(i + int2(1, 0), 0, m), 0));
+			const float2 t01 = scene.Load(int3(clamp(i + int2(0, 1), 0, m), 0)), t11 = scene.Load(int3(clamp(i + 1, 0, m), 0));
+			// The brightness: the least of the four texels around (no raise spilling onto darker pixels next to bright
+			// ones); the sky: blended between them (its edge as smooth as the image's)
+			const float s = max(0.0, min(min(t00.x, t10.x), min(t01.x, t11.x)));
+			const float sky_mask = lerp(lerp(t00.y, t10.y, f.x), lerp(t01.y, t11.y, f.x), f.y);
 			const float y = s / (1.0 + s);
 			if (y > knee)
 				raise = hdr_curve(s, knee, gain) / y;
 			// The pixel as graded dark (a lens or overlay drawn later over a bright scene): left as it is
 			raise = lerp(1.0, raise, highlights * smoothstep(0.03, 0.15, lum));
+			raise_sky = lerp(1.0, min(sky, gain), sky_mask * smoothstep(0.02, 0.2, lum));
 		}
 	}
 	else
@@ -2275,9 +2281,9 @@ float4 ps(float4 pos : SV_Position) : SV_Target
 		if (split > 2.5)
 			c *= gain;
 		else if (split > 1.5)
-			c = lerp(c, float3(1, 0, 0), saturate((raise - 1.0) * 4.0));
+			c = lerp(lerp(c, float3(0, 0, 1), saturate((raise_sky - 1.0) * 2.0)), float3(1, 0, 0), saturate((raise - 1.0) * 4.0));
 		else
-			c *= raise;
+			c *= max(raise, raise_sky);
 	}
 	c = mul(float3x3(0.6274040, 0.3292820, 0.0433136, 0.0690970, 0.9195400, 0.0113612, 0.0163916, 0.0880132, 0.8955950), c);
 	return float4(pq(c * paper_white), 1);
@@ -2357,7 +2363,7 @@ void Device::SetHdrOutput(bool on) { m_impl->hdr_output = on; }
 bool Device::HdrOutput() const { return m_impl->hdr_output && m_impl->sdr_target; }
 DXGI_FORMAT Device::SwapChainFormat() const { return m_impl->swap_chain_format; }
 
-void Device::SetHdrParams(float paper_white, float peak, float expand, int split, float highlights, float knee)
+void Device::SetHdrParams(float paper_white, float peak, float expand, int split, float highlights, float knee, float sky)
 {
 	float* p = m_impl->hdr_params;
 	p[0] = paper_white;
@@ -2366,6 +2372,7 @@ void Device::SetHdrParams(float paper_white, float peak, float expand, int split
 	p[3] = float(split);
 	p[4] = highlights;
 	p[5] = knee;
+	p[7] = sky;
 }
 
 Texture2D* Device::HdrPreUiTarget() { return m_impl->hdr_output ? m_impl->hdr_preui : nullptr; }

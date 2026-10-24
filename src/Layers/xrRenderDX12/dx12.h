@@ -430,7 +430,7 @@ public:
 	// highlights raised toward peak nits by expand, 0: none) into the swap chain's buffer. Off when it can't be set up
 	void SetHdrOutput(bool on);
 	bool HdrOutput() const;
-	void SetHdrParams(float paper_white, float peak, float expand, int split, float highlights, float knee);
+	void SetHdrParams(float paper_white, float peak, float expand, int split, float highlights, float knee, float sky);
 	// Scene highlights (Context::SetHdrScene): the frame copied here before the UI is drawn, Present raises only the
 	// pixels the UI left as they were. Null without HDR output
 	Texture2D* HdrPreUiTarget();
@@ -601,7 +601,7 @@ public:
 	// HDR output: the SDR back buffer converted into dst (R10G10B10A2, a render target), as Present does it into the
 	// swap chain's buffer (frame generation's image without the UI)
 	void ConvertOutput(Resource* dst);
-	// HDR output, scene highlights: this frame's scene brightness (R16_FLOAT, the scene's resolution) for the
+	// HDR output, scene highlights: this frame's scene brightness and sky (R16G16_FLOAT, the scene's resolution) for the
 	// conversions that follow, the frame copied into Device::HdrPreUiTarget before. Forgotten at Present: frames
 	// without a scene (menus) are converted as SDR
 	void SetHdrScene(Resource* scene);

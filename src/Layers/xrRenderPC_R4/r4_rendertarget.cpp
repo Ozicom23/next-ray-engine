@@ -588,9 +588,9 @@ CRenderTarget::CRenderTarget()
 
 		rt_fakescope.create(r2_RT_scopert, w, h, D3DFMT_A8R8G8B8, 1); //crookr fakescope
 
-		// HDR output's scene highlights: the scene's brightness, combine_2's second target, read at Present
+		// HDR output's scene highlights: the scene's brightness and sky, combine_2's second target, read at Present
 		if (RImplementation.o.nextray_hdr_scene)
-			rt_nextray_hdr_scene.create("$user$nextray_hdr_scene", w, h, D3DFMT_R16F, 1);
+			rt_nextray_hdr_scene.create("$user$nextray_hdr_scene", w, h, D3DFMT_G16R16F, 1);
 
 		//--DSR-- HeatVision_start
 		rt_Heat.create(r2_RT_heat, w, h, D3DFMT_A8R8G8B8, SampleCount);

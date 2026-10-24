@@ -29,10 +29,12 @@ highlights are in the [README](../README.md).
   raises what is brighter than mid-grey toward the display's peak (SDR white at the peak at 1); `r4_hdr_debug_split 1`
   shows the left half without it (2: red where it applies, 3: the right half all at the peak's ratio). Steam Deck OLED: HDR on in Display settings and `DXVK_HDR=1` in the launch options.
   Scene highlights (`r4_hdr_scene 1`, default; DX12, vid_restart): GAMMA's combine_2 (the shader patch for Screen Space
-  Shaders 23) also writes the scene's brightness before its tonemap, and Present raises the scene's pixels above
-  `r4_hdr_knee` (SDR brightness, 0.5) toward the peak by it, the pixel's graded colour kept (`r4_hdr_highlights` 0..1,
-  `r4_hdr_expand` unused). Below the knee the image is GAMMA's SDR one; the UI stays at paper white (pixels that differ
-  from the frame before the UI are left as they are). The scene's brightness comes from the 8-bit image (16-bit float
+  Shaders 23) also writes the scene's brightness before its tonemap and which pixels are sky. Present raises the
+  scene's pixels above `r4_hdr_knee` (SDR brightness, 0.5) toward the peak by it, lamps, fire and flashes reaching it
+  where SDR reaches white, the pixel's graded colour kept (`r4_hdr_highlights` 0..1, `r4_hdr_expand` unused); the sky,
+  whose textures hold nothing above white, at `r4_hdr_sky` (2) times its SDR brightness, a night sky left as it is.
+  Below the knee the image is GAMMA's SDR one; the UI stays at paper white (pixels that differ from the frame before the
+  UI are left as they are). `r4_hdr_debug_split 2`: red where highlights are raised, blue the sky. The scene's brightness comes from the 8-bit image (16-bit float
   post-process buffers darken GAMMA's image), so it steps near white.
 - Variable rate shading for sun and lamp lighting where the image is flat (`r4_vrs`, on, tier 2 GPUs; `r4_vrs_debug`).
 - Shaders a level uses compiled ahead on worker threads after a settings change (`r4_shader_precompile`).

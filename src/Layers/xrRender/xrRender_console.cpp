@@ -327,6 +327,7 @@ int   ps_r4_hdr_debug_split = 0;      // the right half against the left: 1 the 
 int   ps_r4_hdr_scene       = 1;
 float ps_r4_hdr_highlights  = 1.f;    // 0: the SDR image, 1: the highlights at the HDR curve
 float ps_r4_hdr_knee        = 0.5f;   // the SDR brightness (linear, 0..1) up to which the image stays as in SDR
+float ps_r4_hdr_sky         = 2.f;    // the daylight sky's brightness, times SDR white (1: as in SDR)
 
 // Temporal upscaling: DLSS / FSR / XeSS (r4-only; XeSS in the DX12 renderer)
 u32   ps_r4_upscaler              = 0;      // r4-only, applied with vid_restart
@@ -1679,6 +1680,7 @@ void xrRender_initconsole()
 	CMD4(CCC_Integer, "r4_hdr_scene", &ps_r4_hdr_scene, 0, 1);
 	CMD4(CCC_Float, "r4_hdr_highlights", &ps_r4_hdr_highlights, 0.f, 1.f);
 	CMD4(CCC_Float, "r4_hdr_knee", &ps_r4_hdr_knee, 0.2f, 0.9f);
+	CMD4(CCC_Float, "r4_hdr_sky", &ps_r4_hdr_sky, 1.f, 4.f);
 
 	CMD3(CCC_Token,   "r4_upscaler",              &ps_r4_upscaler,                   upscaler_token);
 	CMD3(CCC_Token,   "r4_upscaler_quality",      &ps_r4_upscaler_quality,           upscaler_quality_token);

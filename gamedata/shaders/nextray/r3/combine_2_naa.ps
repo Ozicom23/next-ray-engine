@@ -1,7 +1,8 @@
 // neXt-Ray shader patch of Screen Space Shaders 23's r3\combine_2_naa.ps: CRC32 f03b8786
 // neXt-Ray: debanding only for sky pixels, SampleLevel taps. Bit 0x040 of r4_shader_patches (NEXTRAY_PATCHES) picks the
 // changed code, kept next to the original; engines without the define use it. With HDR output's scene highlights
-// (NEXTRAY_HDR_SCENE) the scene's brightness as blend_soft sums it also goes to a second target; the color unchanged
+// (NEXTRAY_HDR_SCENE) the scene's brightness as blend_soft sums it and whether the pixel is sky also go to a second
+// target; the color unchanged
 #ifndef NEXTRAY_PATCHES
 #define NEXTRAY_PATCHES 0xFFF
 #endif
@@ -58,7 +59,7 @@ struct c2_out
 {
 	float4	Color : SV_Target;
 #ifdef NEXTRAY_HDR_SCENE
-	float	Scene : SV_Target1;
+	float2	Scene : SV_Target1;	// brightness, sky
 #endif
 #ifdef USE_MSAA
 	float	Depth : SV_Depth;
@@ -143,7 +144,7 @@ c2_out main( v2p_aa_AA I )
 #endif
 #endif
 #ifdef NEXTRAY_HDR_SCENE
-	res.Scene = dot(nextray_scene, float3(0.2126, 0.7152, 0.0722));
+	res.Scene = float2(dot(nextray_scene, float3(0.2126, 0.7152, 0.0722)), depth <= SKY_EPS);
 #endif
 
 

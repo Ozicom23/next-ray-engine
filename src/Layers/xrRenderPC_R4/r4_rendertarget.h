@@ -151,7 +151,7 @@ public:
 	ref_rt rt_sunshafts_0; // ss0
 	ref_rt rt_sunshafts_1; // ss1
 	ref_rt rt_Generic_0; // 32bit		(r,g,b,a)				// post-process, intermidiate results, etc.
-	ref_rt rt_nextray_hdr_scene; // R16F: the scene's brightness from combine_2, HDR output's scene highlights
+	ref_rt rt_nextray_hdr_scene; // R16G16F: the scene's brightness and sky from combine_2, HDR output's scene highlights
 	ref_rt rt_Generic_1; // 32bit		(r,g,b,a)				// post-process, intermidiate results, etc.
 
 	resptr_core<CRT, resptrcode_crt> rt_Generic_temp;
