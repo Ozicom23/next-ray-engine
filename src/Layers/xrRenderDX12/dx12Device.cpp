@@ -2250,24 +2250,30 @@ float4 ps(float4 pos : SV_Position) : SV_Target
 		const float3 d = abs(c0 - pre_ui.Load(int3(pos.xy, 0)).rgb);
 		if (max(d.r, max(d.g, d.b)) < 0.5 / 255.0 && gain > 1.0)
 		{
+			// The map is at the scene's resolution and jittered (TAA, upscaler): what is raised is decided from what
+			// is stable, the final pixel. Its brightness: the map's (filtered) but no more than the pixel's own SDR
+			// brightness gives (a dark pixel next to a bright one is not raised, wherever the jitter puts the edge);
+			// the sky: the map's mask over 4x4 texels (a soft edge), on pixels bright enough to be sky
 			float sw, sh;
 			scene.GetDimensions(sw, sh);
 			const float2 p = pos.xy * float2(sw / w, sh / h) - 0.5;
 			const int2 i = int2(floor(p));
 			const float2 f = p - i;
 			const int2 m = int2(sw, sh) - 1;
-			const float2 t00 = scene.Load(int3(clamp(i, 0, m), 0)), t10 = scene.Load(int3(clamp(i + int2(1, 0), 0, m), 0));
-			const float2 t01 = scene.Load(int3(clamp(i + int2(0, 1), 0, m), 0)), t11 = scene.Load(int3(clamp(i + 1, 0, m), 0));
-			// The brightness: the least of the four texels around (no raise spilling onto darker pixels next to bright
-			// ones); the sky: blended between them (its edge as smooth as the image's)
-			const float s = max(0.0, min(min(t00.x, t10.x), min(t01.x, t11.x)));
-			const float sky_mask = lerp(lerp(t00.y, t10.y, f.x), lerp(t01.y, t11.y, f.x), f.y);
+			const float s00 = scene.Load(int3(clamp(i, 0, m), 0)).x, s10 = scene.Load(int3(clamp(i + int2(1, 0), 0, m), 0)).x;
+			const float s01 = scene.Load(int3(clamp(i + int2(0, 1), 0, m), 0)).x, s11 = scene.Load(int3(clamp(i + 1, 0, m), 0)).x;
+			const float s_map = max(0.0, lerp(lerp(s00, s10, f.x), lerp(s01, s11, f.x), f.y));
+			const float s = min(s_map, lum / max(1.0 - lum, 0.001));
+			float sky_mask = 0.0;
+			[unroll] for (int ky = -1; ky <= 2; ++ky)
+				[unroll] for (int kx = -1; kx <= 2; ++kx)
+					sky_mask += scene.Load(int3(clamp(i + int2(kx, ky), 0, m), 0)).y;
+			sky_mask *= 1.0 / 16.0;
 			const float y = s / (1.0 + s);
 			if (y > knee)
 				raise = hdr_curve(s, knee, gain) / y;
-			// The pixel as graded dark (a lens or overlay drawn later over a bright scene): left as it is
-			raise = lerp(1.0, raise, highlights * smoothstep(0.03, 0.15, lum));
-			raise_sky = lerp(1.0, min(sky, gain), sky_mask * smoothstep(0.02, 0.2, lum));
+			raise = lerp(1.0, raise, highlights);
+			raise_sky = lerp(1.0, min(sky, gain), sky_mask * smoothstep(0.1, 0.3, lum));
 		}
 	}
 	else

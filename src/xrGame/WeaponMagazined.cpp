@@ -974,8 +974,16 @@ void CWeaponMagazined::OnAnimationEnd(u32 state)
                 ReloadMagazine();
 
             // demonized: If wpn fire button is held, initiate auto firing when reload is done
-            if (Actor() && H_Parent() == Actor() && is_action_key_held(kWPN_FIRE))
-                m_pendingShot = true;
+            if (Actor() && H_Parent() == Actor())
+            {
+                if (const int held = action_key_held(kWPN_FIRE))
+                {
+                    // Logged: firing on its own after a reload (a key's state left held) shows the key
+                    LPCSTR name = dik_to_keyname(held, false);
+                    Msg("* Reload done, fire held by %s (%d): firing", name ? name : "?", held);
+                    m_pendingShot = true;
+                }
+            }
             SwitchState(eIdle);
         }
 		break; // End of reload animation

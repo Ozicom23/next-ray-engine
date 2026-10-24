@@ -930,19 +930,21 @@ EGameActions gamepad_binding(int gp_key)
 	return s_gamepad_resolved[i] != kNOTBINDED ? s_gamepad_resolved[i] : s_gamepad_bindings[i];
 }
 
-bool is_action_key_held(EGameActions action)
+int action_key_held(EGameActions action)
 {
 	for (int idx = 0; idx < 2; ++idx)
 	{
 		const int dik = get_action_dik(action, idx);
 		if (dik && pInput->iGetAsyncKeyState(dik))
-			return true;
+			return dik;
 	}
 	for (int key = GP_FIRST; key <= GP_LAST; ++key)
 		if (pInput->iGetAsyncKeyState(key) && gamepad_binding(key) == action)
-			return true;
-	return false;
+			return key;
+	return 0;
 }
+
+bool is_action_key_held(EGameActions action) { return action_key_held(action) != 0; }
 
 void gamepad_resolve(int gp_key, EGameActions action)
 {

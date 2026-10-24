@@ -208,6 +208,7 @@ extern bool g_gamepad_prompts;
 extern bool g_gamepad_playstation;
 // A key of the action is down: its keyboard or mouse keys (primary, secondary) or a gamepad key bound to it
 bool is_action_key_held(EGameActions action);
+int action_key_held(EGameActions action); // the key holding it (a keyboard, mouse or gamepad key), 0: none
 void gamepad_resolve(int gp_key, EGameActions action);
 void gamepad_default_layout();
 
