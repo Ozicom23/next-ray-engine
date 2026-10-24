@@ -58,6 +58,11 @@ void CSkeletonX::_Copy(CSkeletonX* B)
 //////////////////////////////////////////////////////////////////////
 void CSkeletonX::_Render(ref_geom& hGeom, u32 vCount, u32 iOffset, u32 pCount)
 {
+	// Parallel bones: the bones may be done but the update callback (foot IK, which also lowers the whole body to the
+	// ground) still to run on the bones task; drawn now, the model dips for a frame. Waited for without its lock: the
+	// callback ray-picks other models and takes theirs
+	while (Parent->UCalc_CallbackHeld.load(std::memory_order_acquire))
+		std::this_thread::yield();
 	xrCriticalSectionGuard guard(&Parent->UCalc_Mutex);
 	PROF_EVENT("CSkeletonX::_Render");
 	Fmatrix p_WV, p_WVP;

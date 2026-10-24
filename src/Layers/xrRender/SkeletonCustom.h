@@ -7,6 +7,7 @@
 #include		"../../Include/xrRender/Kinematics.h"
 #include "../../xrEngine/IRenderable.h"
 #include <optional>
+#include <atomic>
 
 // refs
 class CKinematics;
@@ -144,7 +145,7 @@ protected:
 	u32 UCalc_Time;
 	s32 UCalc_Visibox;
 	bool UCalc_ThisFrame;
-	bool UCalc_CallbackHeld = false; // CalculateBones_HoldCallback: the update callback still to run
+	std::atomic<bool> UCalc_CallbackHeld{false}; // CalculateBones_HoldCallback: the update callback still to run
 
 	Flags64 visimask;
 	Flags64 hidden_bones;
