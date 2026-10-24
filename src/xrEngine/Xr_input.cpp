@@ -853,7 +853,11 @@ void CInput::OnFrame(void)
 	{
 		PROF_EVENT("gamepad");
 		PadUpdate();
-		const float dt = Device.fTimeDelta;
+		// Real time: the game's is 0 while paused (the main menu over a level, where the stick moved the cursor by 0)
+		static u64 last_pad_frame = 0;
+		const u64 now = CPU::QPC();
+		const float dt = last_pad_frame ? _min(float(double(now - last_pad_frame) / double(CPU::qpc_freq)), 0.1f) : 0.f;
+		last_pad_frame = now;
 #ifndef _EDITOR
 		if (Device.dwPrecacheFrame == 0)
 #endif

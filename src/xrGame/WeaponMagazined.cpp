@@ -12,6 +12,7 @@
 #include "ActorEffector.h"
 #include "EffectorZoomInertion.h"
 #include "xr_level_controller.h"
+#include "Actor_Flags.h"
 #include "UIGameCustom.h"
 #include "object_broker.h"
 #include "string_table.h"
@@ -985,6 +986,11 @@ void CWeaponMagazined::OnAnimationEnd(u32 state)
                 }
             }
             SwitchState(eIdle);
+            // Aim held through the reload (aim by holding, AF_AIM_TOGGLE off): aiming again, its press came while
+            // reloading and was ignored
+            if (Actor() && H_Parent() == Actor() && !psActorFlags.test(AF_AIM_TOGGLE) && !IsZoomed() &&
+                is_action_key_held(kWPN_ZOOM))
+                Action(kWPN_ZOOM, CMD_START);
         }
 		break; // End of reload animation
 	case eHiding: SwitchState(eHidden);
