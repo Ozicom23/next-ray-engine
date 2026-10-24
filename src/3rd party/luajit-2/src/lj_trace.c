@@ -254,6 +254,10 @@ void lj_trace_flushproto(global_State *g, GCproto *pt)
     trace_flushroot(G2J(g), traceref(G2J(g), pt->trace));
 }
 
+/* neXt-Ray: the hashed penalties (see penalty_pc) */
+#define XR_PENALTY_BITS		12
+static HotPenalty xr_penalty[1 << XR_PENALTY_BITS];
+
 /* Flush all traces. */
 int lj_trace_flushall(lua_State *L)
 {
@@ -275,6 +279,7 @@ int lj_trace_flushall(lua_State *L)
   J->freetrace = 0;
   /* Clear penalty cache. */
   memset(J->penalty, 0, sizeof(J->penalty));
+  memset(xr_penalty, 0, sizeof(xr_penalty));
   /* Free the whole machine code and invalidate all exit stub groups. */
   lj_mcode_free(J);
   memset(J->exitstubgroup, 0, sizeof(J->exitstubgroup));
@@ -326,28 +331,41 @@ static void blacklist_pc(GCproto *pt, BCIns *pc)
   pt->flags |= PROTO_ILOOP;
 }
 
+/* neXt-Ray: the penalties in a table of 4096 slots hashed by the bytecode's address, not the 64 round-robin slots of
+** J->penalty (left unused, the VM's offsets into jit_State stay as built). With GAMMA's thousands of hot spots a slot
+** was reused before its bytecode reached PENALTY_MAX: nothing was ever blacklisted, and traces through the engine's
+** C functions aborted again and again all game long (each abort an SEH exception on Win64, slow under Wine). The
+** penalty steps and the limit are LuaJIT's; a colliding bytecode takes the slot over, as a round-robin one did */
+static HotPenalty *xr_penalty_slot(const BCIns *pc)
+{
+  uint32_t h = (uint32_t)((uintptr_t)pc >> 2) * 2654435761u;
+  return &xr_penalty[h >> (32 - XR_PENALTY_BITS)];
+}
+
+/* The penalty of a bytecode, NULL if it has none. */
+HotPenalty *lj_trace_penalty_find(const BCIns *pc)
+{
+  HotPenalty *p = xr_penalty_slot(pc);
+  return mref(p->pc, const BCIns) == pc ? p : NULL;
+}
+
 /* Penalize a bytecode instruction. */
 static void penalty_pc(jit_State *J, GCproto *pt, BCIns *pc, TraceError e)
 {
-  uint32_t i, val = PENALTY_MIN;
-  for (i = 0; i < PENALTY_SLOTS; i++)
-    if (mref(J->penalty[i].pc, const BCIns) == pc) {  /* Cache slot found? */
-      /* First try to bump its hotcount several times. */
-      val = ((uint32_t)J->penalty[i].val << 1) +
-	    LJ_PRNG_BITS(J, PENALTY_RNDBITS);
-      if (val > PENALTY_MAX) {
-	blacklist_pc(pt, pc);  /* Blacklist it, if that didn't help. */
-	return;
-      }
-      goto setpenalty;
+  uint32_t val = PENALTY_MIN;
+  HotPenalty *p = xr_penalty_slot(pc);
+  if (mref(p->pc, const BCIns) == pc) {  /* Cache slot found? */
+    /* First try to bump its hotcount several times. */
+    val = ((uint32_t)p->val << 1) + LJ_PRNG_BITS(J, PENALTY_RNDBITS);
+    if (val > PENALTY_MAX) {
+      blacklist_pc(pt, pc);  /* Blacklist it, if that didn't help. */
+      return;
     }
-  /* Assign a new penalty cache slot. */
-  i = J->penaltyslot;
-  J->penaltyslot = (J->penaltyslot + 1) & (PENALTY_SLOTS-1);
-  setmref(J->penalty[i].pc, pc);
-setpenalty:
-  J->penalty[i].val = (uint16_t)val;
-  J->penalty[i].reason = e;
+  } else {
+    setmref(p->pc, pc);  /* Assign the slot. */
+  }
+  p->val = (uint16_t)val;
+  p->reason = e;
   hotcount_set(J2GG(J), pc+1, val);
 }
 

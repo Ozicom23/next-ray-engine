@@ -53,6 +53,14 @@ highlights are in the [README](../README.md).
 Steam Deck, Cordon, FSR balanced: GPU ~22.6 -> ~19.7 ms per frame, main thread ~20.5 -> ~18.5 ms, draw calls
 ~5,600 -> ~4,400.
 
+## Lua JIT
+LuaJIT remembers the bytecodes whose traces failed in 64 round-robin slots and stops trying one only after several
+failures. GAMMA has thousands of hot spots, most of them calling engine (C) functions that a trace can't compile, so a
+slot was reused before its bytecode got there: nothing was ever given up, and traces aborted all game long (each abort
+an exception on 64-bit Windows, slow under Wine). The penalties are now in a 4096-slot table hashed by the bytecode's
+address, with LuaJIT's own steps and limit. Deck village flight: the NPCs' updates -15%, the actor's scripts -9%,
+about +1 fps (the same as with the JIT off, which code that does compile keeps).
+
 ## Lua garbage collector
 Modded Exes steps the Lua GC on a worker thread while the frame renders. `lua_parallel_gc_paced`:
 - 0: as Modded Exes.

@@ -523,15 +523,11 @@ static LoopEvent rec_loop(jit_State *J, BCReg ra)
 /* Check if a loop repeatedly failed to trace because it didn't loop back. */
 static int innerloopleft(jit_State *J, const BCIns *pc)
 {
-  ptrdiff_t i;
-  for (i = 0; i < PENALTY_SLOTS; i++)
-    if (mref(J->penalty[i].pc, const BCIns) == pc) {
-      if ((J->penalty[i].reason == LJ_TRERR_LLEAVE ||
-	   J->penalty[i].reason == LJ_TRERR_LINNER) &&
-	  J->penalty[i].val >= 2*PENALTY_MIN)
-	return 1;
-      break;
-    }
+  HotPenalty *p = lj_trace_penalty_find(pc);  /* neXt-Ray: hashed penalties (lj_trace.c) */
+  UNUSED(J);
+  if (p && (p->reason == LJ_TRERR_LLEAVE || p->reason == LJ_TRERR_LINNER) &&
+      p->val >= 2*PENALTY_MIN)
+    return 1;
   return 0;
 }
 

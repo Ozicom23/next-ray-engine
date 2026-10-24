@@ -28,6 +28,7 @@ LJ_FUNC void lj_trace_reenableproto(GCproto *pt);
 LJ_FUNC void lj_trace_flushproto(global_State *g, GCproto *pt);
 LJ_FUNC void lj_trace_flush(jit_State *J, TraceNo traceno);
 LJ_FUNC int lj_trace_flushall(lua_State *L);
+LJ_FUNC HotPenalty *lj_trace_penalty_find(const BCIns *pc);  /* neXt-Ray (lj_trace.c) */
 LJ_FUNC void lj_trace_initstate(global_State *g);
 LJ_FUNC void lj_trace_freestate(global_State *g);
 
