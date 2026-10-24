@@ -547,8 +547,8 @@ CRenderTarget::CRenderTarget()
 		// select albedo & accum
 		if (RImplementation.o.mrtmixdepth)
 		{
-			// NV50
-			if (RImplementation.o.dx11_hdr10) {
+			// NV50 (scene highlights: the scene's brightness read back in combine_2 without 8 bit steps near white)
+			if (RImplementation.o.dx11_hdr10 || RImplementation.o.nextray_hdr_scene) {
 				rt_Color.create(r2_RT_albedo, w, h, D3DFMT_A16B16G16R16F, SampleCount);
 			} else {
 				rt_Color.create(r2_RT_albedo, w, h, D3DFMT_A8R8G8B8, SampleCount);
@@ -576,7 +576,7 @@ CRenderTarget::CRenderTarget()
 
 		// generic(LDR) RTs
 		//LV - we should change their formats into D3DFMT_A16B16G16R16F for better HDR support.
-		if (RImplementation.o.dx11_hdr10) {
+		if (RImplementation.o.dx11_hdr10 || RImplementation.o.nextray_hdr_scene) {
 			rt_Generic_0.create(r2_RT_generic0, w, h, D3DFMT_A16B16G16R16F, 1);
 			rt_Generic_1.create(r2_RT_generic1, w, h, D3DFMT_A16B16G16R16F, 1);
 			rt_Generic.create(r2_RT_generic, w, h, D3DFMT_A16B16G16R16F, 1);
@@ -587,6 +587,10 @@ CRenderTarget::CRenderTarget()
 		}
 
 		rt_fakescope.create(r2_RT_scopert, w, h, D3DFMT_A8R8G8B8, 1); //crookr fakescope
+
+		// HDR output's scene highlights: the scene's brightness, combine_2's second target, read at Present
+		if (RImplementation.o.nextray_hdr_scene)
+			rt_nextray_hdr_scene.create("$user$nextray_hdr_scene", w, h, D3DFMT_R16F, 1);
 
 		//--DSR-- HeatVision_start
 		rt_Heat.create(r2_RT_heat, w, h, D3DFMT_A8R8G8B8, SampleCount);

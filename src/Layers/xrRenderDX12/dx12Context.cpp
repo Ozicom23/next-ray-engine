@@ -1250,25 +1250,48 @@ struct Context::Impl : public Context::NativeRecorder
 		return device->CurrentBackBuffer();
 	}
 
+	// HDR output, scene highlights: this frame's scene brightness (Context::SetHdrScene), until Present
+	Resource* hdr_scene = nullptr;
+	void SetHdrScene(Resource* scene)
+	{
+		if (scene)
+			scene->AddRef();
+		if (hdr_scene)
+			hdr_scene->Release();
+		hdr_scene = scene;
+	}
+
 	// HDR output: the SDR frame drawn into dst through the conversion (Device::Impl::CreateHdrPipeline)
 	void ConvertOutput(Resource* dst, D3D12_CPU_DESCRIPTOR_HANDLE rtv)
 	{
 		Texture2D* src = dev->sdr_target;
 		if (!src || !dst || !dev->hdr_pipeline)
 			return;
+		// Without a scene map the frame stands in for the other two textures, unread
+		Resource* pre_ui = hdr_scene && dev->hdr_preui ? dev->hdr_preui : src;
+		Resource* scene = hdr_scene && dev->hdr_preui ? hdr_scene : src;
 		RequireWhole(src, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+		RequireWhole(pre_ui, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+		RequireWhole(scene, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 		RequireWhole(dst, D3D12_RESOURCE_STATE_RENDER_TARGET);
 		FlushBarriers();
 		Record();
 		SetHeaps();
 		D3D12_CPU_DESCRIPTOR_HANDLE cpu;
 		D3D12_GPU_DESCRIPTOR_HANDLE gpu;
-		AllocViews(1, cpu, gpu);
+		AllocViews(3, cpu, gpu);
 		d3d->CreateShaderResourceView(src->m_resource, nullptr, cpu);
+		cpu.ptr += view_inc;
+		d3d->CreateShaderResourceView(pre_ui->m_resource, nullptr, cpu);
+		cpu.ptr += view_inc;
+		d3d->CreateShaderResourceView(scene->m_resource, nullptr, cpu);
+		float params[8];
+		memcpy(params, dev->hdr_params, sizeof(params));
+		params[6] = scene != src ? 1.f : 0.f;
 		list->SetGraphicsRootSignature(dev->hdr_signature);
 		list->SetPipelineState(dev->hdr_pipeline);
 		list->SetGraphicsRootDescriptorTable(0, gpu);
-		list->SetGraphicsRoot32BitConstants(1, 4, dev->hdr_params, 0);
+		list->SetGraphicsRoot32BitConstants(1, 8, params, 0);
 		list->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
 		const D3D12_VIEWPORT vp = { 0.f, 0.f, float(dst->m_width), float(dst->m_height), 0.f, 1.f };
 		const D3D12_RECT sc = { 0, 0, LONG(dst->m_width), LONG(dst->m_height) };
@@ -3273,6 +3296,7 @@ HRESULT Context::Present(IDXGISwapChain1* swap_chain, UINT interval, UINT flags)
 			c.ConvertOutput(bb, rtv); // HDR output
 			c.RequireWhole(bb, D3D12_RESOURCE_STATE_PRESENT);
 		}
+		c.SetHdrScene(nullptr);
 		const u64 fence = c.Submit(false);
 		const u64 present_from = Ticks();
 		const HRESULT hr = swap_chain ? swap_chain->Present(interval, flags) : S_OK;
@@ -3336,6 +3360,19 @@ void Context::ConvertOutput(Resource* dst)
 	Front& f = *m_front;
 	f.BeforeWork();
 	f.Emit([dst, rtv](Impl& c) { c.ConvertOutput(dst, rtv); });
+}
+
+void Context::SetHdrScene(Resource* scene)
+{
+	if (!m_impl->device->HdrOutput())
+		return;
+	if (scene)
+		scene->AddRef(); // until the worker has taken its own
+	m_front->Emit([scene](Impl& c) {
+		c.SetHdrScene(scene);
+		if (scene)
+			scene->Release();
+	});
 }
 
 void Context::SetShadingRateImage(Resource* image)

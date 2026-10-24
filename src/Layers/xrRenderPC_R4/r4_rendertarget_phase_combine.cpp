@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "r4_vrs.h"
+#include "../xrRender/shader_patches.h"
 #include "../../xrEngine/igame_persistent.h"
 #include "../../xrEngine/environment.h"
 
@@ -668,6 +669,12 @@ void CRenderTarget::phase_combine()
 	RCache.set_CullMode(CULL_NONE);
 	RCache.set_Stencil(FALSE);
 
+	// HDR output's scene highlights: combine_2 also writes the scene's brightness, when its shader is neXt-Ray's patch
+	// of the known version (the one with that output) and not the edge AA variant
+	const bool hdr_scene = RImplementation.o.nextray_hdr_scene && !ps_r2_ls_flags.test(R2FLAG_AA) &&
+		shader_patches::in_use().count("r3\\combine_2_naa.ps");
+	if (hdr_scene)
+		RCache.set_RT(rt_nextray_hdr_scene->pRT, 1);
 
 	if (1)
 	{
@@ -775,6 +782,8 @@ void CRenderTarget::phase_combine()
 		RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
 	}
 	RCache.set_Stencil(FALSE);
+	if (hdr_scene)
+		RCache.set_RT(NULL, 1); // the flares that follow write the color only
 
 	if (RImplementation.o.dx11_hdr10) {
 		// TODO: we should be able to avoid a copy if both are enabled
@@ -807,6 +816,19 @@ void CRenderTarget::phase_combine()
 		PIX_EVENT(phase_pp);
 		phase_pp();
 	}
+
+#ifdef USE_DX12
+	// HDR output's scene highlights: the frame before the UI kept, Present raises the pixels the UI leaves as they are
+	if (hdr_scene)
+	{
+		if (dx12::Texture2D* pre_ui = HW.pDevice->HdrPreUiTarget())
+		{
+			PIX_EVENT(hdr_scene_pre_ui);
+			HW.pContext->CopyResource(pre_ui, HW.pDevice->BackBufferAlias());
+			HW.pContext->SetHdrScene(rt_nextray_hdr_scene->pSurface);
+		}
+	}
+#endif
 
 #ifdef USE_DX12
 	// FSR frame generation: the image before the UI (the UI is told apart by comparing with the presented one) and

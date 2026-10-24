@@ -1,6 +1,7 @@
 // neXt-Ray shader patch of Screen Space Shaders 23's r3\combine_2_naa.ps: CRC32 f03b8786
 // neXt-Ray: debanding only for sky pixels, SampleLevel taps. Bit 0x040 of r4_shader_patches (NEXTRAY_PATCHES) picks the
-// changed code, kept next to the original; engines without the define use it
+// changed code, kept next to the original; engines without the define use it. With HDR output's scene highlights
+// (NEXTRAY_HDR_SCENE) the scene's brightness as blend_soft sums it also goes to a second target; the color unchanged
 #ifndef NEXTRAY_PATCHES
 #define NEXTRAY_PATCHES 0xFFF
 #endif
@@ -56,6 +57,9 @@ float4 e_kernel;	// x=norm, y=depth, z=clr
 struct c2_out
 {
 	float4	Color : SV_Target;
+#ifdef NEXTRAY_HDR_SCENE
+	float	Scene : SV_Target1;
+#endif
 #ifdef USE_MSAA
 	float	Depth : SV_Depth;
 #endif
@@ -65,6 +69,9 @@ c2_out main( v2p_aa_AA I )
 {
 	c2_out	res;
 	res.Color = float4(0,0,0,0);
+#ifdef NEXTRAY_HDR_SCENE
+	res.Scene = 0;
+#endif
 
 	int iSample = 0;
 
@@ -110,6 +117,14 @@ c2_out main( v2p_aa_AA I )
 #endif
 #endif
 
+#ifdef NEXTRAY_HDR_SCENE
+	// neXt-Ray: blend_soft's sum, the image's inverse tonemap and the bloom (as it adds them, before tonemapping the
+	// sum again): the scene's brightness for HDR output's highlights
+	float3 nextray_scene = SRGBToLinear(img);
+	nextray_scene = nextray_scene / max(0.004, 1 - nextray_scene);
+	float3 nextray_bloom = SRGBToLinear(bloom.xyz*bloom.w);
+#endif
+
 #ifdef SSFX_BEEFS_NVG
 	// NVG CHANGE TO PREVENT WEIRD COLORS, ONLY APPLY BLOOM WHEN WE'RE NOT IN NVG MASK
 	float lua_param_nvg_generation = floor(shader_param_8.x);			// 1, 2, or 3
@@ -117,9 +132,18 @@ c2_out main( v2p_aa_AA I )
 	if (lua_param_nvg_generation < 0.01f && compute_lens_mask(aspect_ratio_correction(I.Tex0), lua_param_nvg_num_tubes) == 0.0f)
 	{
 		img = blend_soft(img, bloom.xyz*bloom.w);
+#ifdef NEXTRAY_HDR_SCENE
+		nextray_scene += nextray_bloom;
+#endif
 	}
 #else
 	img = blend_soft(img, bloom.xyz*bloom.w);
+#ifdef NEXTRAY_HDR_SCENE
+	nextray_scene += nextray_bloom;
+#endif
+#endif
+#ifdef NEXTRAY_HDR_SCENE
+	res.Scene = dot(nextray_scene, float3(0.2126, 0.7152, 0.0722));
 #endif
 
 

@@ -322,6 +322,11 @@ float ps_r4_hdr_paper_white = 200.f;  // nits of SDR white
 float ps_r4_hdr_peak        = 1000.f; // the display's peak nits
 float ps_r4_hdr_expand      = 0.f;    // highlights raised toward the peak, 0: the SDR image unchanged
 int   ps_r4_hdr_debug_split = 0;      // the right half against the left: 1 the raise, 2 where it applies, 3 all at the peak
+// Scene highlights (vid_restart): the scene's brightness before GAMMA's tonemap kept next to the SDR frame, Present
+// raises the scene's pixels above the knee toward the peak by it (r4_hdr_expand then unused)
+int   ps_r4_hdr_scene       = 1;
+float ps_r4_hdr_highlights  = 1.f;    // 0: the SDR image, 1: the highlights at the HDR curve
+float ps_r4_hdr_knee        = 0.5f;   // the SDR brightness (linear, 0..1) up to which the image stays as in SDR
 
 // Temporal upscaling: DLSS / FSR / XeSS (r4-only; XeSS in the DX12 renderer)
 u32   ps_r4_upscaler              = 0;      // r4-only, applied with vid_restart
@@ -1671,6 +1676,9 @@ void xrRender_initconsole()
 	CMD4(CCC_Float, "r4_hdr_peak", &ps_r4_hdr_peak, 200.f, 4000.f);
 	CMD4(CCC_Float, "r4_hdr_expand", &ps_r4_hdr_expand, 0.f, 1.f);
 	CMD4(CCC_Integer, "r4_hdr_debug_split", &ps_r4_hdr_debug_split, 0, 3);
+	CMD4(CCC_Integer, "r4_hdr_scene", &ps_r4_hdr_scene, 0, 1);
+	CMD4(CCC_Float, "r4_hdr_highlights", &ps_r4_hdr_highlights, 0.f, 1.f);
+	CMD4(CCC_Float, "r4_hdr_knee", &ps_r4_hdr_knee, 0.2f, 0.9f);
 
 	CMD3(CCC_Token,   "r4_upscaler",              &ps_r4_upscaler,                   upscaler_token);
 	CMD3(CCC_Token,   "r4_upscaler_quality",      &ps_r4_upscaler_quality,           upscaler_quality_token);

@@ -417,6 +417,13 @@ void CRender::create()
 	o.dx10_msaa = ps_r3_msaa && !o.dx11_hdr10 && !o.upscaler;
 	o.dx10_msaa_samples = (o.dx11_hdr10 || o.upscaler) ? 1 : (1 << ps_r3_msaa);
 
+	// HDR output's scene highlights: the DX12 device converts at Present (the swap chain is up by now)
+#ifdef USE_DX12
+	o.nextray_hdr_scene = ps_r4_hdr_scene && HW.pDevice->HdrOutput() && !o.dx11_hdr10 && !o.dx10_msaa;
+#else
+	o.nextray_hdr_scene = false;
+#endif
+
 	o.dx10_msaa_opt = ps_r2_ls_flags.test(R3FLAG_MSAA_OPT);
 	o.dx10_msaa_opt = o.dx10_msaa_opt && o.dx10_msaa && (HW.FeatureLevel >= D3D_FEATURE_LEVEL_10_1)
 		|| o.dx10_msaa && (HW.FeatureLevel >= D3D_FEATURE_LEVEL_11_0);
@@ -2491,6 +2498,16 @@ HRESULT CRender::shader_compile(
 		def_it++;
 	}
 	sh_name[len] = '0' + char(!o.dx11_hdr10);
+	++len;
+
+	// NEXTRAY_HDR_SCENE: HDR output's scene highlights, combine_2 writes the scene's brightness (SV_Target1)
+	if (o.nextray_hdr_scene)
+	{
+		defines[def_it].Name = "NEXTRAY_HDR_SCENE";
+		defines[def_it].Definition = "1";
+		def_it++;
+	}
+	sh_name[len] = '0' + char(o.nextray_hdr_scene);
 	++len;
 
 	// NEXTRAY_PATCHES: the bits of r4_shader_patches, three hex digits in the variant name

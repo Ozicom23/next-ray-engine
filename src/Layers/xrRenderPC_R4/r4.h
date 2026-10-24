@@ -119,6 +119,8 @@ public:
 		
 		// HDR10
 		u32 dx11_hdr10 : 1;
+		// HDR output's scene highlights (r4_hdr_scene): combine_2 writes the scene's brightness to rt_nextray_hdr_scene
+		u32 nextray_hdr_scene : 1;
 
 		// Temporal upscaler in use (EUpscalerType)
 		u32 upscaler : 2;

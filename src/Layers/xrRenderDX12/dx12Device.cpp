@@ -2127,14 +2127,18 @@ HRESULT Device::AttachSwapChain(IDXGISwapChain1* swap_chain)
 		td.Usage = D3D11_USAGE_DEFAULT;
 		td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
 		if (sd.Format != DXGI_FORMAT_R10G10B10A2_UNORM || !d.CreateHdrPipeline(m_device) ||
-		    FAILED(CreateTexture2D(&td, nullptr, &d.sdr_target)))
+		    FAILED(CreateTexture2D(&td, nullptr, &d.sdr_target)) || FAILED(CreateTexture2D(&td, nullptr, &d.hdr_preui)))
 		{
 			Msg("! D3D12: HDR output unavailable, SDR");
 			d.hdr_output = false; // the 10-bit buffers take the SDR frame as it is
+			if (d.sdr_target)
+				d.sdr_target->Release();
+			d.sdr_target = nullptr;
 		}
 		else
 		{
 			d.sdr_target->m_debug_name = "hdr_output_sdr";
+			d.hdr_preui->m_debug_name = "hdr_output_pre_ui";
 			d.sdr_rtv_slot = d.rtv_pool.Alloc(&d.sdr_rtv);
 			m_device->CreateRenderTargetView(d.sdr_target->m_resource, nullptr, d.sdr_rtv);
 			Msg("* D3D12: HDR output, the frame drawn in SDR and converted to HDR10 at Present");
@@ -2190,17 +2194,27 @@ HRESULT Device::AttachSwapChain(IDXGISwapChain1* swap_chain)
 	return S_OK;
 }
 
-// The conversion: the SDR frame as an SDR display shows it (gamma 2.2), SDR white at hdr_params[0] nits; above
-// mid-grey the brightness raised toward the peak (hdr_params[1] nits) by hdr_params[2] (0: none, 1: SDR white at the
-// peak), the colour's ratios kept; Rec.709 to Rec.2020, PQ. hdr_params[3], the right half against the left as it is:
-// 1 the raise, 2 red where the raise applies, 3 everything at the peak's ratio (does brighter output show at all)
+// The conversion: the SDR frame as an SDR display shows it (gamma 2.2), SDR white at hdr_params[0] nits, Rec.709 to
+// Rec.2020, PQ. Highlights toward the peak (hdr_params[1] nits):
+// - scene highlights (hdr_params[6], a scene map this frame): the scene's brightness s in blend_soft's terms (GAMMA's
+//   combine_2 shows s / (1 + s) before its grading). Up to the knee (hdr_params[5]) the HDR curve is that one, above
+//   it rises with the same slope toward the peak's ratio; the pixel's colour, as graded, scaled by the curves' ratio,
+//   by hdr_params[4] (0: none). Only where the frame is as it was before the UI (the UI stays at SDR white)
+// - otherwise the frame's own brightness above mid-grey raised by hdr_params[2] (0: none, 1: SDR white at the peak)
+// hdr_params[3], the right half against the left as it is: 1 the raise, 2 red where the raise applies, 3 everything at
+// the peak's ratio (does brighter output show at all)
 bool Device::Impl::CreateHdrPipeline(ID3D12Device* d3d)
 {
 	if (hdr_pipeline)
 		return true;
 	static const char kShader[] = R"(
 Texture2D<float4> sdr : register(t0);
-cbuffer P : register(b0) { float paper_white; float peak; float expand; float split; };
+Texture2D<float4> pre_ui : register(t1);
+Texture2D<float> scene : register(t2);
+cbuffer P : register(b0)
+{
+	float paper_white; float peak; float expand; float split; float highlights; float knee; float scene_on; float unused;
+};
 float4 vs(uint id : SV_VertexID) : SV_Position
 {
 	float2 uv = float2((id << 1) & 2, id & 2);
@@ -2212,26 +2226,58 @@ float3 pq(float3 nits)
 	float3 y = pow(saturate(nits / 10000.0), m1);
 	return pow((c1 + c2 * y) / (1.0 + c3 * y), m2);
 }
+float hdr_curve(float s, float k, float g)
+{
+	const float sk = k / (1.0 - k);
+	if (s <= sk)
+		return s / (1.0 + s);
+	return k + (g - k) * (1.0 - exp(-(1.0 - k) * (1.0 - k) * (s - sk) / (g - k)));
+}
 float4 ps(float4 pos : SV_Position) : SV_Target
 {
-	float3 c = pow(saturate(sdr.Load(int3(pos.xy, 0)).rgb), 2.2);
+	const float3 c0 = sdr.Load(int3(pos.xy, 0)).rgb;
+	float3 c = pow(saturate(c0), 2.2);
 	float w, h;
 	sdr.GetDimensions(w, h);
 	const bool left = split > 0.5 && pos.x < w * 0.5;
 	if (split > 0.5 && abs(pos.x - w * 0.5) < 1.0)
 		return float4(pq(float3(1, 1, 1) * paper_white), 1);
-	// Inverse tone mapping: luminance above mid-grey scaled up smoothly, SDR white reaching the peak at expand 1
-	const float knee = 0.18;
 	const float gain = max(peak / paper_white, 1.0);
-	float t = saturate((dot(c, float3(0.2126, 0.7152, 0.0722)) - knee) / (1.0 - knee));
+	const float lum = dot(c, float3(0.2126, 0.7152, 0.0722));
+	float raise = 1.0;
+	if (scene_on > 0.5)
+	{
+		const float3 d = abs(c0 - pre_ui.Load(int3(pos.xy, 0)).rgb);
+		if (max(d.r, max(d.g, d.b)) < 0.5 / 255.0 && gain > 1.0)
+		{
+			// The least of the four scene texels around: no raise spilling onto darker pixels next to bright ones
+			float sw, sh;
+			scene.GetDimensions(sw, sh);
+			const int2 i = int2(floor(pos.xy * float2(sw / w, sh / h) - 0.5));
+			const int2 m = int2(sw, sh) - 1;
+			const float s = max(0.0, min(min(scene.Load(int3(clamp(i, 0, m), 0)), scene.Load(int3(clamp(i + int2(1, 0), 0, m), 0))),
+				min(scene.Load(int3(clamp(i + int2(0, 1), 0, m), 0)), scene.Load(int3(clamp(i + 1, 0, m), 0)))));
+			const float y = s / (1.0 + s);
+			if (y > knee)
+				raise = hdr_curve(s, knee, gain) / y;
+			// The pixel as graded dark (a lens or overlay drawn later over a bright scene): left as it is
+			raise = lerp(1.0, raise, highlights * smoothstep(0.03, 0.15, lum));
+		}
+	}
+	else
+	{
+		// Inverse tone mapping: luminance above mid-grey scaled up smoothly, SDR white reaching the peak at expand 1
+		const float t = saturate((lum - 0.18) / (1.0 - 0.18));
+		raise = lerp(1.0, gain, expand * pow(t, 1.25));
+	}
 	if (!left)
 	{
 		if (split > 2.5)
 			c *= gain;
 		else if (split > 1.5)
-			c = lerp(c, float3(1, 0, 0), saturate(expand * pow(t, 1.25) * 2.0));
+			c = lerp(c, float3(1, 0, 0), saturate((raise - 1.0) * 4.0));
 		else
-			c *= lerp(1.0, gain, expand * pow(t, 1.25));
+			c *= raise;
 	}
 	c = mul(float3x3(0.6274040, 0.3292820, 0.0433136, 0.0690970, 0.9195400, 0.0113612, 0.0163916, 0.0880132, 0.8955950), c);
 	return float4(pq(c * paper_white), 1);
@@ -2253,17 +2299,17 @@ float4 ps(float4 pos : SV_Position) : SV_Target
 		return false;
 	}
 
-	// The SDR frame (t0) and the parameters (b0, root constants)
+	// The SDR frame (t0), the frame before the UI (t1), the scene's brightness (t2), the parameters (b0, root constants)
 	D3D12_DESCRIPTOR_RANGE range = {};
 	range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-	range.NumDescriptors = 1;
+	range.NumDescriptors = 3;
 	D3D12_ROOT_PARAMETER params[2] = {};
 	params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
 	params[0].DescriptorTable.NumDescriptorRanges = 1;
 	params[0].DescriptorTable.pDescriptorRanges = &range;
 	params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 	params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-	params[1].Constants.Num32BitValues = 4;
+	params[1].Constants.Num32BitValues = 8;
 	params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 	D3D12_ROOT_SIGNATURE_DESC rd = {};
 	rd.NumParameters = 2;
@@ -2311,14 +2357,18 @@ void Device::SetHdrOutput(bool on) { m_impl->hdr_output = on; }
 bool Device::HdrOutput() const { return m_impl->hdr_output && m_impl->sdr_target; }
 DXGI_FORMAT Device::SwapChainFormat() const { return m_impl->swap_chain_format; }
 
-void Device::SetHdrParams(float paper_white, float peak, float expand, int split)
+void Device::SetHdrParams(float paper_white, float peak, float expand, int split, float highlights, float knee)
 {
 	float* p = m_impl->hdr_params;
 	p[0] = paper_white;
 	p[1] = peak;
 	p[2] = expand;
 	p[3] = float(split);
+	p[4] = highlights;
+	p[5] = knee;
 }
+
+Texture2D* Device::HdrPreUiTarget() { return m_impl->hdr_output ? m_impl->hdr_preui : nullptr; }
 
 D3D12_CPU_DESCRIPTOR_HANDLE Device::HdrTargetRTV(Resource* target)
 {
@@ -2363,6 +2413,11 @@ void Device::ReleaseBackBuffers()
 		d.sdr_target->Release();
 		d.sdr_target = nullptr;
 		d.rtv_pool.Free(d.sdr_rtv_slot);
+	}
+	if (d.hdr_preui)
+	{
+		d.hdr_preui->Release();
+		d.hdr_preui = nullptr;
 	}
 	for (auto& r : d.hdr_rtvs)
 		d.rtv_pool.Free(r.second.first);
