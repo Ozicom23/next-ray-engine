@@ -232,7 +232,7 @@ struct Device::Impl
 	ID3D12PipelineState* hdr_pipeline = nullptr;
 	// SDR white nits, peak nits, highlight expansion, split view, scene highlights, knee, (scene map present: per
 	// conversion), the sky's brightness
-	float hdr_params[8] = { 200.f, 1000.f, 0.f, 0.f, 1.f, 0.5f, 0.f, 2.f };
+	float hdr_params[8] = { 200.f, 1000.f, 0.f, 0.f, 1.f, 0.2f, 0.f, 3.f };
 	Texture2D* hdr_preui = nullptr; // Device::HdrPreUiTarget
 	std::mutex hdr_lock;
 	std::unordered_map<ID3D12Resource*, std::pair<UINT, D3D12_CPU_DESCRIPTOR_HANDLE>> hdr_rtvs; // other targets

@@ -326,8 +326,8 @@ int   ps_r4_hdr_debug_split = 0;      // the right half against the left: 1 the 
 // raises the scene's pixels above the knee toward the peak by it (r4_hdr_expand then unused)
 int   ps_r4_hdr_scene       = 1;
 float ps_r4_hdr_highlights  = 1.f;    // 0: the SDR image, 1: the highlights at the HDR curve
-float ps_r4_hdr_knee        = 0.5f;   // the SDR brightness (linear, 0..1) up to which the image stays as in SDR
-float ps_r4_hdr_sky         = 2.f;    // the daylight sky's brightness, times SDR white (1: as in SDR)
+float ps_r4_hdr_knee        = 0.2f;   // the SDR brightness (linear, 0..1) up to which the image stays as in SDR
+float ps_r4_hdr_sky         = 3.f;    // the daylight sky's brightness, times SDR white (1: as in SDR)
 
 // Temporal upscaling: DLSS / FSR / XeSS (r4-only; XeSS in the DX12 renderer)
 u32   ps_r4_upscaler              = 0;      // r4-only, applied with vid_restart
