@@ -113,12 +113,11 @@ enum EGameActions
 	kEDITOR,
 
 	// Gamepad actions (gamepad.cpp), decided when pressed: use what's looked at or reload, the other of the two weapon
-	// slots, hide or take out the weapon, the radial menu, the actions wheel (mods' keys)
+	// slots, hide or take out the weapon, the radial menu (the slots; mods' keys on the buttons while held)
 	kUSE_OR_RELOAD,
 	kWPN_SWAP,
 	kWPN_HOLSTER,
 	kRADIAL_MENU,
-	kACTION_WHEEL,
 
 	kLASTACTION,
 	kNOTBINDED,

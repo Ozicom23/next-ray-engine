@@ -123,7 +123,6 @@ _action actions[] = {
 	{"wpn_swap", kWPN_SWAP, _sp},
 	{"wpn_holster", kWPN_HOLSTER, _sp},
 	{"radial_menu", kRADIAL_MENU, _sp},
-	{"action_wheel", kACTION_WHEEL, _sp},
 	{NULL, kLASTACTION, _both}
 };
 
@@ -994,9 +993,9 @@ static void gamepad_unbind_all()
 }
 
 // The layout's version: a layout saved by an older one gets the bindings added since, on keys left free
-// (gamepad_layout_update). 2: LT + R3 the alternative aim; 3: RB held the actions wheel (it was night vision, which
-// the radial menu has)
-static const int kLayoutVersion = 3;
+// (gamepad_layout_update). 2: LT + R3 the alternative aim; 4: RB held night vision again (3 had the actions wheel there,
+// now on the radial menu's buttons: its name is unknown, the key left free)
+static const int kLayoutVersion = 4;
 static int s_layout_version = kLayoutVersion;
 
 void gamepad_layout_update()
@@ -1011,16 +1010,16 @@ void gamepad_layout_update()
 	if (s_layout_version < 2 && s_gamepad_bindings[GP_RS + GP_AIM - GP_FIRST] == kNOTBINDED)
 		s_gamepad_bindings[GP_RS + GP_AIM - GP_FIRST] = kWPN_FUNC;
 	const int rb_hold = GP_RB + GP_HOLD - GP_FIRST;
-	if (s_layout_version < 3 && !s_gamepad_keys[rb_hold] &&
-		(s_gamepad_bindings[rb_hold] == kNOTBINDED || s_gamepad_bindings[rb_hold] == kNIGHT_VISION))
-		s_gamepad_bindings[rb_hold] = kACTION_WHEEL;
+	if (s_layout_version == 3 && !s_gamepad_keys[rb_hold] && s_gamepad_bindings[rb_hold] == kNOTBINDED)
+		s_gamepad_bindings[rb_hold] = kNIGHT_VISION;
 	s_layout_version = kLayoutVersion;
 }
 
 // Like STALKER 2's: the left stick moves (L3 sprints), the right one looks (R3 the knife, LT + R3 the alternative aim:
 // the weapon's other sight or aiming position), LT aims, RT fires, A jumps,
 // B crouches, X uses what's looked at or reloads (held: the next ammo type), Y swaps weapons (held: hides it), LB held
-// opens the radial menu (pressed: the detector), RB the torch (held: the actions wheel), LT + LB / RB lean, the D-pad: up the
+// opens the radial menu (pressed: the detector; while held the other buttons do mods' actions: unjam, quick melee...),
+// RB the torch (held: night vision), LT + LB / RB lean, the D-pad: up the
 // fire mode (held: the weapon's function), down the inventory, left / right the quick slots (held: the other two),
 // View the PDA, Menu the main menu
 void gamepad_default_layout()
@@ -1037,7 +1036,7 @@ void gamepad_default_layout()
 		{GP_X, kUSE_OR_RELOAD}, {GP_X + GP_HOLD, kWPN_NEXT},
 		{GP_Y, kWPN_SWAP}, {GP_Y + GP_HOLD, kWPN_HOLSTER},
 		{GP_LB, kDETECTOR}, {GP_LB + GP_HOLD, kRADIAL_MENU}, {GP_LB + GP_AIM, kL_LOOKOUT},
-		{GP_RB, kTORCH}, {GP_RB + GP_HOLD, kACTION_WHEEL}, {GP_RB + GP_AIM, kR_LOOKOUT},
+		{GP_RB, kTORCH}, {GP_RB + GP_HOLD, kNIGHT_VISION}, {GP_RB + GP_AIM, kR_LOOKOUT},
 		{GP_DPAD_UP, kWPN_FIREMODE_NEXT}, {GP_DPAD_UP + GP_HOLD, kWPN_FUNC},
 		{GP_DPAD_DOWN, kINVENTORY},
 		{GP_DPAD_LEFT, kQUICK_USE_1}, {GP_DPAD_LEFT + GP_HOLD, kQUICK_USE_3},

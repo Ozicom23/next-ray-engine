@@ -1,15 +1,16 @@
 -- neXt-Ray gamepad support for GAMMA's mods (in the engine's gamedata). The original mods stay untouched: a mod's
 -- function is changed at runtime only when its source text is exactly the known one (other executables, or another
--- version of the mod, run it as it is, with one log line); the actions wheel presses the mods' own keys.
+-- version of the mod, run it as it is, with one log line); the wheel's buttons press the mods' own keys.
 --
 -- 1. Catspaw's mods (Interaction Dot Marks, Fair Fast Travel, Milspec PDA...): utils_catspaw_text.bindtext names a
 --    key by MCM's own table (ui_mcm.display_key), "F" for the use key also with the gamepad in use. While texts name
 --    the gamepad's buttons, a key bound to an action is named by its gamepad button, as the engine names it in texts
 --    ($$ACTION_use$$); modifiers (Shift, Ctrl, Alt) and keys of no action keep their names.
--- 2. The actions wheel (RB held by default): the mods' actions a gamepad has no button for, as the engine's custom
---    actions their scripts listen to (key_bindings.kCUSTOM..., pressed as if by their key, bound or not) or a mod's
---    MCM key (pressed with its modifier, tapped twice or held as its MCM settings want). Only those whose mod is there
---    (its script) and whose key is bound (MCM); the wheel's order is the list's, clockwise from the top.
+-- 2. The wheel's buttons (LB held by default: the wheel takes out the slots, the other buttons do these): the mods'
+--    actions a gamepad has no button for, as the engine's custom actions their scripts listen to (key_bindings.kCUSTOM...,
+--    pressed as if by their key, bound or not) or a mod's MCM key (pressed with its modifier, tapped twice or held as
+--    its MCM settings want). Only those whose mod is there (its script) and whose key is bound (MCM); each on its own
+--    button, shown beside the wheel.
 -- 3. The menu cursor's targets in GAMMA's inventory (its item cells).
 
 local function msg(fmt, ...)
@@ -49,47 +50,29 @@ local function catspaw_patch()
 end
 
 ---------------------------------------------------------------------------------------------------------------------
--- 2. The actions wheel
+-- 2. The wheel's buttons
 
 local function has_script(name)
 	return getFS():exist("$game_scripts$", name .. ".script") ~= nil
 end
 
--- The firearm in hands (not a knife)
-local function firearm_section()
-	local item = db.actor and db.actor:active_item()
-	if not (item and IsWeapon(item)) then
-		return
-	end
-	local id = item:clsid()
-	if id == clsid.wpn_knife_s or id == clsid.wpn_knife then
-		return
-	end
-	return item:section()
-end
-
-local function slot_section(slot)
-	local item = db.actor and db.actor:item_in_slot(slot)
-	return item and item:section()
-end
-
--- label: a string id; action: the engine's action, or mcm: a key's MCM path (mod, mode: its modifier and press type's
--- paths); script: the mod's script; icon: an item section for its icon (a function: looked up as the wheel opens)
+-- button: the gamepad's (gpX, gpDPAD_UP...); label: a string id; action: the engine's action, or mcm: a key's MCM path
+-- (mod, mode: its modifier and press type's paths); script: the mod's script
 local wheel = {
-	{ label = "st_gp_wheel_unjam", action = "kCUSTOM22", script = "arti_jamming", icon = firearm_section },
-	{ label = "st_gp_wheel_quick_melee", action = "kCUSTOM24", script = "quickdraw", icon = function() return slot_section(1) end },
-	{ label = "st_gp_wheel_grenade_throw", action = "kCUSTOM19", script = "actor_effects", icon = function() return slot_section(4) end },
-	{ label = "st_gp_wheel_lower_weapon", action = "kSAFEMODE", script = "lower_weapon_sprint", icon = firearm_section },
-	{ label = "st_gp_wheel_map", action = "kCUSTOM20", script = "actor_effects", icon = "device_pda_1" },
-	{ label = "st_gp_wheel_companions", action = "kCUSTOM18", script = "ui_addon_companion_quick_menu" },
-	{ label = "st_gp_wheel_reticle", mcm = "3d_scopes/mark_switch/keybind", mod = "3d_scopes/mark_switch/modifier",
-		mode = "3d_scopes/mark_switch/press_type", script = "z_mark_switch" },
-	{ label = "st_gp_wheel_suppressor", action = "kCUSTOM13", script = "item_weapon" },
-	{ label = "st_gp_wheel_unload_all", action = "kCUSTOM15", script = "item_weapon", icon = "ammo_9x18_fmj" },
-	{ label = "st_gp_wheel_freelook", action = "kFREELOOK" },
+	{ button = "gpX", label = "st_gp_wheel_unjam", action = "kCUSTOM22", script = "arti_jamming" },
+	{ button = "gpY", label = "st_gp_wheel_unload_all", action = "kCUSTOM15", script = "item_weapon" },
+	{ button = "gpB", label = "st_gp_wheel_lower_weapon", action = "kSAFEMODE", script = "lower_weapon_sprint" },
+	{ button = "gpA", label = "st_gp_wheel_quick_melee", action = "kCUSTOM24", script = "quickdraw" },
+	{ button = "gpRB", label = "st_gp_wheel_grenade_throw", action = "kCUSTOM19", script = "actor_effects" },
+	{ button = "gpDPAD_UP", label = "st_gp_wheel_reticle", mcm = "3d_scopes/mark_switch/keybind",
+		mod = "3d_scopes/mark_switch/modifier", mode = "3d_scopes/mark_switch/press_type", script = "z_mark_switch" },
+	{ button = "gpDPAD_DOWN", label = "st_gp_wheel_suppressor", action = "kCUSTOM13", script = "item_weapon" },
+	{ button = "gpDPAD_LEFT", label = "st_gp_wheel_companions", action = "kCUSTOM18", script = "ui_addon_companion_quick_menu" },
+	{ button = "gpDPAD_RIGHT", label = "st_gp_wheel_map", action = "kCUSTOM20", script = "actor_effects" },
+	{ button = "gpLS", label = "st_gp_wheel_freelook", action = "kFREELOOK" },
 }
 
-local shown = {} -- the wheel's sectors as it opened: their entries
+local shown = {} -- the buttons' entries as the wheel opened
 
 local function mcm_get(path)
 	return ui_mcm and ui_mcm.get and ui_mcm.get(path)
@@ -125,8 +108,7 @@ function action_wheel_open()
 	for _, e in ipairs(wheel) do
 		if available(e) then
 			shown[#shown + 1] = e
-			local icon = type(e.icon) == "function" and e.icon() or e.icon
-			gamepad_wheel_add(e.label, type(icon) == "string" and icon or "")
+			gamepad_wheel_add(e.button, e.label)
 		end
 	end
 end

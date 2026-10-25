@@ -10,7 +10,7 @@ local actions = {
 	"wpn_fire", "wpn_zoom", "wpn_reload", "use", "use_or_reload", "wpn_next", "wpn_func",
 	"wpn_firemode_next", "wpn_firemode_prev", "wpn_swap", "wpn_holster", "next_slot", "prev_slot",
 	"wpn_1", "wpn_2", "wpn_3", "wpn_4", "wpn_5", "wpn_6",
-	"radial_menu", "action_wheel", "show_detector", "torch", "night_vision", "drop", "safemode",
+	"radial_menu", "show_detector", "torch", "night_vision", "drop", "safemode",
 	"inventory", "active_jobs", "quick_use_1", "quick_use_2", "quick_use_3", "quick_use_4",
 	"quick_save", "quick_load", "quit",
 	"forward", "back", "lstrafe", "rstrafe",

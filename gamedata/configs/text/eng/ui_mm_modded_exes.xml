@@ -1125,9 +1125,6 @@
 	<string id="st_gp_act_radial_menu">
 		<text>Radial Menu</text>
 	</string>
-	<string id="st_gp_act_action_wheel">
-		<text>Actions Wheel</text>
-	</string>
 	<string id="st_gp_act_show_detector">
 		<text>Detector</text>
 	</string>

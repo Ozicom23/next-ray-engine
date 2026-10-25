@@ -134,9 +134,10 @@ struct stick_rebound
 stick_rebound s_rebound_left, s_rebound_right;
 
 //------------------------------------------------------------------------------------------------------------------
-// The wheels: hold its key, choose a sector with the right stick, release. The radial menu takes out what's in the
-// slots; the actions wheel presses mods' keys and actions, its sectors given by scripts as it opens
-// (zzzz_nextray_gamepad: action_wheel_open adds them with gamepad_wheel_add, action_wheel_choose gets the one chosen)
+// The wheel: hold its key, choose a sector with the right stick, release; its sectors take out what's in the slots.
+// While it's held other buttons press mods' keys and actions (unjam, quick melee...), shown beside it, given by scripts
+// as it opens (zzzz_nextray_gamepad: action_wheel_open adds them with gamepad_wheel_add, action_wheel_choose gets the
+// one pressed)
 
 struct radial_item
 {
@@ -157,32 +158,25 @@ const radial_item s_radial_items[] = {
 	{kNIGHT_VISION, NO_ACTIVE_SLOT, "st_gp_radial_night_vision"},
 };
 const int RADIAL_COUNT = sizeof(s_radial_items) / sizeof(s_radial_items[0]);
-const int WHEEL_MAX = 12; // the actions wheel's sectors at most
 
-// An actions wheel's sector
+// A button's action while the wheel is held
 struct action_entry
 {
+	int button; // 0..GP_BUTTON_COUNT-1
 	xr_string label; // a string id or the text
-	shared_str icon; // an item section: its inventory icon, or none
 };
 xr_vector<action_entry> s_action_entries;
 
 int s_radial_key = 0; // the key that opened it, 0 closed
-bool s_radial_actions = false; // the actions wheel is open, not the radial menu
 int s_radial_sel = -1;
 u32 s_radial_open_time = 0; // Device.dwTimeContinual when it opened (it runs while paused)
 float s_radial_dir = 0.f; // the right stick's angle when it chose, 0 up, clockwise
 ui_shader* s_radial_shader = nullptr; // made at the first draw (the renderer exists then)
-CUIStatic* s_radial_icons[WHEEL_MAX] = {};
-CUITextWnd* s_radial_labels[WHEEL_MAX] = {};
+CUIStatic* s_radial_icons[RADIAL_COUNT] = {};
+CUITextWnd* s_radial_labels[RADIAL_COUNT] = {};
 CUITextWnd* s_radial_title = nullptr; // the chosen one's name in the middle
 
-int radial_count()
-{
-	return s_radial_actions ? int(s_action_entries.size()) : RADIAL_COUNT;
-}
-
-// Keyboard keys pressed for the actions wheel (a mod's key, its modifier, taps or a hold), at their times
+// Keyboard keys pressed for the wheel's buttons (a mod's key, its modifier, taps or a hold), at their times
 struct key_event
 {
 	int dik;
@@ -227,27 +221,36 @@ void radial_close(bool choose)
 	const int sel = s_radial_sel;
 	s_radial_key = 0;
 	s_radial_sel = -1;
-	if (!choose || sel < 0)
-		return;
-	if (!s_radial_actions)
+	if (choose && sel >= 0)
 		send_action(s_radial_items[sel].action);
-	else if (sel < int(s_action_entries.size()))
-		call_script("zzzz_nextray_gamepad.action_wheel_choose", sel + 1);
 }
 
-void radial_open(int code, bool actions)
+void radial_open(int code)
 {
-	if (actions)
-	{
-		s_action_entries.clear();
-		call_script("zzzz_nextray_gamepad.action_wheel_open");
-		if (s_action_entries.empty())
-			return;
-	}
-	s_radial_actions = actions;
+	s_action_entries.clear();
+	call_script("zzzz_nextray_gamepad.action_wheel_open");
 	s_radial_key = code;
 	s_radial_sel = -1;
 	s_radial_open_time = Device.dwTimeContinual;
+}
+
+// A button pressed while the wheel is held: its action, the wheel closed without a choice (the button and the wheel's
+// own ignored till released). False when the button has none
+bool radial_button(int b)
+{
+	for (u32 i = 0; i < s_action_entries.size(); ++i)
+	{
+		if (s_action_entries[i].button != b)
+			continue;
+		const int own = (s_radial_key - GP_A) % GP_HOLD; // its button (held, with LT)
+		if (s_radial_key < GP_LS_UP)
+			s_buttons[own].ignore = true;
+		s_buttons[b].ignore = true;
+		radial_close(false);
+		call_script("zzzz_nextray_gamepad.action_wheel_choose", int(i) + 1);
+		return true;
+	}
+	return false;
 }
 
 void radial_update(const gamepad_state& pad)
@@ -258,9 +261,8 @@ void radial_update(const gamepad_state& pad)
 	float angle = atan2f(rs.x, rs.y); // 0 up, clockwise
 	if (angle < 0.f)
 		angle += PI_MUL_2;
-	const int n = radial_count();
-	const float sector = PI_MUL_2 / float(n);
-	s_radial_sel = iFloor((angle + sector * 0.5f) / sector) % n;
+	const float sector = PI_MUL_2 / float(RADIAL_COUNT);
+	s_radial_sel = iFloor((angle + sector * 0.5f) / sector) % RADIAL_COUNT;
 	s_radial_dir = angle;
 }
 
@@ -312,10 +314,7 @@ void key_press(int code)
 	switch (gamepad_binding(code))
 	{
 	case kRADIAL_MENU:
-		radial_open(code, false);
-		return;
-	case kACTION_WHEEL:
-		radial_open(code, true);
+		radial_open(code);
 		return;
 	case kUSE_OR_RELOAD:
 		if (actor)
@@ -392,6 +391,8 @@ void update_game(const gamepad_state& pad, float dt)
 			t.down = false;
 			continue;
 		}
+		if (down && !t.down && s_radial_key && radial_button(b))
+			continue;
 		if (down && !t.down)
 		{
 			t.down = true;
@@ -1139,7 +1140,7 @@ void gamepad_stop()
 {
 	if (pInput)
 		pInput->pad_handler = nullptr;
-	for (int i = 0; i < WHEEL_MAX; ++i)
+	for (int i = 0; i < RADIAL_COUNT; ++i)
 	{
 		xr_delete(s_radial_icons[i]);
 		xr_delete(s_radial_labels[i]);
@@ -1168,14 +1169,14 @@ void gamepad_rumble(float low, float high, float time)
 		                 time);
 }
 
-void gamepad_wheel_add(LPCSTR label, LPCSTR icon)
+void gamepad_wheel_add(LPCSTR button, LPCSTR label)
 {
-	if (int(s_action_entries.size()) >= WHEEL_MAX || !label)
+	const int code = button && label ? keyname_to_dik(button) : 0;
+	if (code < GP_A || code >= GP_A + GP_BUTTON_COUNT)
 		return;
 	action_entry e;
+	e.button = code - GP_A;
 	e.label = label;
-	if (icon && icon[0] && pSettings->section_exist(icon))
-		e.icon = icon;
 	s_action_entries.push_back(e);
 }
 
@@ -1252,17 +1253,6 @@ static void draw_item_icon(CUIStatic* icon, LPCSTR section, const Irect& grid, f
 	icon->Draw();
 }
 
-// A section's inventory grid rect, as CInventoryItem::GetInvGridRect gives an item's
-static Irect section_grid(LPCSTR section)
-{
-	Irect r;
-	r.x1 = READ_IF_EXISTS(pSettings, r_u32, section, "inv_grid_x", 0);
-	r.y1 = READ_IF_EXISTS(pSettings, r_u32, section, "inv_grid_y", 0);
-	r.x2 = READ_IF_EXISTS(pSettings, r_u32, section, "inv_grid_width", 1);
-	r.y2 = READ_IF_EXISTS(pSettings, r_u32, section, "inv_grid_height", 1);
-	return r;
-}
-
 // The on-screen keyboard: its keys in a dark panel under the edit box (above it near the screen's bottom), the one
 // picked amber, shift's keys shown shifted; a line of what the buttons do under it
 static void render_osk()
@@ -1330,31 +1320,27 @@ static void render_osk()
 	hint_font->Out(p.x, p.y, "%s", hint);
 }
 
-// The wheels: their sectors in a ring around the screen's centre (the radial menu eight, the actions wheel as many as
-// scripts gave, up to twelve: a wider ring then), opening with a short zoom and fade. Each a dark glass gradient with
-// a light rim on its outer edge; the chosen one amber, pushed out, its rim bright; the slot in hands marked on the
-// inner edge; a disc in the middle with the chosen one's name and a pointer to the stick's direction. Each sector
-// shows its slot's item (icon and name) or what it's for
+// The wheel: its eight sectors in a ring around the screen's centre, opening with a short zoom and fade. Each a dark
+// glass gradient with a light rim on its outer edge; the chosen one amber, pushed out, its rim bright; the slot in
+// hands marked on the inner edge; a disc in the middle with the chosen one's name and a pointer to the stick's
+// direction. Each sector shows its slot's item (icon and name) or what it's for. Beside it the buttons' actions: the
+// D-pad's and L3's on the left, the others on the right, each a glyph by the ring and its name
 static void render_wheel()
 {
 	if (!s_radial_key || !Actor())
 		return;
-	const int n = radial_count();
-	if (n <= 0)
-		return;
+	const int n = RADIAL_COUNT;
 
 	const float kx = UI().get_current_kx(); // wide screens: UI x units are narrower
 	const Fvector2 c = {UI_BASE_WIDTH * 0.5f, UI_BASE_HEIGHT * 0.5f};
 	const float open = clampr(float(Device.dwTimeContinual - s_radial_open_time) / 140.f, 0.f, 1.f);
 	const float ease = 1.f - (1.f - open) * (1.f - open) * (1.f - open);
 	const float zoom = 0.88f + 0.12f * ease;
-	const bool many = n > 8;
-	const float r_in = (many ? 84.f : 76.f) * zoom, r_out = (many ? 236.f : 206.f) * zoom;
-	const float r_mid = (many ? 160.f : 141.f) * zoom, pop = 10.f * zoom, r_disc = 62.f * zoom;
-	const float label_w = many ? 92.f : 130.f, box_w = many ? 80.f : 100.f, box_h = many ? 36.f : 44.f;
+	const float r_in = 76.f * zoom, r_out = 206.f * zoom, r_mid = 141.f * zoom, pop = 10.f * zoom, r_disc = 62.f * zoom;
+	const float label_w = 130.f, box_w = 100.f, box_h = 44.f;
 	const float sector = PI_MUL_2 / float(n);
 	const float gap = 0.022f; // radians between sectors
-	const int steps = many ? 8 : 12, disc_steps = 48;
+	const int steps = 12, disc_steps = 48;
 	auto argb = [&](u32 a, u32 r, u32 g, u32 b) { return color_argb(u32(float(a) * ease), r, g, b); };
 
 	CInventory& inv = Actor()->inventory();
@@ -1386,8 +1372,39 @@ static void render_wheel()
 			point(r0, a1, c0);
 		}
 	};
-	UIRender->StartPrimitive(n * steps * 6 * 4 + disc_steps * 6 * 2 + 6, IUIRender::ptTriList,
-		UI().m_currentPointType);
+	// The buttons' rows: on which side, from the top
+	static const int left_order[] = {GP_DPAD_UP, GP_DPAD_LEFT, GP_DPAD_RIGHT, GP_DPAD_DOWN, GP_LS, GP_LB, GP_LT, GP_BACK};
+	static const int right_order[] = {GP_Y, GP_X, GP_B, GP_A, GP_RB, GP_RT, GP_RS, GP_START};
+	const int sides = sizeof(left_order) / sizeof(left_order[0]);
+	const action_entry* rows[2][sides] = {};
+	int row_count[2] = {};
+	for (int side = 0; side < 2; ++side)
+		for (int k = 0; k < sides; ++k)
+			for (const action_entry& e : s_action_entries)
+				if (e.button == (side ? right_order : left_order)[k] - GP_A)
+				{
+					rows[side][row_count[side]++] = &e;
+					break;
+				}
+	const float row_h = 30.f, row_gap = 6.f, row_w = 184.f, row_off = r_out + pop + 26.f * zoom;
+	auto row_rect = [&](int side, int k, Frect& rc)
+	{
+		const float y = c.y - (row_count[side] * (row_h + row_gap) - row_gap) * 0.5f + k * (row_h + row_gap);
+		const float edge = side ? c.x + row_off * kx : c.x - row_off * kx;
+		rc.set(side ? edge : edge - row_w * kx, y, side ? edge + row_w * kx : edge, y + row_h);
+	};
+	auto quad = [&](const Frect& rc, u32 color)
+	{
+		Fvector2 p[4] = {{rc.x1, rc.y1}, {rc.x2, rc.y1}, {rc.x2, rc.y2}, {rc.x1, rc.y2}};
+		for (Fvector2& v : p)
+			UI().ClientToScreenScaled(v);
+		const int order[6] = {0, 1, 2, 0, 2, 3};
+		for (int i : order)
+			UIRender->PushPoint(p[i].x, p[i].y, 0.f, color, 0.f, 0.f);
+	};
+
+	UIRender->StartPrimitive(n * steps * 6 * 4 + disc_steps * 6 * 2 + 6 + (row_count[0] + row_count[1]) * 6 * 3,
+		IUIRender::ptTriList, UI().m_currentPointType);
 	for (int i = 0; i < n; ++i)
 	{
 		const bool chosen = i == s_radial_sel;
@@ -1405,7 +1422,7 @@ static void render_wheel()
 			band(out - 2.f, out, a_from, a_to, steps, argb(150, 150, 150, 150), argb(150, 150, 150, 150));
 		}
 		// The slot in hands: a light strip on the inner edge
-		if (!s_radial_actions && s_radial_items[i].slot != NO_ACTIVE_SLOT && s_radial_items[i].slot == active_slot)
+		if (s_radial_items[i].slot != NO_ACTIVE_SLOT && s_radial_items[i].slot == active_slot)
 			band(r_in, r_in + 4.f, a_from, a_to, steps, argb(230, 235, 235, 235), argb(230, 235, 235, 235));
 	}
 	// The middle: a dark disc with a faint rim
@@ -1419,6 +1436,21 @@ static void render_wheel()
 		point(r_disc + 1.f, s_radial_dir - 0.09f, tip);
 		point(r_disc + 1.f, s_radial_dir + 0.09f, tip);
 	}
+	// The buttons' rows: dark glass, a light line on the side by the ring, the glyph's square there
+	for (int side = 0; side < 2; ++side)
+		for (int k = 0; k < row_count[side]; ++k)
+		{
+			Frect rc;
+			row_rect(side, k, rc);
+			quad(rc, argb(175, 6, 7, 8));
+			Frect key = rc, line = rc;
+			if (side)
+				key.x2 = rc.x1 + row_h * kx, line.x2 = rc.x1 + 2.f * kx;
+			else
+				key.x1 = rc.x2 - row_h * kx, line.x1 = rc.x2 - 2.f * kx;
+			quad(key, argb(150, 34, 36, 38));
+			quad(line, argb(170, 150, 150, 150));
+		}
 	UIRender->SetShader(**s_radial_shader);
 	UIRender->FlushPrimitive();
 
@@ -1433,17 +1465,6 @@ static void render_wheel()
 	auto sector_view = [&](int i)
 	{
 		view v;
-		if (s_radial_actions)
-		{
-			const action_entry& e = s_action_entries[i];
-			v.text = CStringTable().translate(e.label.c_str());
-			if (e.icon.size())
-			{
-				v.section = e.icon.c_str();
-				v.grid = section_grid(v.section);
-			}
-			return v;
-		}
 		const radial_item& item = s_radial_items[i];
 		PIItem itm = item.slot != NO_ACTIVE_SLOT ? inv.ItemFromSlot(item.slot) : nullptr;
 		v.text = itm ? shared_str(itm->NameShort()) : CStringTable().translate(item.label);
@@ -1476,7 +1497,7 @@ static void render_wheel()
 		label->SetText(v.text.c_str());
 		label->SetTextColor(chosen ? argb(255, 255, 255, 255) : (v.dim ? argb(255, 110, 110, 110) : argb(255, 215, 215, 215)));
 		// Without an icon the name takes the sector's middle
-		const float label_y = v.section ? at.y + (many ? 18.f : 24.f) * zoom : at.y - 9.f;
+		const float label_y = v.section ? at.y + 24.f * zoom : at.y - 9.f;
 		label->SetWndPos(Fvector2().set(at.x - label_w * 0.5f * kx, label_y));
 		label->Draw();
 
@@ -1505,6 +1526,26 @@ static void render_wheel()
 		s_radial_title->SetTextColor(argb(255, 255, 214, 140));
 		s_radial_title->Draw();
 	}
+
+	// The buttons' glyphs and actions
+	CGameFont* font = UI().Font().pFontLetterica16Russian;
+	for (int side = 0; side < 2; ++side)
+		for (int k = 0; k < row_count[side]; ++k)
+		{
+			Frect rc;
+			row_rect(side, k, rc);
+			const float y = rc.y1 + row_h * 0.5f - 8.f;
+			Fvector2 key = {side ? rc.x1 + row_h * 0.5f * kx : rc.x2 - row_h * 0.5f * kx, y};
+			Fvector2 text = {side ? rc.x1 + (row_h + 8.f) * kx : rc.x2 - (row_h + 8.f) * kx, y};
+			UI().ClientToScreenScaled(key);
+			UI().ClientToScreenScaled(text);
+			font->SetAligment(CGameFont::alCenter);
+			font->SetColor(argb(255, 255, 214, 140));
+			font->Out(key.x, key.y, "%s", gamepad_button_text(rows[side][k]->button));
+			font->SetAligment(side ? CGameFont::alLeft : CGameFont::alRight);
+			font->SetColor(argb(255, 225, 225, 225));
+			font->Out(text.x, text.y, "%s", CStringTable().translate(rows[side][k]->label.c_str()).c_str());
+		}
 }
 
 void gamepad_render_ui(bool main_menu)

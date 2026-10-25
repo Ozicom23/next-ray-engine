@@ -9,7 +9,7 @@ void gamepad_register_commands();
 // CGamePersistent::OnAppStart / OnAppEnd: the handler CInput calls every frame
 void gamepad_start();
 void gamepad_stop();
-// The wheels over the HUD (CHUDManager::RenderUI) and the on-screen keyboard over the level's dialogs or the main
+// The wheel over the HUD (CHUDManager::RenderUI) and the on-screen keyboard over the level's dialogs or the main
 // menu's (CMainMenu, main_menu true)
 void gamepad_render_ui(bool main_menu);
 // The left stick for the actor's movement, after the dead zone: x right, y forward, length 0..1. False when the
@@ -20,9 +20,10 @@ bool gamepad_radial_open();
 // Rumble: low (heavy) and high (light) motors 0..1 for time seconds, scaled by gp_vibration
 void gamepad_rumble(float low, float high, float time);
 
-// For scripts (the actions wheel, zzzz_nextray_gamepad.script):
-// a sector of the actions wheel as it opens: its name (a string id or the text) and an item section for its icon
-void gamepad_wheel_add(LPCSTR label, LPCSTR icon);
+// For scripts (the wheel's buttons, zzzz_nextray_gamepad.script):
+// a button's action while the wheel is held, as it opens: the button (gpX, gpDPAD_UP...) and its name (a string id or
+// the text)
+void gamepad_wheel_add(LPCSTR button, LPCSTR label);
 // a keyboard key pressed (a mod's key): with its modifier key held (0 none), taps times, held hold seconds (0: a tap)
 void gamepad_press_key(int dik, int modifier, int taps, float hold);
 // an action pressed as if by its key (key_bindings.k...)
