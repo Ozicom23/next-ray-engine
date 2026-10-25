@@ -601,7 +601,9 @@ void CMainMenu::CheckForErrorDlg()
 
 void CMainMenu::SwitchToMultiplayerMenu()
 {
-	m_startDialog->Dispatch(2, 1);
+	// Anomaly's start dialog has no multiplayer menu (CoP's): MCM's main menu takes Dispatch(2) for it and calls a
+	// method the engine doesn't have, a crash after a failed multiplayer start; the main menu stays as it is
+	Msg("* main menu: no multiplayer menu to switch to");
 };
 
 void CMainMenu::DestroyInternal(bool bForce)

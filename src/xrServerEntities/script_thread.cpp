@@ -45,7 +45,8 @@ CScriptThread::CScriptThread(LPCSTR caNamespaceName, bool do_string, bool reload
 
 	try
 	{
-		string256 S;
+		// As the console's run_string outside a level (a level's commands were cut at about 235 characters)
+		string4096 S;
 		if (!do_string)
 		{
 			m_script_name = caNamespaceName;
