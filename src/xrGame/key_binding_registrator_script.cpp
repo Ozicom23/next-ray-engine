@@ -2,6 +2,7 @@
 #include <dinput.h>
 #include "key_binding_registrator.h"
 #include "xr_level_controller.h"
+#include "gamepad.h"
 #include "xrEngine/xr_input.h"
 
 using namespace luabind;
@@ -25,6 +26,11 @@ void key_binding_registrator::script_register(lua_State* L)
 		def("dik_to_bind", &dik_to_bind),
 		def("bind_to_dik", &get_action_dik),
 		def("key_state", &key_state),
+		def("gamepad_key_prompt", &gamepad_key_prompt),
+		def("gamepad_wheel_add", &gamepad_wheel_add),
+		def("gamepad_press_key", &gamepad_press_key),
+		def("gamepad_send_action", &gamepad_send_action),
+		def("gamepad_menu_target", &gamepad_menu_target),
 
 		class_<enum_exporter<EGameActions>>("key_bindings")
 		.enum_("commands")

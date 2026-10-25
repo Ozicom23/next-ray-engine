@@ -41,6 +41,7 @@ public:
 	virtual void Enable(bool status);
 
 	void SetPasswordMode(bool mode = true);
+	bool InputFocus() const { return m_bInputFocus; } // taking typed text (the gamepad's on-screen keyboard shows)
 
 	virtual CUIWindow* ui_cast_window() { return this; }
 	virtual CUIStatic* ui_cast_static() { return this; }

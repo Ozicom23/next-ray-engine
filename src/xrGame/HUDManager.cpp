@@ -326,7 +326,7 @@ void CHUDManager::RenderUI()
 			xrCriticalSectionGuard guard(&ui_lock);
 			pUIGame->Render();
 		}
-		gamepad_render_ui();
+		gamepad_render_ui(false);
 
 		UI().RenderFont();
 	}

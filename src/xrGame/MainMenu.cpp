@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "MainMenu.h"
+#include "gamepad.h"
 #include "UI/UIDialogWnd.h"
 #include "ui/UIMessageBoxEx.h"
 #include "../xrEngine/xr_IOConsole.h"
@@ -439,6 +440,7 @@ void CMainMenu::OnRender()
 	if (!OnRenderPPUI_query())
 	{
 		DoRenderDialogs();
+		gamepad_render_ui(true);
 		UI().RenderFont();
 		draw_wnds_rects();
 	}
@@ -459,6 +461,7 @@ void CMainMenu::OnRenderPPUI_main()
 	if (OnRenderPPUI_query())
 	{
 		DoRenderDialogs();
+		gamepad_render_ui(true);
 		UI().RenderFont();
 	}
 

@@ -123,6 +123,7 @@ _action actions[] = {
 	{"wpn_swap", kWPN_SWAP, _sp},
 	{"wpn_holster", kWPN_HOLSTER, _sp},
 	{"radial_menu", kRADIAL_MENU, _sp},
+	{"action_wheel", kACTION_WHEEL, _sp},
 	{NULL, kLASTACTION, _both}
 };
 
@@ -390,6 +391,18 @@ static LPCSTR gamepad_button_name(int b)
 	return (g_gamepad_playstation ? playstation : xbox)[b];
 }
 
+extern int g_gp_glyphs;
+
+LPCSTR gamepad_button_text(int b)
+{
+	static char glyph[GP_BUTTON_COUNT][2];
+	if (!g_gp_glyphs)
+		return gamepad_button_name(b);
+	glyph[b][0] = gamepad_glyphs::to_char(b);
+	glyph[b][1] = 0;
+	return glyph[b];
+}
+
 // "Pad A", "Pad A (hold)", "Pad LT + A", "Pad left stick up"
 static bool gamepad_key_name(int dik, LPSTR dest, int dest_sz)
 {
@@ -644,6 +657,19 @@ void GetActionAllBinding(LPCSTR _action, char* dst_buff, int dst_buff_sz)
 	else
 		xr_sprintf(dst_buff, dst_buff_sz, "%s%s%s", prim[0] ? prim : "", (sec[0] && prim[0]) ? " , " : "",
 		           sec[0] ? sec : "");
+}
+
+LPCSTR gamepad_key_prompt(int dik)
+{
+	static string64 prompt;
+	prompt[0] = 0;
+	if (g_gamepad_prompts && !is_gamepad_key(dik))
+	{
+		const EGameActions action = get_binded_action(dik);
+		if (action == kNOTBINDED || !gamepad_action_prompt(action, prompt, sizeof(prompt)))
+			prompt[0] = 0;
+	}
+	return prompt;
 }
 
 ConsoleBindCmds bindConsoleCmds;
@@ -921,6 +947,7 @@ void ConsoleBindCmds::save(IWriter* F)
 
 static EGameActions s_gamepad_bindings[GP_KEY_COUNT];
 static EGameActions s_gamepad_resolved[GP_KEY_COUNT];
+static int s_gamepad_keys[GP_KEY_COUNT]; // a keyboard or mouse key instead of an action, 0 none
 
 EGameActions gamepad_binding(int gp_key)
 {
@@ -928,6 +955,11 @@ EGameActions gamepad_binding(int gp_key)
 		return kNOTBINDED;
 	const int i = gp_key - GP_FIRST;
 	return s_gamepad_resolved[i] != kNOTBINDED ? s_gamepad_resolved[i] : s_gamepad_bindings[i];
+}
+
+int gamepad_key_binding(int gp_key)
+{
+	return is_gamepad_key(gp_key) ? s_gamepad_keys[gp_key - GP_FIRST] : 0;
 }
 
 int action_key_held(EGameActions action)
@@ -955,12 +987,16 @@ void gamepad_resolve(int gp_key, EGameActions action)
 static void gamepad_unbind_all()
 {
 	for (int i = 0; i < GP_KEY_COUNT; ++i)
+	{
 		s_gamepad_bindings[i] = kNOTBINDED;
+		s_gamepad_keys[i] = 0;
+	}
 }
 
 // The layout's version: a layout saved by an older one gets the bindings added since, on keys left free
-// (gamepad_layout_update). 2: LT + R3 the alternative aim
-static const int kLayoutVersion = 2;
+// (gamepad_layout_update). 2: LT + R3 the alternative aim; 3: RB held the actions wheel (it was night vision, which
+// the radial menu has)
+static const int kLayoutVersion = 3;
 static int s_layout_version = kLayoutVersion;
 
 void gamepad_layout_update()
@@ -974,13 +1010,17 @@ void gamepad_layout_update()
 		return;
 	if (s_layout_version < 2 && s_gamepad_bindings[GP_RS + GP_AIM - GP_FIRST] == kNOTBINDED)
 		s_gamepad_bindings[GP_RS + GP_AIM - GP_FIRST] = kWPN_FUNC;
+	const int rb_hold = GP_RB + GP_HOLD - GP_FIRST;
+	if (s_layout_version < 3 && !s_gamepad_keys[rb_hold] &&
+		(s_gamepad_bindings[rb_hold] == kNOTBINDED || s_gamepad_bindings[rb_hold] == kNIGHT_VISION))
+		s_gamepad_bindings[rb_hold] = kACTION_WHEEL;
 	s_layout_version = kLayoutVersion;
 }
 
 // Like STALKER 2's: the left stick moves (L3 sprints), the right one looks (R3 the knife, LT + R3 the alternative aim:
 // the weapon's other sight or aiming position), LT aims, RT fires, A jumps,
 // B crouches, X uses what's looked at or reloads (held: the next ammo type), Y swaps weapons (held: hides it), LB held
-// opens the radial menu (pressed: the detector), RB the torch (held: night vision), LT + LB / RB lean, the D-pad: up the
+// opens the radial menu (pressed: the detector), RB the torch (held: the actions wheel), LT + LB / RB lean, the D-pad: up the
 // fire mode (held: the weapon's function), down the inventory, left / right the quick slots (held: the other two),
 // View the PDA, Menu the main menu
 void gamepad_default_layout()
@@ -997,7 +1037,7 @@ void gamepad_default_layout()
 		{GP_X, kUSE_OR_RELOAD}, {GP_X + GP_HOLD, kWPN_NEXT},
 		{GP_Y, kWPN_SWAP}, {GP_Y + GP_HOLD, kWPN_HOLSTER},
 		{GP_LB, kDETECTOR}, {GP_LB + GP_HOLD, kRADIAL_MENU}, {GP_LB + GP_AIM, kL_LOOKOUT},
-		{GP_RB, kTORCH}, {GP_RB + GP_HOLD, kNIGHT_VISION}, {GP_RB + GP_AIM, kR_LOOKOUT},
+		{GP_RB, kTORCH}, {GP_RB + GP_HOLD, kACTION_WHEEL}, {GP_RB + GP_AIM, kR_LOOKOUT},
 		{GP_DPAD_UP, kWPN_FIREMODE_NEXT}, {GP_DPAD_UP + GP_HOLD, kWPN_FUNC},
 		{GP_DPAD_DOWN, kINVENTORY},
 		{GP_DPAD_LEFT, kQUICK_USE_1}, {GP_DPAD_LEFT + GP_HOLD, kQUICK_USE_3},
@@ -1009,7 +1049,8 @@ void gamepad_default_layout()
 		s_gamepad_bindings[b.key - GP_FIRST] = b.action;
 }
 
-// gp_bind <gamepad key> <action>, e.g. gp_bind gpA jump; saved as the whole layout after gp_unbind_all
+// gp_bind <gamepad key> <action or keyboard / mouse key>, e.g. gp_bind gpA jump, gp_bind gpDPAD_UP_aim kK (a mod's key,
+// pressed while the button is); saved as the whole layout after gp_unbind_all
 class CCC_GamepadBind : public IConsole_Command
 {
 public:
@@ -1022,10 +1063,19 @@ public:
 		_keyboard* kb = keyname_to_ptr(key);
 		if (!kb || !is_gamepad_key(kb->dik) || kb->dik == GP_VIRTUAL)
 			return;
-		_action* a = action_name_to_ptr(action);
-		if (!a)
-			return;
-		s_gamepad_bindings[kb->dik - GP_FIRST] = a->id;
+		const int i = kb->dik - GP_FIRST;
+		if (_action* a = action_name_to_ptr(action))
+		{
+			s_gamepad_bindings[i] = a->id;
+			s_gamepad_keys[i] = 0;
+		}
+		else if (_keyboard* pressed = keyname_to_ptr(action))
+		{
+			if (is_gamepad_key(pressed->dik))
+				return;
+			s_gamepad_bindings[i] = kNOTBINDED;
+			s_gamepad_keys[i] = pressed->dik;
+		}
 	}
 
 	virtual void Save(IWriter* F)
@@ -1033,10 +1083,9 @@ public:
 		F->w_printf("gp_unbind_all\r\n");
 		for (int i = 0; i < GP_KEY_COUNT; ++i)
 		{
-			if (s_gamepad_bindings[i] == kNOTBINDED)
-				continue;
 			LPCSTR key = dik_to_keyname(GP_FIRST + i, false);
-			LPCSTR action = id_to_action_name(s_gamepad_bindings[i]);
+			LPCSTR action = s_gamepad_keys[i] ? dik_to_keyname(s_gamepad_keys[i], false) :
+				(s_gamepad_bindings[i] != kNOTBINDED ? id_to_action_name(s_gamepad_bindings[i]) : nullptr);
 			if (key && action)
 				F->w_printf("%s %s %s\r\n", cName, key, action);
 		}
@@ -1052,7 +1101,10 @@ public:
 	{
 		_keyboard* kb = keyname_to_ptr(args);
 		if (kb && is_gamepad_key(kb->dik))
+		{
 			s_gamepad_bindings[kb->dik - GP_FIRST] = kNOTBINDED;
+			s_gamepad_keys[kb->dik - GP_FIRST] = 0;
+		}
 	}
 };
 
@@ -1082,7 +1134,8 @@ public:
 	virtual void Execute(LPCSTR args) { gamepad_default_layout(); }
 };
 
-// gp_get_bind <gamepad key>: its action's name ("none") as the command's status, for the options menu
+// gp_get_bind <gamepad key>: its action's name ("none"), or the keyboard key it presses, as the command's status, for
+// the options menu
 class CCC_GamepadGetBind : public IConsole_Command
 {
 	string64 m_last;
@@ -1092,8 +1145,11 @@ public:
 	virtual void Execute(LPCSTR args)
 	{
 		_keyboard* kb = keyname_to_ptr(args);
-		const EGameActions a = (kb && is_gamepad_key(kb->dik)) ? s_gamepad_bindings[kb->dik - GP_FIRST] : kNOTBINDED;
-		xr_strcpy(m_last, a == kNOTBINDED ? "none" : id_to_action_name(a));
+		const bool pad = kb && is_gamepad_key(kb->dik);
+		const int dik = pad ? s_gamepad_keys[kb->dik - GP_FIRST] : 0;
+		const EGameActions a = pad ? s_gamepad_bindings[kb->dik - GP_FIRST] : kNOTBINDED;
+		LPCSTR dik_name = dik ? dik_to_keyname(dik, false) : nullptr;
+		xr_strcpy(m_last, dik_name ? dik_name : (a == kNOTBINDED ? "none" : id_to_action_name(a)));
 	}
 	virtual void Status(TStatus& S) { xr_strcpy(S, m_last); }
 	virtual void Save(IWriter*) {}
@@ -1104,7 +1160,7 @@ void CCC_RegisterInput()
 	initialize_bindings();
 	for (int i = 0; i < GP_KEY_COUNT; ++i)
 		s_gamepad_resolved[i] = kNOTBINDED;
-	gamepad_default_layout();
+	gamepad_default_layout(); // also clears the keyboard keys (gamepad_unbind_all)
 	CMD1(CCC_GamepadBind, "gp_bind");
 	CMD1(CCC_GamepadUnbind, "gp_unbind");
 	CMD1(CCC_GamepadUnbindAll, "gp_unbind_all");

@@ -113,11 +113,12 @@ enum EGameActions
 	kEDITOR,
 
 	// Gamepad actions (gamepad.cpp), decided when pressed: use what's looked at or reload, the other of the two weapon
-	// slots, hide or take out the weapon, the radial menu
+	// slots, hide or take out the weapon, the radial menu, the actions wheel (mods' keys)
 	kUSE_OR_RELOAD,
 	kWPN_SWAP,
 	kWPN_HOLSTER,
 	kRADIAL_MENU,
+	kACTION_WHEEL,
 
 	kLASTACTION,
 	kNOTBINDED,
@@ -202,10 +203,17 @@ extern ConsoleBindCmds bindConsoleCmds;
 // Gamepad layout (gp_bind): the action of each gamepad key (GP_ codes), kNOTBINDED for none. A key pressed for an
 // action decided at the press (kUSE_OR_RELOAD...) has that action until released (gamepad_resolve)
 EGameActions gamepad_binding(int gp_key);
+// ... or the keyboard or mouse key it presses (gp_bind gpX_aim kK: a mod's key), 0 for none
+int gamepad_key_binding(int gp_key);
 // Key names in texts ($$ACTION_...$$) are the gamepad's while it is the device in use (gamepad.cpp)
 extern bool g_gamepad_prompts;
+// The gamepad's button for the action a keyboard or mouse key is bound to, as texts name it; "" while texts name
+// keyboard keys or the action has none on the gamepad (gamepad_key_prompt in scripts)
+LPCSTR gamepad_key_prompt(int dik);
 // ... named as a PlayStation controller's (Cross, L1...), not an Xbox one's
 extern bool g_gamepad_playstation;
+// A button (0..GP_BUTTON_COUNT-1) as texts name it: its glyph (gp_glyphs) or its name
+LPCSTR gamepad_button_text(int b);
 // A key of the action is down: its keyboard or mouse keys (primary, secondary) or a gamepad key bound to it
 bool is_action_key_held(EGameActions action);
 int action_key_held(EGameActions action); // the key holding it (a keyboard, mouse or gamepad key), 0: none

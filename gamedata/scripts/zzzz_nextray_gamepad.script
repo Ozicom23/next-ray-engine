@@ -1,0 +1,171 @@
+-- neXt-Ray gamepad support for GAMMA's mods (in the engine's gamedata). The original mods stay untouched: a mod's
+-- function is changed at runtime only when its source text is exactly the known one (other executables, or another
+-- version of the mod, run it as it is, with one log line); the actions wheel presses the mods' own keys.
+--
+-- 1. Catspaw's mods (Interaction Dot Marks, Fair Fast Travel, Milspec PDA...): utils_catspaw_text.bindtext names a
+--    key by MCM's own table (ui_mcm.display_key), "F" for the use key also with the gamepad in use. While texts name
+--    the gamepad's buttons, a key bound to an action is named by its gamepad button, as the engine names it in texts
+--    ($$ACTION_use$$); modifiers (Shift, Ctrl, Alt) and keys of no action keep their names.
+-- 2. The actions wheel (RB held by default): the mods' actions a gamepad has no button for, as the engine's custom
+--    actions their scripts listen to (key_bindings.kCUSTOM..., pressed as if by their key, bound or not) or a mod's
+--    MCM key (pressed with its modifier, tapped twice or held as its MCM settings want). Only those whose mod is there
+--    (its script) and whose key is bound (MCM); the wheel's order is the list's, clockwise from the top.
+-- 3. The menu cursor's targets in GAMMA's inventory (its item cells).
+
+local function msg(fmt, ...)
+	log(string.format("[neXt-Ray gamepad] " .. fmt, ...))
+end
+
+---------------------------------------------------------------------------------------------------------------------
+-- 1. utils_catspaw_text.bindtext
+
+local modifiers = { [DIK_keys.DIK_LSHIFT] = true, [DIK_keys.DIK_LCONTROL] = true, [DIK_keys.DIK_LMENU] = true }
+
+local function catspaw_patch()
+	local m = utils_catspaw_text
+	local native = gamepad_key_prompt
+	if not (native and m and type(m.bindtext) == "function" and debug and debug.getupvalue) then return false end
+	local fp = zzzz_nextray_load.source_hash(m.bindtext)
+	if fp ~= "808:743618750" then
+		msg("utils_catspaw_text.bindtext is not the known one (%s), kept", tostring(fp))
+		return false
+	end
+	local i = 1
+	while true do
+		local name, key_name = debug.getupvalue(m.bindtext, i)
+		if not name then return false end
+		if name == "DIK_name" and type(key_name) == "function" then
+			debug.setupvalue(m.bindtext, i, function(dik)
+				local pad = (not modifiers[dik]) and type(dik) == "number" and native(dik)
+				if pad and pad ~= "" then
+					return pad
+				end
+				return key_name(dik)
+			end)
+			return true
+		end
+		i = i + 1
+	end
+end
+
+---------------------------------------------------------------------------------------------------------------------
+-- 2. The actions wheel
+
+local function has_script(name)
+	return getFS():exist("$game_scripts$", name .. ".script") ~= nil
+end
+
+-- The firearm in hands (not a knife)
+local function firearm_section()
+	local item = db.actor and db.actor:active_item()
+	if not (item and IsWeapon(item)) then
+		return
+	end
+	local id = item:clsid()
+	if id == clsid.wpn_knife_s or id == clsid.wpn_knife then
+		return
+	end
+	return item:section()
+end
+
+local function slot_section(slot)
+	local item = db.actor and db.actor:item_in_slot(slot)
+	return item and item:section()
+end
+
+-- label: a string id; action: the engine's action, or mcm: a key's MCM path (mod, mode: its modifier and press type's
+-- paths); script: the mod's script; icon: an item section for its icon (a function: looked up as the wheel opens)
+local wheel = {
+	{ label = "st_gp_wheel_unjam", action = "kCUSTOM22", script = "arti_jamming", icon = firearm_section },
+	{ label = "st_gp_wheel_quick_melee", action = "kCUSTOM24", script = "quickdraw", icon = function() return slot_section(1) end },
+	{ label = "st_gp_wheel_grenade_throw", action = "kCUSTOM19", script = "actor_effects", icon = function() return slot_section(4) end },
+	{ label = "st_gp_wheel_lower_weapon", action = "kSAFEMODE", script = "lower_weapon_sprint", icon = firearm_section },
+	{ label = "st_gp_wheel_map", action = "kCUSTOM20", script = "actor_effects", icon = "device_pda_1" },
+	{ label = "st_gp_wheel_companions", action = "kCUSTOM18", script = "ui_addon_companion_quick_menu" },
+	{ label = "st_gp_wheel_reticle", mcm = "3d_scopes/mark_switch/keybind", mod = "3d_scopes/mark_switch/modifier",
+		mode = "3d_scopes/mark_switch/press_type", script = "z_mark_switch" },
+	{ label = "st_gp_wheel_suppressor", action = "kCUSTOM13", script = "item_weapon" },
+	{ label = "st_gp_wheel_unload_all", action = "kCUSTOM15", script = "item_weapon", icon = "ammo_9x18_fmj" },
+	{ label = "st_gp_wheel_freelook", action = "kFREELOOK" },
+}
+
+local shown = {} -- the wheel's sectors as it opened: their entries
+
+local function mcm_get(path)
+	return ui_mcm and ui_mcm.get and ui_mcm.get(path)
+end
+
+local function available(e)
+	if e.script and not has_script(e.script) then
+		return false
+	end
+	if e.mcm then
+		local key = mcm_get(e.mcm)
+		return type(key) == "number" and key > 0
+	end
+	return key_bindings[e.action] ~= nil
+end
+
+-- A mod's MCM key: with its modifier, tapped twice (press type 1) or held past MCM's hold time (2)
+local function press_mcm(e)
+	local key = mcm_get(e.mcm)
+	local mod = e.mod and tonumber(mcm_get(e.mod)) or 0
+	local mode = e.mode and tonumber(mcm_get(e.mode)) or 0
+	local mod_dik = ({ DIK_keys.DIK_LSHIFT, DIK_keys.DIK_LCONTROL, DIK_keys.DIK_LMENU })[mod] or 0
+	local tap_ms = tonumber(mcm_get("mcm/mcm_kb/mcm_kb_main/dtaptime2")) or 200
+	local hold = 0
+	if mode == 2 then
+		hold = (tonumber(mcm_get("mcm/mcm_kb/mcm_kb_main/presstime")) or 2) * tap_ms * 1.3 / 1000
+	end
+	gamepad_press_key(key, mod_dik, mode == 1 and 2 or 1, hold)
+end
+
+function action_wheel_open()
+	shown = {}
+	for _, e in ipairs(wheel) do
+		if available(e) then
+			shown[#shown + 1] = e
+			local icon = type(e.icon) == "function" and e.icon() or e.icon
+			gamepad_wheel_add(e.label, type(icon) == "string" and icon or "")
+		end
+	end
+end
+
+function action_wheel_choose(i)
+	local e = shown[i]
+	if not e then
+		return
+	end
+	if e.mcm then
+		press_mcm(e)
+	else
+		gamepad_send_action(key_bindings[e.action])
+	end
+end
+
+---------------------------------------------------------------------------------------------------------------------
+-- 3. The menu cursor's targets: GAMMA's inventory (utils_ui, ui_inventory.GUI: also trade, loot, stashes) draws its
+--    item cells as plain statics; their windows, those shown, are given to the engine (gamepad_menu_target)
+
+function menu_targets()
+	local gui = ui_inventory and ui_inventory.GUI
+	if not (gui and gui.IsShown and gui:IsShown() and type(gui.CC) == "table") then
+		return
+	end
+	for _, cc in pairs(gui.CC) do
+		if type(cc.cell) == "table" then
+			for _, ci in pairs(cc.cell) do
+				if ci.cell and ci:IsShown() then
+					gamepad_menu_target(ci.cell)
+				end
+			end
+		end
+	end
+end
+
+---------------------------------------------------------------------------------------------------------------------
+
+function on_game_start()
+	local catspaw_on = catspaw_patch()
+	msg("Catspaw's key names by the gamepad %s", catspaw_on and "on" or "off")
+end

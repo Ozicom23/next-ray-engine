@@ -870,6 +870,9 @@
 	<string id="ui_mm_modded_exes_control_gamepad_gp_adaptive_triggers">
 		<text>DualSense Trigger Resistance (gp_adaptive_triggers)</text>
 	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_aim_slowdown">
+		<text>Aim Slowdown on Enemies (gp_aim_slowdown)</text>
+	</string>
 	<string id="ui_mm_modded_exes_control_gamepad_gp_sony">
 		<text>Read PlayStation Controllers Directly (gp_sony)</text>
 	</string>
@@ -1122,6 +1125,9 @@
 	<string id="st_gp_act_radial_menu">
 		<text>Radial Menu</text>
 	</string>
+	<string id="st_gp_act_action_wheel">
+		<text>Actions Wheel</text>
+	</string>
 	<string id="st_gp_act_show_detector">
 		<text>Detector</text>
 	</string>
@@ -1199,6 +1205,37 @@
 	</string>
 	<string id="st_gp_radial_night_vision">
 		<text>Night Vision</text>
+	</string>
+
+	<string id="st_gp_wheel_unjam">
+		<text>Unjam</text>
+	</string>
+	<string id="st_gp_wheel_quick_melee">
+		<text>Quick Melee</text>
+	</string>
+	<string id="st_gp_wheel_grenade_throw">
+		<text>Throw Grenade</text>
+	</string>
+	<string id="st_gp_wheel_lower_weapon">
+		<text>Lower Weapon</text>
+	</string>
+	<string id="st_gp_wheel_map">
+		<text>Map</text>
+	</string>
+	<string id="st_gp_wheel_companions">
+		<text>Companions</text>
+	</string>
+	<string id="st_gp_wheel_reticle">
+		<text>Switch Reticle</text>
+	</string>
+	<string id="st_gp_wheel_suppressor">
+		<text>Suppressor</text>
+	</string>
+	<string id="st_gp_wheel_unload_all">
+		<text>Unload All</text>
+	</string>
+	<string id="st_gp_wheel_freelook">
+		<text>Free Look</text>
 	</string>
 
 	<!-- Camera -->

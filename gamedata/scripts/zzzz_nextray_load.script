@@ -14,8 +14,8 @@ local function msg(fmt, ...)
 end
 
 -- The function's source lines as the game reads its script file now (also from the game's archives), end of lines
--- without "\r", hashed like _g_patches' fingerprint
-local function source_hash(f)
+-- without "\r", hashed like _g_patches' fingerprint (also for zzzz_nextray_gamepad)
+function source_hash(f)
 	local info = debug and debug.getinfo and debug.getinfo(f, "S")
 	if not (info and info.source and info.source:sub(1, 1) == "@" and info.linedefined and info.lastlinedefined) then
 		return nil
