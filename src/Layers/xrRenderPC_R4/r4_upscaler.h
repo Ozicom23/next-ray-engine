@@ -77,3 +77,7 @@ public:
 
 // Upscaler implementation for EUpscalerType, nullptr for upscaler_off (and XeSS outside the DX12 renderer)
 CUpscaler* GetUpscaler(u32 type);
+
+// Frees an upscaler no longer used: shut down, or with OptiScaler installed (OptiScaler.ini next to the exe) only its
+// feature released and its library kept until the game exits (OptiScaler's DLSS crashes when NGX is shut down)
+void ReleaseUpscaler(CUpscaler* upscaler);

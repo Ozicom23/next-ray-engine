@@ -67,3 +67,28 @@ CUpscaler* GetUpscaler(u32 type)
 	default: return nullptr;
 	}
 }
+
+static bool optiscaler_installed()
+{
+	static int installed = -1;
+	if (installed < 0)
+	{
+		string_path ini;
+		GetModuleFileNameA(nullptr, ini, sizeof(ini));
+		if (char* slash = strrchr(ini, '\\'))
+			slash[1] = 0;
+		xr_strcat(ini, "OptiScaler.ini");
+		installed = GetFileAttributesA(ini) != INVALID_FILE_ATTRIBUTES;
+		if (installed)
+			Msg("* Upscalers: OptiScaler installed, kept loaded until the game exits");
+	}
+	return installed != 0;
+}
+
+void ReleaseUpscaler(CUpscaler* upscaler)
+{
+	if (optiscaler_installed())
+		upscaler->ReleaseFeature();
+	else
+		upscaler->Shutdown();
+}

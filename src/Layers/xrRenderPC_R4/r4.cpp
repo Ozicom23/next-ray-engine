@@ -599,7 +599,7 @@ void CRender::destroy()
 	xr_delete(Target);
 	for (u32 type = upscaler_dlss; type < upscaler_count; ++type)
 		if (CUpscaler* upscaler = GetUpscaler(type))
-			upscaler->Shutdown();
+			ReleaseUpscaler(upscaler);
 	Device.seqRender.Remove(&g_PerfOverlay);
 	Device.seqRender.Remove(&g_ShaderProgressOverlay);
 	g_PerfOverlay.Destroy();
@@ -628,7 +628,7 @@ void CRender::reset_begin()
 // Upscalers need the Screen Space Shaders motion vectors; DLSS also needs an NVIDIA RTX GPU
 // Which upscalers this GPU supports, for the options menu (r4_upscaler_available). DLSS is only
 // tried on NVIDIA adapters (DXVK reports NVIDIA GPUs as AMD unless NVAPI is enabled) and released
-// again when not in use, so the menu offers it only where it can start
+// again when not in use (ReleaseUpscaler: kept loaded with OptiScaler), so the menu offers it only where it can start
 void CRender::upscaler_probe()
 {
 	ps_r4_upscaler_available = 0;
@@ -644,7 +644,7 @@ void CRender::upscaler_probe()
 		{
 			if (dlss->Init())
 				ps_r4_upscaler_available |= 1;
-			dlss->Shutdown();
+			ReleaseUpscaler(dlss);
 		}
 	}
 	// XeSS (DX12 renderer): any GPU with Shader Model 6.4; released again when not in use, like DLSS
@@ -654,7 +654,7 @@ void CRender::upscaler_probe()
 	{
 		if (xess->Init())
 			ps_r4_upscaler_available |= 4;
-		xess->Shutdown();
+		ReleaseUpscaler(xess);
 	}
 	Msg("* Upscalers available: %s%s%s%s", (ps_r4_upscaler_available & 1) ? "DLSS " : "",
 	    (ps_r4_upscaler_available & 2) ? "FSR " : "", (ps_r4_upscaler_available & 4) ? "XeSS" : "",
@@ -699,7 +699,7 @@ void CRender::reset_end()
 		// Free the one no longer used (e.g. NGX when switching from DLSS to FSR)
 		if (previous != o.upscaler)
 			if (CUpscaler* old_upscaler = GetUpscaler(previous))
-				old_upscaler->Shutdown();
+				ReleaseUpscaler(old_upscaler);
 
 		CUpscaler* upscaler = GetUpscaler(o.upscaler);
 		Msg("* Upscaler: %s", upscaler ? upscaler->Name() : "off");
