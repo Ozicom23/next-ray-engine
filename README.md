@@ -1,5 +1,7 @@
 <p align="center"><img src="docs/splash.png" width="500" alt="neXt-Ray x64 / DX12"></p>
 
+<p align="center"><a href="https://ko-fi.com/ozicom23"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Support me on Ko-fi"></a></p>
+
 # neXt-Ray Engine
 
 A performance engine for [G.A.M.M.A.](https://github.com/Grokitach/Stalker_GAMMA): more fps, fewer stutters, faster
@@ -13,67 +15,43 @@ Everything Modded Exes has is still here.
 
 ## Highlights
 
-### Upscaling and frame generation
-<!-- screenshot: native vs DLSS/FSR quality, scope lens sharp after the upscaler -->
-NVIDIA DLSS 4, AMD FSR 3.1 and Intel XeSS, with FSR or XeSS frame generation on top. Scope lenses, night vision, the
-gas mask and the PDA are drawn after the upscaler, so they stay sharp. Pick them in Video > Advanced.
+### DirectX 12
+<!-- screenshot: DX11 vs DX12, performance overlay in the same spot -->
+A Direct3D 12 renderer next to the DX11 one (`AnomalyDX12AVX.exe`), with HDR10 output that keeps GAMMA's look.
 
-### DirectX 12 and HDR
-<!-- screenshot: HDR on / off -->
-A Direct3D 12 renderer next to the DX11 one, with HDR10 output that keeps GAMMA's look (Video > Basic). FSR frame
-generation runs on its own GPU queue.
+### Upscaling: DLSS, FSR, XeSS
+<!-- screenshot: native vs upscaled, scope lens sharp -->
+NVIDIA DLSS 4, AMD FSR 3.1 and Intel XeSS. Scope lenses, night vision, the gas mask and the PDA are drawn after the
+upscaler, so they stay sharp. Video > Advanced.
 
-### Faster frames, same image
-<!-- screenshot: performance overlay, before / after in the same spot -->
-Hidden objects and shadows are skipped, far shadows and lamp shadows are reused between frames, and trees are drawn in
-batches: about 13% less GPU time per frame and a fifth fewer draw calls.
+### Frame generation
+<!-- screenshot: performance overlay, frame generation off / on -->
+FSR or XeSS frame generation on top of the upscaler, on any GPU that runs them. On DX12, FSR's runs on its own GPU
+queue.
 
-### Fewer stutters
-<!-- screenshot: frame time graph, before / after -->
-Lua's garbage collector, GAMMA's biggest source of hitches, now works in the background while the frame renders. With
-its last step in testing (`lua_parallel_gc_paced 2`), a benchmark flight gets 16% more fps, a 70% higher 1% low, and
-the longest frame less than half as long. A-Life's updates and squads coming online are spread over several
-frames: a squad no longer freezes the game for up to a third of a second when it appears.
+### Texture streaming
+<!-- screenshot: performance overlay VRAM line, before / after -->
+Textures load as they are needed instead of all at once: texture memory at full quality 6.25 GB -> about 2.6 GB.
 
-### Less memory
-Textures stream in as they are needed: texture memory at full quality 6.25 GB -> about 2.6 GB.
+### General optimization
+<!-- before / after screenshots with the performance overlay, same spot:
+| Modded Exes | neXt-Ray |
+|---|---|
+| ![before](docs/img/before.png) | ![after](docs/img/after.png) | -->
+Hundreds of smaller changes that add up, all with the same image:
+- **Rendering:** hidden objects and shadows skipped, far and lamp shadows reused between frames, trees drawn in batches.
+- **Lua scripts:** the garbage collector works in the background (GAMMA's biggest source of hitches), a faster JIT and
+  faster calls into the engine.
+- **A-Life:** squads coming online and their updates spread over several frames: no freeze when a squad appears.
+- **GAMMA's mods:** the most expensive scripts and shaders made cheaper without touching their files.
 
-### Faster loading
-Collision and script caches, a faster file index, the next level read ahead near its level changer, and level changes
-behind a short fade: about a third less time per level change.
-
-### Gamepad and gyro
-<!-- screenshot: radial menu with gamepad prompts -->
-Full gamepad play with a STALKER 2-like layout, a radial menu and button prompts. DualSense and DualShock 4 add gyro
-aiming and adaptive triggers.
-
-### Tools
-<!-- screenshot: performance overlay detailed -->
-A performance overlay (fps, CPU and GPU time, memory), Lua cost per mod, crash reports that name the mod at fault, a
-watchdog that turns a frozen game into a crash report, and repeatable benchmark flights.
-
-## Patches for GAMMA's mods
-Some of GAMMA's own mods are made cheaper without changing what they do; their files stay untouched.
-
-**Built in**, nothing to install:
-- Dynamic Anomalies' 200-350 per-frame checks go through one dispatcher: 0.58 -> 0.07 ms per frame.
-- Useful Idiots' emission cover cache, 3DSS's scope marker shaders and story item lookups no longer slow down loads:
-  about 10% faster level changes.
-- 3DSS no longer loads HUD models for the weapons NPCs carry (never drawn): no 7-45 ms hitch each time.
-- Squads find their targets through an index instead of scanning ~1000 simulation objects at every update: about
-  0.25 ms less main-thread work per frame on the Deck.
-- Guards Spawner's check on every enemy evaluation looks only at the guard involved: ~10% less NPC update time once
-  its guards are out.
-- Cheaper versions of Screen Space Shaders' terrain, AO, fog, SSR and debanding, the same image: about 1.5 ms less GPU
-  time per frame on the Steam Deck (terrain alone ~1 ms), more with a lot of sky in view.
-
-Each patch applies only to the exact version of the mod it was made for. After that mod updates, the patch switches
-itself off and the mod runs as it is. A file named `nextray_perf_off` in `appdata` turns the script patches off,
-`r4_shader_patches 0` the shader ones. The `neXt-Ray performance patches` MO2 mod of earlier builds is no longer needed
-and can be removed.
+### Fade to black transitions
+<!-- video: a level change, cold (first time) and warm (files cached) -->
+Level changes behind a short fade to black instead of the loading screen, with the next level read ahead near its level
+changer: about a third less time per level change.
 
 ## More
-- [Features](docs/FEATURES.md): everything added, with the console variables.
+- [Features](docs/FEATURES.md): everything added, with the console variables and the numbers.
 - [Development](docs/DEVELOPMENT.md): building, testing, the rules for changes.
 
 ## License
