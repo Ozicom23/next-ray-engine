@@ -2,23 +2,45 @@
 
 Building, testing and the rules for changes. Back to the [README](../README.md).
 
+## Renderers
+
+DX12 (`AnomalyDX12AVX.exe`, `src/Layers/xrRenderDX12`) is the main renderer: new features land there first, and
+performance is measured there. DX11 (`AnomalyDX11AVX.exe`) is kept working for older PCs. Both exes share the R4
+renderer code in `src/Layers/xrRenderPC_R4`; code for one API only sits behind `USE_DX12`.
+
+Some features are DX12 only: XeSS, frame generation, variable rate shading, HDR scene highlights.
+
 ## Building
 
-The build is the CI's (`.github/workflows/dev-build.yml`): configuration `DX11-AVX` builds both `AnomalyDX11AVX.exe`
-and `AnomalyDX12AVX.exe`. A plain `msbuild` silently leaves out DLSS and FSR; they need:
-1. the NVIDIA DLSS SDK (tag in `dev-build.yml`) in `src/3rd party/NVIDIA-DLSS`,
-2. the FSR shaders: `src/3rd party/FidelityFX-FSR3/compile_shaders.ps1`,
-3. the frame generation shaders: `compile_shaders_dx12.ps1 -Compiler <FidelityFX_SC.exe>` (FidelityFX SDK v1.1.4),
-4. `msbuild /m /p:Configuration=DX11-AVX src/engine-vs2022.sln`.
+Visual Studio 2022, configuration `DX11-AVX` of `src/engine-vs2022.sln`. It builds both exes.
 
-Every push to `master` runs the dev build in GitHub Actions (~38 min) and uploads the package and the PDBs.
+A plain build silently leaves out the upscalers. Before it, as in the CI (`.github/workflows/dev-build.yml`):
+1. the NVIDIA DLSS SDK (tag `DLSS_SDK_TAG` in `dev-build.yml`) into `src/3rd party/NVIDIA-DLSS`,
+2. the Intel XeSS SDK (tag `XESS_SDK_TAG`) into `src/3rd party/Intel-XeSS`,
+3. the FSR shaders: `src/3rd party/FidelityFX-FSR3/compile_shaders.ps1`,
+4. the frame generation shaders: `compile_shaders_dx12.ps1 -Compiler <FidelityFX_SC.exe>` (FidelityFX SDK v1.1.4),
+5. `msbuild /m /p:Configuration=DX11-AVX src/engine-vs2022.sln`.
 
-## Testing: remote console
+The game needs `nvngx_dlss.dll` and the XeSS DLLs (`libxess.dll`, `libxess_fg.dll`, `libxell.dll`) next to the exes.
+
+Every push to `master` runs the dev build in GitHub Actions and uploads the package and the debug symbols.
+
+## Branches
+
+- `master`: stable, what releases are made from.
+- `multiplayer`: the multiplayer work in progress.
+
+## Testing
+
+Test on DX12 first, then check that DX11 still works. A shader change is compared in separate game sessions on DX12
+(`vid_restart` keeps the compiled shaders).
+
+### Remote console
 
 Start the game with `-dbg -remote_console` (MO2: the executable's arguments). The engine then reads console commands
 from `appdata/remote_cmd.txt` and writes its state twice a second to `appdata/remote_status.txt`
-(`state=menu|level|loading|idle`, `fps`, `frame`, `queue`, `waiting`, `last`). Write the command file to a temporary name
-and rename it, one command per line; the game deletes it when it has taken the commands.
+(`state=menu|level|loading|idle`, `fps`, `frame`, `queue`, `waiting`, `last`). Write the command file under a
+temporary name and rename it, one command per line; the game deletes it when it has taken the commands.
 
 Commands only for the remote console:
 - `rc_wait <s>`: wait before the next commands,
@@ -38,14 +60,12 @@ tools/remote_console.sh transition x y z    # travel through a level changer, pr
 tools/remote_console.sh status | log 50 | quit
 ```
 
-Useful in tests: `screenshot`, `dbg_freeze 1` (time stops, rendering goes on), `vid_restart`, `run_string <lua>`
-(about 240 characters at most), and the profilers in [FEATURES.md](FEATURES.md#tools). A frozen game writes a hang
-dump (`logs/hang_*.txt`).
+Useful in tests: `screenshot`, `dbg_freeze 1` (time stops, rendering goes on), `vid_restart`, `run_string <lua>`, and
+the profilers in [FEATURES.md](FEATURES.md#tools). A frozen game writes a hang dump (`logs/hang_*.txt`).
 
 ## Rules for changes
-- No visual or behaviour change from GAMMA without an option; new optimizations must give the same image.
+- No visual or gameplay change from GAMMA without an option; optimizations must give the same image.
 - Mods are not edited. Script fixes for them go into the engine's gamedata and apply only to the mod's known version
   (fingerprints); shader fixes go into `gamedata/shaders/nextray/<path>`, the whole patched file with the original's
   CRC32 on its first line (`CRC32 <zlib crc32 of the mod's file>`, `group <name>` for files that only work together).
-  A changed shader A/Bs in separate game sessions on D3D12 (`vid_restart` keeps the compiled shaders).
 - Don't name variables `far` / `near` (Windows macros).
