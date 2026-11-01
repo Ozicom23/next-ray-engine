@@ -49,8 +49,7 @@ cheaper versions, without touching the mods' files. The image stays the same.
 
 ### Faster level transitions
 <!-- video: cold and warm transition -->
-No more loading screen between levels: the screen fades to black and back, and the next level starts loading while you
-walk up to the level changer. Cordon to Swamp on the Steam Deck takes 16.5 s instead of 26 s.
+Level transitions are up to 2.7x faster, with no loading screen.
 
 ## More
 - [Features](docs/FEATURES.md): the full list, with console commands and defaults
