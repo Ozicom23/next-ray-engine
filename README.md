@@ -11,6 +11,13 @@ lower memory use.
 It is built on [Modded Exes](https://github.com/themrdemonized/xray-monolith) by themrdemonized, the engine GAMMA
 ships with, so everything Modded Exes has is still here.
 
+## Compatibility
+
+- **Mods** (scripts, configs, textures, shaders): anything that works with GAMMA should work with neXt-Ray, since it
+  is the same game with a different engine.
+- **Mods that ship their own exes** (for example xrRazom co-op): these won't work. They need their own engine, and
+  installing them would replace neXt-Ray.
+
 ## Features
 
 ### DirectX 12
