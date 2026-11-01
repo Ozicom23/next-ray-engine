@@ -51,6 +51,10 @@ cheaper versions, without touching the mods' files. The image stays the same.
 <!-- video: cold and warm transition -->
 Level transitions are up to 2.7x faster, with no loading screen.
 
+### Gamepad (in progress)
+<!-- screenshot -->
+Play with a controller: Xbox pads, DualSense and DualShock 4, with gyro aiming. Still being worked on.
+
 ## More
 - [Features](docs/FEATURES.md): the full list, with console commands and defaults
 - [Development](docs/DEVELOPMENT.md): building and testing
