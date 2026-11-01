@@ -22,7 +22,7 @@ ships with, so everything Modded Exes has is still here.
 
 ### DirectX 12
 <!-- screenshot -->
-A new DX12 renderer, with HDR support. DX11 is still there for older PCs.
+A new DX12 renderer with HDR. DX11 still gets updates too, for older PCs.
 
 ### Upscaling
 <!-- screenshot -->
