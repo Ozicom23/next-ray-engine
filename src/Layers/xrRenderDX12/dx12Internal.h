@@ -5,6 +5,8 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <thread>
+#include <condition_variable>
+#include <deque>
 #include <D3D12MemoryAllocator/D3D12MemAlloc.h>
 
 namespace dx12
@@ -173,6 +175,16 @@ struct Device::Impl
 	u64 Completed();
 	void WaitFence(u64 value);
 	u64 Submit(ID3D12CommandList* const* lists, UINT count); // returns the signalled value
+
+	// Device::StartGpuBusyTimer: the submissions (fence value, QPC when submitted) not completed yet, the busy total
+	std::atomic<bool> busy_on{ false };
+	bool busy_quit = false;
+	std::mutex busy_lock;
+	std::condition_variable busy_cv;
+	std::deque<std::pair<u64, u64>> busy_submits;
+	std::atomic<u64> busy_ticks{ 0 };
+	std::thread busy_thread;
+	void BusyTimer();
 	void WaitQueueIdle(); // pending initial uploads submitted, the GPU idle (no context work submitted here)
 
 	DescriptorPool rtv_pool, dsv_pool, srv_pool, sampler_pool;

@@ -80,6 +80,21 @@ void CPerfOverlay::CollectGpuTimes()
 			const float ms = float(double(t1 - t0) * 1000.0 / double(dj.Frequency));
 			m_sum.gpu += ms;
 			++m_sum.gpu_n;
+			m_gpu_good = true;
+		}
+		else if (!m_gpu_good && ++m_gpu_bad == 30)
+		{
+#ifdef USE_DX12
+			Msg("* perf_overlay: GPU timestamps give no time (frequency %llu, %llu -> %llu, disjoint %d): GPU time "
+			    "estimated from the queue's fences", dj.Frequency, t0, t1, int(dj.Disjoint));
+			HW.pDevice->StartGpuBusyTimer();
+			m_gpu_busy_last = HW.pDevice->GpuBusyMs();
+			m_gpu_estimated = true;
+#else
+			Msg("* perf_overlay: GPU timestamps give no time (frequency %llu, %llu -> %llu, disjoint %d)", dj.Frequency,
+			    t0, t1, int(dj.Disjoint));
+#endif
+			return;
 		}
 	}
 }
@@ -90,7 +105,7 @@ void CPerfOverlay::GpuFrameBegin()
 	gpu_profiler::frame_begin(ps_perf_overlay >= 3);
 
 	m_query_active = false;
-	if (!ps_perf_overlay || !CreateQueries())
+	if (!ps_perf_overlay || m_gpu_estimated || !CreateQueries())
 		return;
 
 	CollectGpuTimes();
@@ -234,6 +249,10 @@ void CPerfOverlay::Draw()
 		m_show_fps = 0.f;
 		m_show_low_fps = 0.f;
 		m_sum = {};
+#ifdef USE_DX12
+		if (m_gpu_estimated)
+			m_gpu_busy_last = HW.pDevice->GpuBusyMs();
+#endif
 		return; // this frame spans the switch
 	}
 
@@ -248,6 +267,15 @@ void CPerfOverlay::Draw()
 	const CStats* st = Device.Statistic;
 	m_sum.frame += frame_ms;
 	++m_sum.n;
+#ifdef USE_DX12
+	if (m_gpu_estimated)
+	{
+		const double busy = HW.pDevice->GpuBusyMs();
+		m_sum.gpu += float(busy - m_gpu_busy_last);
+		++m_sum.gpu_n;
+		m_gpu_busy_last = busy;
+	}
+#endif
 	if (st)
 	{
 		m_sum.cpu += _max(0.f, st->EngineTOTAL.last + st->RenderTOTAL.last - m_present_ms);
@@ -349,7 +377,8 @@ void CPerfOverlay::Draw()
 
 		if (m_show_gpu_ms > 0.f)
 		{
-			ImGui::Text("GPU %5.2f ms   CPU %5.2f ms", m_show_gpu_ms, m_show_cpu_ms);
+			ImGui::Text(m_gpu_estimated ? "GPU~%5.2f ms   CPU %5.2f ms" : "GPU %5.2f ms   CPU %5.2f ms", m_show_gpu_ms,
+			            m_show_cpu_ms);
 			ImGui::SameLine();
 			// Whichever side takes (nearly) the whole frame limits it; neither means an FPS cap, vsync or waits
 			const float limit = m_show_interval_ms * 0.85f;

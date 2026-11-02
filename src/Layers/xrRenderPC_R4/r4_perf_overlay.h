@@ -51,6 +51,11 @@ private:
 	u32 m_query_write = 0;
 	bool m_query_active = false;
 	bool m_queries_failed = false;
+	// Timestamps that never give a time (D3DMetal on macOS): the GPU time estimated from the DX12 queue's fences
+	u32 m_gpu_bad = 0;
+	bool m_gpu_good = false;
+	bool m_gpu_estimated = false;
+	double m_gpu_busy_last = 0.0;
 
 	CTimer m_present_timer;
 	float m_present_ms = 0.f; // last frame

@@ -511,7 +511,71 @@ u64 Device::Impl::Submit(ID3D12CommandList* const* lists, UINT count)
 	const u64 value = next_fence++;
 	g_device->m_queue->Signal(fence, value);
 	pending_fence = next_fence;
+	if (busy_on.load(std::memory_order_relaxed))
+	{
+		LARGE_INTEGER now;
+		QueryPerformanceCounter(&now);
+		{
+			std::lock_guard<std::mutex> busy(busy_lock);
+			busy_submits.emplace_back(value, u64(now.QuadPart));
+		}
+		busy_cv.notify_one();
+	}
 	return value;
+}
+
+void Device::Impl::BusyTimer()
+{
+	HANDLE event = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+	u64 last_done = 0;
+	for (;;)
+	{
+		std::pair<u64, u64> next;
+		{
+			std::unique_lock<std::mutex> lock(busy_lock);
+			busy_cv.wait(lock, [this] { return busy_quit || !busy_submits.empty(); });
+			if (busy_quit)
+				break;
+			next = busy_submits.front();
+		}
+		if (Completed() < next.first)
+		{
+			fence->SetEventOnCompletion(next.first, event);
+			WaitForSingleObject(event, 100);
+		}
+		const u64 completed = Completed();
+		if (completed == UINT64_MAX)
+			break; // device removed
+		LARGE_INTEGER now;
+		QueryPerformanceCounter(&now);
+		std::lock_guard<std::mutex> lock(busy_lock);
+		// Submissions completed together: the first takes the time since it could start, the others none
+		while (!busy_submits.empty() && busy_submits.front().first <= completed)
+		{
+			const u64 start = _max(busy_submits.front().second, last_done);
+			if (u64(now.QuadPart) > start)
+				busy_ticks += u64(now.QuadPart) - start;
+			last_done = u64(now.QuadPart);
+			busy_submits.pop_front();
+		}
+	}
+	CloseHandle(event);
+}
+
+void Device::StartGpuBusyTimer()
+{
+	Impl& d = *m_impl;
+	if (d.busy_on)
+		return;
+	d.busy_on = true;
+	d.busy_thread = std::thread([&d] { d.BusyTimer(); });
+}
+
+double Device::GpuBusyMs() const
+{
+	LARGE_INTEGER freq;
+	QueryPerformanceFrequency(&freq);
+	return double(m_impl->busy_ticks.load()) * 1000.0 / double(freq.QuadPart);
 }
 
 void Device::Impl::DeferRelease(IUnknown* object, D3D12MA::Allocation* allocation)
@@ -953,6 +1017,15 @@ Device::~Device()
 {
 	m_impl->StopPipelineCache();
 	WaitIdle();
+	if (m_impl->busy_thread.joinable())
+	{
+		{
+			std::lock_guard<std::mutex> lock(m_impl->busy_lock);
+			m_impl->busy_quit = true;
+		}
+		m_impl->busy_cv.notify_one();
+		m_impl->busy_thread.join();
+	}
 	delete m_context;
 	m_context = nullptr;
 	Impl& d = *m_impl;

@@ -453,6 +453,12 @@ public:
 	// Logs the device removal reason and the DRED breadcrumbs, once
 	void ReportRemoval(const char* where);
 
+	// GPU busy time measured on the CPU, for where timestamp queries give nothing (D3DMetal on macOS): a thread notes
+	// when each queue submission's fence completes; a submission is busy from its submission (or the one before's
+	// completion) to its own. Milliseconds since StartGpuBusyTimer, 0 before
+	void StartGpuBusyTimer();
+	double GpuBusyMs() const;
+
 	// Internal (dx12Device.cpp / dx12Context.cpp)
 	struct Impl;
 	Impl* m_impl = nullptr;
