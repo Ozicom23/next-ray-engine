@@ -433,9 +433,18 @@ function on_xml_read()
 				end
 				local in_basic = {upscaler = true, upscaler_quality = true, dlss_preset = true, fsr_sharpness = true, framegen = true,
 					hdr_output = true, hdr_brightness = true}
+				-- Before GAMMA's lighting button, the page's last row: its row is shorter than the button, the next row
+				-- drawn over it
+				local basic_idx = #basic.gr + 1
+				for i, row in ipairs(basic.gr) do
+					if row.id == "lighting" then
+						basic_idx = i
+					end
+				end
 				for _, row in ipairs(rows) do
 					if in_basic[row.id] then
-						table.insert(basic.gr, row)
+						table.insert(basic.gr, basic_idx, row)
+						basic_idx = basic_idx + 1
 					else
 						table.insert(advanced.gr, insert_idx, row)
 						insert_idx = insert_idx + 1
