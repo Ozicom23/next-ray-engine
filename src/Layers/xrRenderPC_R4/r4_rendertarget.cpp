@@ -1427,7 +1427,15 @@ void CRenderTarget::post_result(ref_rt& dest)
 {
 	if (!m_post_chain || &dest != &rt_Color)
 	{
-		HW.pContext->CopyResource(rt_Generic_0->pSurface, dest->pSurface);
+		// Through the textures, as before the post chain: after an upscaler (phase_screen_overlays_upscaled)
+		// rt_Generic_0's texture is the upscaled image and dest the output sized overlay target, while
+		// rt_Generic_0->pSurface stays the render resolution one (copying there lost the overlay: a red screen with
+		// night vision under FSR)
+		ID3DBaseTexture* to = rt_Generic_0->pTexture->surface_get();
+		ID3DBaseTexture* from = dest->pTexture->surface_get();
+		HW.pContext->CopyResource(to, from);
+		_RELEASE(to);
+		_RELEASE(from);
 		return;
 	}
 	swap_rt_resources(&*rt_Generic_0, &*rt_Color);
