@@ -1179,6 +1179,15 @@
 	<string id="st_gp_act_wpn_6">
 		<text>Bolt</text>
 	</string>
+	<string id="st_gp_act_custom24">
+		<text>Quick Melee (GAMMA)</text>
+	</string>
+	<string id="st_gp_act_wpn_laser">
+		<text>Weapon Laser (GAMMA)</text>
+	</string>
+	<string id="st_gp_act_cam_zoom_in">
+		<text>Wipe Mask (GAMMA)</text>
+	</string>
 	<string id="st_gp_act_prone">
 		<text>Lie Down</text>
 	</string>
@@ -1264,6 +1273,9 @@
 		<text>Night Vision</text>
 	</string>
 
+	<string id="st_gp_wheel_lower_weapon">
+		<text>Lower Weapon</text>
+	</string>
 	<string id="st_gp_wheel_quick_melee">
 		<text>Quick Melee</text>
 	</string>

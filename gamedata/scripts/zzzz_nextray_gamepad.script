@@ -13,7 +13,9 @@
 --    button, shown beside the wheel.
 -- 3. The menu cursor's targets in GAMMA's inventory (its item cells).
 -- 4. Mods' keys the buttons press as the keyboard's do: the reload button unjams a jammed weapon (GAMMA's reload key is
---    arti_jamming's unjam one), the jump button holds Ledge Grabbing's key (it reads its own key, not the jump action).
+--    arti_jamming's unjam one), the jump button holds Ledge Grabbing's key (it reads its own key, not the jump action),
+--    the laser action (key_bindings.kWPN_LASER, RB tapped twice) switches the weapon's laser as the torch key held does
+--    (zzz_bas_laser_control).
 
 local function msg(fmt, ...)
 	log(string.format("[neXt-Ray gamepad] " .. fmt, ...))
@@ -61,7 +63,7 @@ end
 -- button: the gamepad's (gpX, gpDPAD_UP...); label: a string id; action: the engine's action, or mcm: a key's MCM path
 -- (mod, mode: its modifier and press type's paths); script: the mod's script
 local wheel = {
-	{ button = "gpA", label = "st_gp_wheel_quick_melee", action = "kCUSTOM24", script = "quickdraw" },
+	{ button = "gpA", label = "st_gp_wheel_lower_weapon", action = "kSAFEMODE", script = "lower_weapon_sprint" },
 	{ button = "gpDPAD_UP", label = "st_gp_wheel_reticle", mcm = "3d_scopes/mark_switch/keybind",
 		mod = "3d_scopes/mark_switch/modifier", mode = "3d_scopes/mark_switch/press_type", script = "z_mark_switch" },
 	{ button = "gpDPAD_DOWN", label = "st_gp_wheel_suppressor", action = "kCUSTOM13", script = "item_weapon" },
@@ -153,9 +155,25 @@ local function is_gamepad_key(dik)
 	return gamepad_key_prompt ~= nil and dik >= 400 and dik < 500
 end
 
+-- The weapon's laser (Laser Settings / BAS, zzz_bas_laser_control): the torch key held for 0.5 s there, with a weapon
+-- that has one in hands, idle, and the HUD free; the same conditions here
+local function laser_toggle()
+	local m = zzz_bas_laser_control
+	if not (m and m.toggle_laser and m.has_laser and db.actor) then return end
+	if device():is_paused() or not actor_menu.is_hud_free() then return end
+	local wpn = db.actor:active_item()
+	if wpn and m.has_laser(wpn:section()) and wpn:get_state() == 0 then
+		m.toggle_laser(wpn:id())
+	end
+end
+
 local function on_key_press(dik)
+	if key_bindings.kWPN_LASER and is_gamepad_key(dik) and dik_to_bind(dik) == key_bindings.kWPN_LASER then
+		laser_toggle()
+		return
+	end
 	if ledge_button or not (is_gamepad_key(dik) and dik_to_bind(dik) == key_bindings.kJUMP) then return end
-	local key = mcm_get("demonized_ledge_grabbing/keybind")
+	local key = has_script("demonized_ledge_grabbing") and mcm_get("demonized_ledge_grabbing/keybind")
 	if type(key) == "number" and key > 0 then
 		ledge_button, ledge_key = dik, key
 		gamepad_key(key, true)
@@ -177,7 +195,7 @@ function on_game_start()
 	if gamepad_unjam_action then
 		gamepad_unjam_action(has_script("arti_jamming") and key_bindings.kCUSTOM22 or 0)
 	end
-	if gamepad_key and has_script("demonized_ledge_grabbing") then
+	if gamepad_key then
 		RegisterScriptCallback("on_key_press", on_key_press)
 		RegisterScriptCallback("on_key_release", on_key_release)
 	end
