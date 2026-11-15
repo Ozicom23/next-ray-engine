@@ -1825,7 +1825,7 @@ void CActor::shedule_Update(u32 DT)
 	if (Level().CurrentControlEntity() == this && !Level().IsDemoPlay())
 		//------------------------------------------------
 	{
-		g_cl_CheckControls(mstate_wishful, NET_SavedAccel, NET_Jump, dt);
+		g_cl_CheckControls(mstate_wishful | gamepad_stance(), NET_SavedAccel, NET_Jump, dt);
 		{
 			/*
 			if (mstate_real & mcJump)
@@ -1843,7 +1843,7 @@ void CActor::shedule_Update(u32 DT)
 
 		g_Physics(NET_SavedAccel, NET_Jump, dt);
 
-		g_cl_ValidateMState(dt, mstate_wishful);
+		g_cl_ValidateMState(dt, mstate_wishful | gamepad_stance());
 		g_SetAnimation(mstate_real);
 
 		// Check for game-contacts

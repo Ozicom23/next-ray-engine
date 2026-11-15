@@ -118,6 +118,7 @@ enum EGameActions
 	kWPN_SWAP,
 	kWPN_HOLSTER,
 	kRADIAL_MENU,
+	kPRONE,
 
 	kLASTACTION,
 	kNOTBINDED,

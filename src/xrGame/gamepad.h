@@ -17,6 +17,9 @@ void gamepad_render_ui(bool main_menu);
 bool gamepad_move(Fvector2& move);
 // The radial menu is open: the right stick chooses, the camera doesn't turn
 bool gamepad_radial_open();
+// The stance kept by the gamepad's keys, as the actor's wished state's bits (mcCrouch, mcAccel): crouched by the crouch
+// key (gp_crouch_toggle), lying by kPRONE
+u32 gamepad_stance();
 // Rumble: low (heavy) and high (light) motors 0..1 for time seconds, scaled by gp_vibration
 void gamepad_rumble(float low, float high, float time);
 
@@ -28,6 +31,10 @@ void gamepad_wheel_add(LPCSTR button, LPCSTR label);
 void gamepad_press_key(int dik, int modifier, int taps, float hold);
 // an action pressed as if by its key (key_bindings.k...)
 void gamepad_send_action(int action);
+// a mod's unjam action (key_bindings.kCUSTOM...): the reload key presses it on a jammed weapon; 0 none
+void gamepad_unjam_action(int action);
+// a keyboard key pressed or released as is (a mod's key kept down while a button is)
+void gamepad_key(int dik, bool down);
 class CUIWindow;
 // a window the menu cursor can point at, beside the buttons, cells and rows it finds itself (a script's item cell;
 // from zzzz_nextray_gamepad.menu_targets, called as the menu is looked at)

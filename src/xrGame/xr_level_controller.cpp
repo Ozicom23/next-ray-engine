@@ -123,6 +123,7 @@ _action actions[] = {
 	{"wpn_swap", kWPN_SWAP, _sp},
 	{"wpn_holster", kWPN_HOLSTER, _sp},
 	{"radial_menu", kRADIAL_MENU, _sp},
+	{"prone", kPRONE, _sp},
 	{NULL, kLASTACTION, _both}
 };
 
@@ -192,7 +193,8 @@ _keyboard keyboards[] = {
 	{"mouse4", MOUSE_4}, {"mouse5", MOUSE_5},
 	{"mouse6", MOUSE_6}, {"mouse7", MOUSE_7},
 	{"mouse8", MOUSE_8}, 
-	// Gamepad keys (xr_input.h): the buttons, held (_hold), pressed while LT is held (_aim), the left stick's directions
+	// Gamepad keys (xr_input.h): the buttons, held (_hold), pressed while LT is held (_aim), tapped twice (_double), the
+	// left stick's directions
 	{"gpA", GP_A},
 	{"gpB", GP_B},
 	{"gpX", GP_X},
@@ -240,6 +242,22 @@ _keyboard keyboards[] = {
 	{"gpDPAD_DOWN_aim", GP_DPAD_DOWN + GP_AIM},
 	{"gpDPAD_LEFT_aim", GP_DPAD_LEFT + GP_AIM},
 	{"gpDPAD_RIGHT_aim", GP_DPAD_RIGHT + GP_AIM},
+	{"gpA_double", GP_A + GP_DOUBLE},
+	{"gpB_double", GP_B + GP_DOUBLE},
+	{"gpX_double", GP_X + GP_DOUBLE},
+	{"gpY_double", GP_Y + GP_DOUBLE},
+	{"gpLB_double", GP_LB + GP_DOUBLE},
+	{"gpRB_double", GP_RB + GP_DOUBLE},
+	{"gpLT_double", GP_LT + GP_DOUBLE},
+	{"gpRT_double", GP_RT + GP_DOUBLE},
+	{"gpBACK_double", GP_BACK + GP_DOUBLE},
+	{"gpSTART_double", GP_START + GP_DOUBLE},
+	{"gpLS_double", GP_LS + GP_DOUBLE},
+	{"gpRS_double", GP_RS + GP_DOUBLE},
+	{"gpDPAD_UP_double", GP_DPAD_UP + GP_DOUBLE},
+	{"gpDPAD_DOWN_double", GP_DPAD_DOWN + GP_DOUBLE},
+	{"gpDPAD_LEFT_double", GP_DPAD_LEFT + GP_DOUBLE},
+	{"gpDPAD_RIGHT_double", GP_DPAD_RIGHT + GP_DOUBLE},
 	{"gpLS_up", GP_LS_UP},
 	{"gpLS_down", GP_LS_DOWN},
 	{"gpLS_left", GP_LS_LEFT},
@@ -411,6 +429,8 @@ static bool gamepad_key_name(int dik, LPSTR dest, int dest_sz)
 		xr_sprintf(dest, dest_sz, "Pad left stick %s", stick[dik - GP_LS_UP]);
 	else if (dik >= GP_A + GP_AIM && dik < GP_A + GP_AIM + GP_BUTTON_COUNT)
 		xr_sprintf(dest, dest_sz, "Pad %s + %s", names(GP_LT - GP_A), names(dik - GP_A - GP_AIM));
+	else if (dik >= GP_A + GP_DOUBLE && dik < GP_A + GP_DOUBLE + GP_BUTTON_COUNT)
+		xr_sprintf(dest, dest_sz, "Pad %s (double tap)", names(dik - GP_A - GP_DOUBLE));
 	else if (dik >= GP_A + GP_HOLD && dik < GP_A + GP_HOLD + GP_BUTTON_COUNT)
 		xr_sprintf(dest, dest_sz, "Pad %s (hold)", names(dik - GP_A - GP_HOLD));
 	else if (dik >= GP_A && dik < GP_A + GP_BUTTON_COUNT)
@@ -621,6 +641,9 @@ static bool gamepad_action_prompt(EGameActions action, LPSTR dest, int dest_sz)
 	for (int b = 0; b < GP_BUTTON_COUNT; ++b)
 		if (does(gamepad_binding(GP_A + GP_HOLD + b)))
 			return xr_sprintf(dest, dest_sz, "Hold %s", names(b)), true;
+	for (int b = 0; b < GP_BUTTON_COUNT; ++b)
+		if (does(gamepad_binding(GP_A + GP_DOUBLE + b)))
+			return xr_sprintf(dest, dest_sz, "Double tap %s", names(b)), true;
 	for (int key = GP_LS_UP; key <= GP_LS_RIGHT; ++key)
 		if (does(gamepad_binding(key)))
 			return g_gp_glyphs ? xr_sprintf(dest, dest_sz, "%c", gamepad_glyphs::to_char(gamepad_glyphs::left_stick)) :
@@ -994,8 +1017,9 @@ static void gamepad_unbind_all()
 
 // The layout's version: a layout saved by an older one gets the bindings added since, on keys left free
 // (gamepad_layout_update). 2: LT + R3 the alternative aim; 4: RB held night vision again (3 had the actions wheel there,
-// now on the radial menu's buttons: its name is unknown, the key left free)
-static const int kLayoutVersion = 4;
+// now on the radial menu's buttons: its name is unknown, the key left free); 5: B held lies down, L3 held the free
+// look, Y tapped twice lowers the weapon (on keys left free), R3 no longer the knife
+static const int kLayoutVersion = 5;
 static int s_layout_version = kLayoutVersion;
 
 void gamepad_layout_update()
@@ -1012,13 +1036,27 @@ void gamepad_layout_update()
 	const int rb_hold = GP_RB + GP_HOLD - GP_FIRST;
 	if (s_layout_version == 3 && !s_gamepad_keys[rb_hold] && s_gamepad_bindings[rb_hold] == kNOTBINDED)
 		s_gamepad_bindings[rb_hold] = kNIGHT_VISION;
+	if (s_layout_version < 5)
+	{
+		auto add = [](int key, EGameActions action)
+		{
+			if (!s_gamepad_keys[key - GP_FIRST] && s_gamepad_bindings[key - GP_FIRST] == kNOTBINDED)
+				s_gamepad_bindings[key - GP_FIRST] = action;
+		};
+		add(GP_B + GP_HOLD, kPRONE);
+		add(GP_LS + GP_HOLD, kFREELOOK);
+		add(GP_Y + GP_DOUBLE, kSAFEMODE);
+		if (s_gamepad_bindings[GP_RS - GP_FIRST] == kWPN_1)
+			s_gamepad_bindings[GP_RS - GP_FIRST] = kNOTBINDED;
+	}
 	s_layout_version = kLayoutVersion;
 }
 
-// Like STALKER 2's: the left stick moves (L3 sprints), the right one looks (R3 the knife, LT + R3 the alternative aim:
-// the weapon's other sight or aiming position), LT aims, RT fires, A jumps,
-// B crouches, X uses what's looked at or reloads (held: the next ammo type), Y swaps weapons (held: hides it), LB held
-// opens the radial menu (pressed: the detector; while held the other buttons do mods' actions: unjam, quick melee...),
+// Like STALKER 2's: the left stick moves (L3 sprints, held: the free look), the right one looks (LT + R3 the
+// alternative aim: the weapon's other sight or aiming position), LT aims, RT fires, A jumps,
+// B crouches (a toggle, gp_crouch_toggle; held: lies down), X uses what's looked at or reloads (unjams a jammed weapon;
+// held: the next ammo type), Y swaps weapons (held: hides it, tapped twice: lowers it), LB held
+// opens the radial menu (pressed: the detector; while held the other buttons do mods' actions: quick melee...),
 // RB the torch (held: night vision), LT + LB / RB lean, the D-pad: up the
 // fire mode (held: the weapon's function), down the inventory, left / right the quick slots (held: the other two),
 // View the PDA, Menu the main menu
@@ -1030,11 +1068,11 @@ void gamepad_default_layout()
 		EGameActions action;
 	} layout[] = {
 		{GP_LS_UP, kFWD}, {GP_LS_DOWN, kBACK}, {GP_LS_LEFT, kL_STRAFE}, {GP_LS_RIGHT, kR_STRAFE},
-		{GP_LS, kSPRINT_TOGGLE}, {GP_RS, kWPN_1}, {GP_RS + GP_AIM, kWPN_FUNC},
+		{GP_LS, kSPRINT_TOGGLE}, {GP_LS + GP_HOLD, kFREELOOK}, {GP_RS + GP_AIM, kWPN_FUNC},
 		{GP_LT, kWPN_ZOOM}, {GP_RT, kWPN_FIRE},
-		{GP_A, kJUMP}, {GP_B, kCROUCH},
+		{GP_A, kJUMP}, {GP_B, kCROUCH}, {GP_B + GP_HOLD, kPRONE},
 		{GP_X, kUSE_OR_RELOAD}, {GP_X + GP_HOLD, kWPN_NEXT},
-		{GP_Y, kWPN_SWAP}, {GP_Y + GP_HOLD, kWPN_HOLSTER},
+		{GP_Y, kWPN_SWAP}, {GP_Y + GP_HOLD, kWPN_HOLSTER}, {GP_Y + GP_DOUBLE, kSAFEMODE},
 		{GP_LB, kDETECTOR}, {GP_LB + GP_HOLD, kRADIAL_MENU}, {GP_LB + GP_AIM, kL_LOOKOUT},
 		{GP_RB, kTORCH}, {GP_RB + GP_HOLD, kNIGHT_VISION}, {GP_RB + GP_AIM, kR_LOOKOUT},
 		{GP_DPAD_UP, kWPN_FIREMODE_NEXT}, {GP_DPAD_UP + GP_HOLD, kWPN_FUNC},

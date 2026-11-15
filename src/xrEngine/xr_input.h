@@ -14,8 +14,8 @@ const int all_device_key = mouse_device_key | keyboard_device_key;
 const int default_key = mouse_device_key | keyboard_device_key;
 
 // Gamepad (XInput) buttons as key codes, after the mouse's (MOUSE_1..8 = 0xED+100..107): bound and sent like keys.
-// A button held for gp_hold_time is its own code (+GP_HOLD), as is a button pressed while LT is held (+GP_AIM);
-// the left stick's directions are codes too (movement)
+// A button held for gp_hold_time is its own code (+GP_HOLD), as is a button pressed while LT is held (+GP_AIM) and one
+// tapped twice within gp_double_time (+GP_DOUBLE); the left stick's directions are codes too (movement)
 enum
 {
 	GP_A = 400,
@@ -42,8 +42,9 @@ enum
 	GP_LS_LEFT,
 	GP_LS_RIGHT,
 	GP_VIRTUAL, // an action chosen by the game (the radial menu): sent as this key, its action set for the press
+	GP_DOUBLE = 70,
 	GP_FIRST = GP_A,
-	GP_LAST = GP_VIRTUAL,
+	GP_LAST = GP_A + GP_DOUBLE + GP_BUTTON_COUNT - 1,
 	GP_KEY_COUNT = GP_LAST - GP_FIRST + 1,
 };
 IC bool is_gamepad_key(int dik) { return dik >= GP_FIRST && dik <= GP_LAST; }

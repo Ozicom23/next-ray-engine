@@ -846,6 +846,12 @@
 	<string id="ui_mm_modded_exes_control_gamepad_gp_hold_time">
 		<text>Hold Time, Seconds (gp_hold_time)</text>
 	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_double_time">
+		<text>Double Tap Time, Seconds (gp_double_time)</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_gp_crouch_toggle">
+		<text>Crouch Button Toggles (gp_crouch_toggle)</text>
+	</string>
 	<string id="ui_mm_modded_exes_control_gamepad_gp_vibration">
 		<text>Vibration (gp_vibration)</text>
 	</string>
@@ -890,6 +896,9 @@
 	</string>
 	<string id="st_gp_overview_hold">
 		<text>hold:</text>
+	</string>
+	<string id="st_gp_overview_double">
+		<text>double tap:</text>
 	</string>
 	<string id="st_gp_overview_move">
 		<text>Move (a light push walks)</text>
@@ -995,6 +1004,54 @@
 	</string>
 	<string id="ui_mm_modded_exes_control_gamepad_bind_gpDPAD_RIGHT_hold">
 		<text>D-pad Right, held</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpA_double">
+		<text>A, tapped twice</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpB_double">
+		<text>B, tapped twice</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpX_double">
+		<text>X, tapped twice</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpY_double">
+		<text>Y, tapped twice</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpLB_double">
+		<text>LB, tapped twice</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpRB_double">
+		<text>RB, tapped twice</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpLT_double">
+		<text>LT, tapped twice</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpRT_double">
+		<text>RT, tapped twice</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpBACK_double">
+		<text>View, tapped twice</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpSTART_double">
+		<text>Menu, tapped twice</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpLS_double">
+		<text>L3 (left stick click), tapped twice</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpRS_double">
+		<text>R3 (right stick click), tapped twice</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpDPAD_UP_double">
+		<text>D-pad Up, tapped twice</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpDPAD_DOWN_double">
+		<text>D-pad Down, tapped twice</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpDPAD_LEFT_double">
+		<text>D-pad Left, tapped twice</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_bind_gpDPAD_RIGHT_double">
+		<text>D-pad Right, tapped twice</text>
 	</string>
 	<string id="ui_mm_modded_exes_control_gamepad_bind_gpA_aim">
 		<text>LT + A</text>
@@ -1122,6 +1179,9 @@
 	<string id="st_gp_act_wpn_6">
 		<text>Bolt</text>
 	</string>
+	<string id="st_gp_act_prone">
+		<text>Lie Down</text>
+	</string>
 	<string id="st_gp_act_radial_menu">
 		<text>Radial Menu</text>
 	</string>
@@ -1204,17 +1264,8 @@
 		<text>Night Vision</text>
 	</string>
 
-	<string id="st_gp_wheel_unjam">
-		<text>Unjam</text>
-	</string>
 	<string id="st_gp_wheel_quick_melee">
 		<text>Quick Melee</text>
-	</string>
-	<string id="st_gp_wheel_grenade_throw">
-		<text>Throw Grenade</text>
-	</string>
-	<string id="st_gp_wheel_lower_weapon">
-		<text>Lower Weapon</text>
 	</string>
 	<string id="st_gp_wheel_map">
 		<text>Map</text>
@@ -1227,12 +1278,6 @@
 	</string>
 	<string id="st_gp_wheel_suppressor">
 		<text>Suppressor</text>
-	</string>
-	<string id="st_gp_wheel_unload_all">
-		<text>Unload All</text>
-	</string>
-	<string id="st_gp_wheel_freelook">
-		<text>Free Look</text>
 	</string>
 
 	<!-- Camera -->

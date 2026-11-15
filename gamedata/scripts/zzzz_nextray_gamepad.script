@@ -12,6 +12,8 @@
 --    its MCM settings want). Only those whose mod is there (its script) and whose key is bound (MCM); each on its own
 --    button, shown beside the wheel.
 -- 3. The menu cursor's targets in GAMMA's inventory (its item cells).
+-- 4. Mods' keys the buttons press as the keyboard's do: the reload button unjams a jammed weapon (GAMMA's reload key is
+--    arti_jamming's unjam one), the jump button holds Ledge Grabbing's key (it reads its own key, not the jump action).
 
 local function msg(fmt, ...)
 	log(string.format("[neXt-Ray gamepad] " .. fmt, ...))
@@ -59,17 +61,12 @@ end
 -- button: the gamepad's (gpX, gpDPAD_UP...); label: a string id; action: the engine's action, or mcm: a key's MCM path
 -- (mod, mode: its modifier and press type's paths); script: the mod's script
 local wheel = {
-	{ button = "gpX", label = "st_gp_wheel_unjam", action = "kCUSTOM22", script = "arti_jamming" },
-	{ button = "gpY", label = "st_gp_wheel_unload_all", action = "kCUSTOM15", script = "item_weapon" },
-	{ button = "gpB", label = "st_gp_wheel_lower_weapon", action = "kSAFEMODE", script = "lower_weapon_sprint" },
 	{ button = "gpA", label = "st_gp_wheel_quick_melee", action = "kCUSTOM24", script = "quickdraw" },
-	{ button = "gpRB", label = "st_gp_wheel_grenade_throw", action = "kCUSTOM19", script = "actor_effects" },
 	{ button = "gpDPAD_UP", label = "st_gp_wheel_reticle", mcm = "3d_scopes/mark_switch/keybind",
 		mod = "3d_scopes/mark_switch/modifier", mode = "3d_scopes/mark_switch/press_type", script = "z_mark_switch" },
 	{ button = "gpDPAD_DOWN", label = "st_gp_wheel_suppressor", action = "kCUSTOM13", script = "item_weapon" },
 	{ button = "gpDPAD_LEFT", label = "st_gp_wheel_companions", action = "kCUSTOM18", script = "ui_addon_companion_quick_menu" },
 	{ button = "gpDPAD_RIGHT", label = "st_gp_wheel_map", action = "kCUSTOM20", script = "actor_effects" },
-	{ button = "gpLS", label = "st_gp_wheel_freelook", action = "kFREELOOK" },
 }
 
 local shown = {} -- the buttons' entries as the wheel opened
@@ -146,8 +143,42 @@ function menu_targets()
 end
 
 ---------------------------------------------------------------------------------------------------------------------
+-- 4. Mods' keys by the buttons
+
+-- Ledge Grabbing (demonized_ledge_grabbing) acts on its own key (MCM, Space as the jump's) and reads whether it's held:
+-- kept down while a gamepad button bound to the jump is
+local ledge_button, ledge_key = nil, nil
+
+local function is_gamepad_key(dik)
+	return gamepad_key_prompt ~= nil and dik >= 400 and dik < 500
+end
+
+local function on_key_press(dik)
+	if ledge_button or not (is_gamepad_key(dik) and dik_to_bind(dik) == key_bindings.kJUMP) then return end
+	local key = mcm_get("demonized_ledge_grabbing/keybind")
+	if type(key) == "number" and key > 0 then
+		ledge_button, ledge_key = dik, key
+		gamepad_key(key, true)
+	end
+end
+
+local function on_key_release(dik)
+	if dik == ledge_button then
+		gamepad_key(ledge_key, false)
+		ledge_button, ledge_key = nil, nil
+	end
+end
+
+---------------------------------------------------------------------------------------------------------------------
 
 function on_game_start()
 	local catspaw_on = catspaw_patch()
 	msg("Catspaw's key names by the gamepad %s", catspaw_on and "on" or "off")
+	if gamepad_unjam_action then
+		gamepad_unjam_action(has_script("arti_jamming") and key_bindings.kCUSTOM22 or 0)
+	end
+	if gamepad_key and has_script("demonized_ledge_grabbing") then
+		RegisterScriptCallback("on_key_press", on_key_press)
+		RegisterScriptCallback("on_key_release", on_key_release)
+	end
 end

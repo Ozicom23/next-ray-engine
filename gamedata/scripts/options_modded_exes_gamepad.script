@@ -6,7 +6,7 @@ options_builder.import_into(this)
 -- The actions a gamepad key can do, in the lists' order
 local actions = {
 	"none",
-	"jump", "crouch", "accel", "sprint_toggle", "llookout", "rlookout", "freelook",
+	"jump", "crouch", "prone", "accel", "sprint_toggle", "llookout", "rlookout", "freelook",
 	"wpn_fire", "wpn_zoom", "wpn_reload", "use", "use_or_reload", "wpn_next", "wpn_func",
 	"wpn_firemode_next", "wpn_firemode_prev", "wpn_swap", "wpn_holster", "next_slot", "prev_slot",
 	"wpn_1", "wpn_2", "wpn_3", "wpn_4", "wpn_5", "wpn_6",
@@ -21,7 +21,7 @@ for i, a in ipairs(actions) do
 	action_content[i] = {a, "st_gp_act_" .. a}
 end
 
--- Gamepad keys: each button, held, and pressed while LT is held
+-- Gamepad keys: each button, held, tapped twice, and pressed while LT is held
 local buttons = {"A", "B", "X", "Y", "LB", "RB", "LT", "RT", "BACK", "START", "LS", "RS",
 	"DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT"}
 
@@ -75,6 +75,8 @@ local rows = {
 	track { id = "gp_walk_threshold", step = 0.05 },
 	track { id = "gp_cursor_speed", step = 0.1 },
 	track { id = "gp_hold_time", step = 0.05 },
+	track { id = "gp_double_time", step = 0.05 },
+	list_bool { id = "gp_crouch_toggle" },
 	track { id = "gp_vibration", step = 0.05 },
 	list_enum { id = "gp_gyro", content = { "st_gp_gyro_off", "st_gp_gyro_aim", "st_gp_gyro_always" } },
 	track { id = "gp_gyro_sens", step = 0.05 },
@@ -91,6 +93,9 @@ for _, b in ipairs(buttons) do
 end
 for _, b in ipairs(buttons) do
 	rows[#rows + 1] = bind_row("gp" .. b .. "_hold")
+end
+for _, b in ipairs(buttons) do
+	rows[#rows + 1] = bind_row("gp" .. b .. "_double")
 end
 for _, b in ipairs(buttons) do
 	if b ~= "LT" then

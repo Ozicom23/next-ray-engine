@@ -28,13 +28,17 @@ local function bind_of(key)
 	return game.translate_string("st_gp_act_" .. a)
 end
 
--- "Jump", then "hold: ...", "LT + ...: ..." in grey when bound
+-- "Jump", then "hold: ...", "double tap: ...", "LT + ...: ..." in grey when bound
 local function describe(key, g)
 	local main = bind_of("gp" .. key) or "-"
 	local extra = {}
 	local hold = bind_of("gp" .. key .. "_hold")
 	if hold then
 		extra[#extra + 1] = game.translate_string("st_gp_overview_hold") .. " " .. hold
+	end
+	local double = bind_of("gp" .. key .. "_double")
+	if double then
+		extra[#extra + 1] = game.translate_string("st_gp_overview_double") .. " " .. double
 	end
 	if key ~= "LT" then
 		local aim = bind_of("gp" .. key .. "_aim")

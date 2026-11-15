@@ -54,6 +54,8 @@ float g_gp_deadzone_right = 0.12f;
 float g_gp_walk_threshold = 0.6f; // the left stick pushed less than this walks
 float g_gp_cursor_speed = 1.f; // x 700 UI units (the screen is 1024 x 768 of them) per second
 float g_gp_hold_time = 0.3f; // a button held this long is its _hold key, if bound
+float g_gp_double_time = 0.25f; // a button tapped again within this is its _double key, if bound (its tap waits for it)
+int g_gp_crouch_toggle = 1; // the crouch key crouches until pressed again (off: while held)
 int g_gp_gyro = 1; // gyro aiming (DualSense, DualShock 4): 0 off, 1 while aiming, 2 always
 float g_gp_gyro_sens = 1.5f; // the camera's turn per the controller's
 int g_gp_gyro_invert_y = 0;
@@ -73,8 +75,9 @@ struct pad_button
 {
 	bool down = false;
 	bool ignore = false; // held when the mode changed: nothing until released
-	bool tap_pending = false; // its _hold key is bound: the press waits for the release or the hold time
+	bool tap_pending = false; // its _hold or _double key is bound: the press waits for the release or the hold time
 	float held = 0.f;
+	float tap_wait = -1.f; // its _double key is bound: the time since the tap's release, waiting for the second; < 0 none
 	int sent = 0; // the key pressed for it, 0 none
 };
 
@@ -85,6 +88,16 @@ Fvector2 s_move = {0.f, 0.f};
 Fvector2 s_look_rest = {0.f, 0.f}; // mouse counts not sent yet
 float s_boost_time = 0.f;
 int s_sprint_key = 0; // a sprint key kept pressed (sprint by holding, AF_SPRINT_TOGGLE off) until the stick stops
+// The stance the gamepad keeps (gamepad_stance): crouched by its crouch key (gp_crouch_toggle), lying by kPRONE (the
+// keyboard's crouch + walk keys held), until pressed again or the sprint
+enum EStance
+{
+	stStand,
+	stCrouch,
+	stProne,
+};
+EStance s_stance = stStand;
+EGameActions s_unjam_action = kNOTBINDED; // a mod's unjam action (gamepad_unjam_action): the reload key's on a jammed weapon
 bool s_mouse_down[2] = {false, false};
 int s_keys_down[GP_BUTTON_COUNT]; // cursor mode: the key pressed for each button, 0 none
 Fvector2 s_cursor = {0.f, 0.f};
@@ -303,6 +316,13 @@ EGameActions holster_action()
 	return kWPN_HOLSTER;
 }
 
+// Reload: a mod's unjam action on a jammed weapon (GAMMA: the keyboard's reload key does both)
+EGameActions reload_action()
+{
+	CWeapon* weapon = Actor() ? smart_cast<CWeapon*>(Actor()->inventory().ActiveItem()) : nullptr;
+	return s_unjam_action != kNOTBINDED && weapon && weapon->IsMisfire() ? s_unjam_action : kWPN_RELOAD;
+}
+
 void key_press(int code)
 {
 	if (const int dik = gamepad_key_binding(code))
@@ -318,7 +338,19 @@ void key_press(int code)
 		return;
 	case kUSE_OR_RELOAD:
 		if (actor)
-			gamepad_resolve(code, actor->GetDefaultActionForObject() ? kUSE : kWPN_RELOAD);
+			gamepad_resolve(code, actor->GetDefaultActionForObject() ? kUSE : reload_action());
+		break;
+	case kWPN_RELOAD:
+		if (actor && reload_action() != kWPN_RELOAD)
+			gamepad_resolve(code, reload_action());
+		break;
+	case kCROUCH:
+		// With the game's own crouch toggle (AF_CROUCH_TOGGLE) the key toggles it there
+		if (g_gp_crouch_toggle && !psActorFlags.test(AF_CROUCH_TOGGLE))
+			s_stance = s_stance == stCrouch ? stStand : stCrouch;
+		break;
+	case kPRONE:
+		s_stance = s_stance == stProne ? stStand : stProne;
 		break;
 	case kWPN_SWAP:
 		if (actor)
@@ -329,6 +361,7 @@ void key_press(int code)
 			gamepad_resolve(code, holster_action());
 		break;
 	case kSPRINT_TOGGLE:
+		s_stance = stStand;
 		// Sprint by holding its key: the click keeps it held until the stick stops or the next click
 		if (!psActorFlags.test(AF_SPRINT_TOGGLE))
 		{
@@ -399,9 +432,15 @@ void update_game(const gamepad_state& pad, float dt)
 			t.held = 0.f;
 			t.sent = 0;
 			t.tap_pending = false;
-			if (code != GP_LT && aiming && bound(code + GP_AIM))
+			if (t.tap_wait >= 0.f)
+			{
+				// The second tap in time: the _double key instead of the tap
+				t.tap_wait = -1.f;
+				key_press(t.sent = code + GP_DOUBLE);
+			}
+			else if (code != GP_LT && aiming && bound(code + GP_AIM))
 				key_press(t.sent = code + GP_AIM);
-			else if (bound(code + GP_HOLD))
+			else if (bound(code + GP_HOLD) || bound(code + GP_DOUBLE))
 				t.tap_pending = true;
 			else if (bound(code))
 				key_press(t.sent = code);
@@ -409,7 +448,7 @@ void update_game(const gamepad_state& pad, float dt)
 		else if (down)
 		{
 			t.held += dt;
-			if (t.tap_pending && t.held >= g_gp_hold_time)
+			if (t.tap_pending && t.held >= g_gp_hold_time && bound(code + GP_HOLD))
 			{
 				t.tap_pending = false;
 				key_press(t.sent = code + GP_HOLD);
@@ -418,7 +457,9 @@ void update_game(const gamepad_state& pad, float dt)
 		else if (t.down)
 		{
 			t.down = false;
-			if (t.tap_pending && bound(code))
+			if (t.tap_pending && bound(code + GP_DOUBLE))
+				t.tap_wait = 0.f;
+			else if (t.tap_pending && bound(code))
 			{
 				key_press(code);
 				key_release(code);
@@ -427,6 +468,20 @@ void update_game(const gamepad_state& pad, float dt)
 				key_release(t.sent);
 			t.tap_pending = false;
 			t.sent = 0;
+		}
+		else if (t.tap_wait >= 0.f)
+		{
+			// No second tap: the tap after all
+			t.tap_wait += dt;
+			if (t.tap_wait >= g_gp_double_time)
+			{
+				t.tap_wait = -1.f;
+				if (bound(code))
+				{
+					key_press(code);
+					key_release(code);
+				}
+			}
 		}
 	}
 
@@ -1117,6 +1172,8 @@ void gamepad_register_commands()
 	CMD4(CCC_Float, "gp_walk_threshold", &g_gp_walk_threshold, 0.f, 1.f);
 	CMD4(CCC_Float, "gp_cursor_speed", &g_gp_cursor_speed, 0.2f, 4.f);
 	CMD4(CCC_Float, "gp_hold_time", &g_gp_hold_time, 0.15f, 1.f);
+	CMD4(CCC_Float, "gp_double_time", &g_gp_double_time, 0.1f, 0.5f);
+	CMD4(CCC_Integer, "gp_crouch_toggle", &g_gp_crouch_toggle, 0, 1);
 	CMD4(CCC_Float, "gp_vibration", &psGamepadVibration, 0.f, 1.f);
 	CMD4(CCC_Integer, "gp_sony", &psGamepadSony, 0, 1);
 	CMD4(CCC_Integer, "gp_gyro", &g_gp_gyro, 0, 2);
@@ -1160,6 +1217,25 @@ bool gamepad_move(Fvector2& move)
 bool gamepad_radial_open()
 {
 	return s_radial_key != 0;
+}
+
+u32 gamepad_stance()
+{
+	CActor* actor = Actor();
+	if (!actor || !actor->g_Alive() || !g_gp_enabled)
+		s_stance = stStand;
+	return s_stance == stProne ? (mcCrouch | mcAccel) : (s_stance == stCrouch ? mcCrouch : 0);
+}
+
+void gamepad_unjam_action(int action)
+{
+	s_unjam_action = action > kNOTBINDED && action < kLASTACTION ? EGameActions(action) : kNOTBINDED;
+}
+
+void gamepad_key(int dik, bool down)
+{
+	if (dik > 0 && !is_gamepad_key(dik))
+		pInput->inject_key(dik, down);
 }
 
 void gamepad_rumble(float low, float high, float time)
