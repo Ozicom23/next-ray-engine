@@ -6,8 +6,8 @@
 --    key by MCM's own table (ui_mcm.display_key), "F" for the use key also with the gamepad in use. While texts name
 --    the gamepad's buttons, a key bound to an action is named by its gamepad button, as the engine names it in texts
 --    ($$ACTION_use$$); modifiers (Shift, Ctrl, Alt) and keys of no action keep their names.
--- 2. The wheel's buttons (LB held by default: the wheel takes out the slots, the other buttons do these): the mods'
---    actions a gamepad has no button for, as the engine's custom actions their scripts listen to (key_bindings.kCUSTOM...,
+-- 2. The wheel's buttons (LB held by default: the wheel takes out the slots, the other buttons do these, each chosen
+--    in the gamepad options from the catalog below): the mods' actions a gamepad has no button for, as the engine's custom actions their scripts listen to (key_bindings.kCUSTOM...,
 --    pressed as if by their key, bound or not) or a mod's MCM key (pressed with its modifier, tapped twice or held as
 --    its MCM settings want). Only those whose mod is there (its script) and whose key is bound (MCM); each on its own
 --    button, shown beside the wheel.
@@ -64,16 +64,56 @@ local function has_script(name)
 	return getFS():exist("$game_scripts$", name .. ".script") ~= nil
 end
 
--- button: the gamepad's (gpX, gpDPAD_UP...); label: a string id; action: the engine's action, or mcm: a key's MCM path
--- (mod, mode: its modifier and press type's paths); script: the mod's script
-local wheel = {
-	{ button = "gpA", label = "st_gp_wheel_lower_weapon", action = "kSAFEMODE", script = "lower_weapon_sprint" },
-	{ button = "gpDPAD_UP", label = "st_gp_wheel_reticle", mcm = "3d_scopes/mark_switch/keybind",
+-- The actions the wheel's buttons can do (Options > Modded Exes > Controls > Gamepad, the wheel's rows), by id.
+-- label: a string id; action: the engine's action, or mcm: a key's MCM path (mod, mode: its modifier and press type's
+-- paths); script: a script of the mod (the action shown only when it's there)
+catalog = {
+	lower_weapon = { label = "st_gp_wheel_lower_weapon", action = "kSAFEMODE", script = "lower_weapon_sprint" },
+	quick_melee = { label = "st_gp_wheel_quick_melee", action = "kCUSTOM24", script = "quickdraw" },
+	suppressor = { label = "st_gp_wheel_suppressor", action = "kCUSTOM13", script = "item_weapon" },
+	unload_all = { label = "st_gp_wheel_unload_all", action = "kCUSTOM15", script = "item_weapon" },
+	unjam = { label = "st_gp_wheel_unjam", action = "kCUSTOM22", script = "arti_jamming" },
+	companions = { label = "st_gp_wheel_companions", action = "kCUSTOM18", script = "ui_addon_companion_quick_menu" },
+	map = { label = "st_gp_wheel_map", action = "kCUSTOM20", script = "actor_effects" },
+	hud = { label = "st_gp_wheel_hud", action = "kCUSTOM6", script = "actor_effects" },
+	health = { label = "st_gp_wheel_health", mcm = "body_health_system/hud_toggle_key_bind",
+		script = "zzz_player_injuries_mcm" },
+	laser_settings = { label = "st_gp_wheel_laser_settings", mcm = "laser_settings/config_key",
+		script = "laser_settings_mcm" },
+	furniture_mode = { label = "st_gp_wheel_furniture_mode", mcm = "aol_hf/controls/bind_place_mode",
+		script = "placeable_furniture" },
+	skills = { label = "st_gp_wheel_skills", mcm = "skill_system/ui_keybind", mod = "skill_system/modifier",
+		script = "haru_skills" },
+	patches = { label = "st_gp_wheel_patches", mcm = "patches_by_hotkey/key", script = "patches_by_hotkey_mcm" },
+	exo_power = { label = "st_gp_wheel_exo_power", mcm = "exo_power/keybind", mod = "exo_power/second_key",
+		mode = "exo_power/modifier", script = "exo_power_activator_mcm" },
+	minimap = { label = "st_gp_wheel_minimap", mcm = "rax_mmt/keybind", mod = "rax_mmt/modifier", mode = "rax_mmt/mode",
+		script = "mini_map_toggle_mcm" },
+	reticle = { label = "st_gp_wheel_reticle", mcm = "3d_scopes/mark_switch/keybind",
 		mod = "3d_scopes/mark_switch/modifier", mode = "3d_scopes/mark_switch/press_type", script = "z_mark_switch" },
-	{ button = "gpDPAD_DOWN", label = "st_gp_wheel_suppressor", action = "kCUSTOM13", script = "item_weapon" },
-	{ button = "gpDPAD_LEFT", label = "st_gp_wheel_companions", action = "kCUSTOM18", script = "ui_addon_companion_quick_menu" },
-	{ button = "gpDPAD_RIGHT", label = "st_gp_wheel_map", action = "kCUSTOM20", script = "actor_effects" },
 }
+-- The options' list order ("none": the button does nothing while the wheel is held)
+catalog_order = { "none", "lower_weapon", "quick_melee", "suppressor", "unload_all", "unjam", "companions",
+	"map", "hud", "health", "laser_settings", "furniture_mode", "skills", "patches", "exo_power", "minimap", "reticle" }
+
+-- The wheel's buttons (LB opens it: the others) and their actions by default; the choice kept in axr_options.ltx
+wheel_buttons = { "gpA", "gpB", "gpX", "gpY", "gpDPAD_UP", "gpDPAD_DOWN", "gpDPAD_LEFT", "gpDPAD_RIGHT" }
+local wheel_default = {
+	gpA = "lower_weapon", gpB = "patches", gpX = "skills", gpY = "laser_settings",
+	gpDPAD_UP = "exo_power", gpDPAD_DOWN = "suppressor", gpDPAD_LEFT = "companions", gpDPAD_RIGHT = "map",
+}
+local WHEEL_SECTION = "nextray_gamepad_wheel"
+
+function wheel_get(button)
+	local id = axr_main.config:r_value(WHEEL_SECTION, button, 0, wheel_default[button] or "none")
+	return (id == "none" or catalog[id]) and id or (wheel_default[button] or "none")
+end
+
+function wheel_set(button, id)
+	if not (id == "none" or catalog[id]) then return end
+	axr_main.config:w_value(WHEEL_SECTION, button, id)
+	axr_main.config:save()
+end
 
 local shown = {} -- the buttons' entries as the wheel opened
 
@@ -108,10 +148,11 @@ end
 
 function action_wheel_open()
 	shown = {}
-	for _, e in ipairs(wheel) do
-		if available(e) then
+	for _, button in ipairs(wheel_buttons) do
+		local e = catalog[wheel_get(button)]
+		if e and available(e) then
 			shown[#shown + 1] = e
-			gamepad_wheel_add(e.button, e.label)
+			gamepad_wheel_add(button, e.label)
 		end
 	end
 end

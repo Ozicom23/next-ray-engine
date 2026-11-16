@@ -1098,6 +1098,30 @@
 	<string id="ui_mm_modded_exes_control_gamepad_bind_gpDPAD_RIGHT_aim">
 		<text>LT + D-pad Right</text>
 	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_wheel_gpA">
+		<text>Radial Wheel (LB held): A</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_wheel_gpB">
+		<text>Radial Wheel (LB held): B</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_wheel_gpX">
+		<text>Radial Wheel (LB held): X</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_wheel_gpY">
+		<text>Radial Wheel (LB held): Y</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_wheel_gpDPAD_UP">
+		<text>Radial Wheel (LB held): D-pad Up</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_wheel_gpDPAD_DOWN">
+		<text>Radial Wheel (LB held): D-pad Down</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_wheel_gpDPAD_LEFT">
+		<text>Radial Wheel (LB held): D-pad Left</text>
+	</string>
+	<string id="ui_mm_modded_exes_control_gamepad_wheel_gpDPAD_RIGHT">
+		<text>Radial Wheel (LB held): D-pad Right</text>
+	</string>
 	<string id="st_gp_act_none">
 		<text>-</text>
 	</string>
@@ -1290,6 +1314,36 @@
 	</string>
 	<string id="st_gp_wheel_suppressor">
 		<text>Suppressor</text>
+	</string>
+	<string id="st_gp_wheel_unload_all">
+		<text>Unload All Weapons</text>
+	</string>
+	<string id="st_gp_wheel_unjam">
+		<text>Unjam</text>
+	</string>
+	<string id="st_gp_wheel_hud">
+		<text>Toggle HUD</text>
+	</string>
+	<string id="st_gp_wheel_health">
+		<text>Body Health Status</text>
+	</string>
+	<string id="st_gp_wheel_laser_settings">
+		<text>Laser Settings</text>
+	</string>
+	<string id="st_gp_wheel_furniture_mode">
+		<text>Furniture Placement Mode</text>
+	</string>
+	<string id="st_gp_wheel_skills">
+		<text>Skills</text>
+	</string>
+	<string id="st_gp_wheel_patches">
+		<text>Attach Patches</text>
+	</string>
+	<string id="st_gp_wheel_exo_power">
+		<text>Exoskeleton Power</text>
+	</string>
+	<string id="st_gp_wheel_minimap">
+		<text>Toggle Minimap</text>
 	</string>
 
 	<!-- Camera -->

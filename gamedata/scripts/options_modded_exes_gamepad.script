@@ -104,4 +104,34 @@ for _, b in ipairs(buttons) do
 	end
 end
 
+-- The radial wheel's buttons (zzzz_nextray_gamepad: what each does while the wheel is held)
+local function wheel_content()
+	local g = zzzz_nextray_gamepad
+	local c = {}
+	for i, id in ipairs(g.catalog_order) do
+		c[i] = {id, id == "none" and "st_gp_act_none" or g.catalog[id].label}
+	end
+	return c
+end
+
+local function wheel_set(button)
+	local val = ui_options.opt_temp["modded_exes/control/gamepad/wheel_" .. button]
+	if val ~= nil then
+		zzzz_nextray_gamepad.wheel_set(button, val)
+	end
+end
+
+rows[#rows + 1] = line {}
+for _, button in ipairs(zzzz_nextray_gamepad.wheel_buttons) do
+	rows[#rows + 1] = {
+		id = "wheel_" .. button,
+		type = "list",
+		val = 0,
+		no_str = true,
+		curr = {zzzz_nextray_gamepad.wheel_get, button},
+		functor = {wheel_set, button},
+		content = {wheel_content},
+	}
+end
+
 PAGE = page(rows)
