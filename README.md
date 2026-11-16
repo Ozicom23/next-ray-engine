@@ -34,8 +34,8 @@ FSR and XeSS frame generation.
 
 ### Texture streaming
 <!-- screenshot -->
-Textures load when they are needed instead of all at once. At full texture quality, texture memory drops from
-6.25 GB to about 2.6 GB.
+Textures load when they are needed instead of all at once. At full texture quality the game uses about 2.5x less
+video memory; how much depends on the location (9.89 GB against 3.63 GB in the comparison below).
 
 ### General optimization
 <p align="center"><img src="docs/img/engine_comparison.png" width="900" alt="The same place on GAMMA's engine and on neXt-Ray, with the performance overlay of each"></p>
