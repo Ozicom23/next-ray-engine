@@ -38,11 +38,23 @@ Textures load when they are needed instead of all at once. At full texture quali
 6.25 GB to about 2.6 GB.
 
 ### General optimization
-<!--
-| Modded Exes | neXt-Ray |
-|---|---|
-| ![before](docs/img/before.png) | ![after](docs/img/after.png) |
--->
+<p align="center"><img src="docs/img/engine_comparison.png" width="900" alt="The same place on GAMMA's engine and on neXt-Ray, with the performance overlay of each"></p>
+
+The same place with the same settings (1728x1080, no upscaler, no frame generation) on GAMMA's engine and on
+neXt-Ray's DX12 renderer:
+
+| | GAMMA engine | neXt-Ray | |
+|---|---|---|---|
+| FPS | 93 | 114 | +23% |
+| 1% low FPS | 50 | 63 | +26% |
+| CPU time per frame | 9.74 ms | 6.74 ms | -31% |
+| Draw calls | 4904 | 2431 | -50% |
+| Triangles | 3.51 M | 2.31 M | -34% |
+| VRAM | 9.89 GB | 3.63 GB | -63% |
+
+For the same picture neXt-Ray needs half the draw calls (hidden objects are skipped), a third less CPU time per
+frame and about a third of the video memory.
+
 GPU occlusion culling, tree batching, cached shadows, multithreaded culling, background Lua garbage collection, a
 faster LuaJIT and A-Life work spread over several frames. The heaviest scripts and shaders of GAMMA's mods run
 cheaper versions, without touching the mods' files. The image stays the same.
