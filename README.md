@@ -48,8 +48,10 @@ faster LuaJIT and A-Life work spread over several frames. The heaviest scripts a
 cheaper versions, without touching the mods' files. The image stays the same.
 
 ### Faster level transitions
-<!-- video: cold and warm transition -->
-Level transitions are up to 2.7x faster, with no loading screen.
+<p align="center"><a href="docs/img/transition_comparison.mp4"><img src="docs/img/transition_comparison.gif" width="720" alt="The same level transition on GAMMA's engine (28.7 s) and on neXt-Ray (12.8 s)"></a></p>
+
+Up to ~2.5x faster loading on level transitions, with no loading screen. Above: the same transition on GAMMA's
+engine (28.7 s) and on neXt-Ray (12.8 s), from the fade to black to the new level on screen.
 
 ### Gamepad (in progress)
 <!-- screenshot -->
