@@ -323,6 +323,35 @@ EGameActions reload_action()
 	return s_unjam_action != kNOTBINDED && weapon && weapon->IsMisfire() ? s_unjam_action : kWPN_RELOAD;
 }
 
+// Aim held through an action that ignored its press or ended the aim (a reload, an unjam, a weapon drawn, an item
+// used: aim by holding, AF_AIM_TOGGLE off): aiming once the weapon is idle again, without the trigger pressed anew.
+// Armed only by a busy or missing weapon, so an aim ended otherwise (by a script) stays ended
+void aim_resume()
+{
+	static bool armed = false;
+	CActor* actor = Actor();
+	if (!actor || psActorFlags.test(AF_AIM_TOGGLE) || !is_gamepad_key(action_key_held(kWPN_ZOOM)))
+	{
+		armed = false;
+		return;
+	}
+	CWeapon* weapon = smart_cast<CWeapon*>(actor->inventory().ActiveItem());
+	if (weapon && weapon->IsZoomed())
+	{
+		armed = false;
+		return;
+	}
+	if (!weapon || weapon->IsPending() || weapon->GetState() != CHUDState::eIdle)
+	{
+		armed = true;
+		return;
+	}
+	if (!armed || actor->is_safemode())
+		return;
+	armed = false;
+	weapon->Action(kWPN_ZOOM, CMD_START);
+}
+
 void key_press(int code)
 {
 	if (const int dik = gamepad_key_binding(code))
@@ -558,6 +587,7 @@ void update_game(const gamepad_state& pad, float dt)
 	s_look_rest.y -= float(ny);
 	if (nx || ny)
 		pInput->inject_mouse_move(nx, ny);
+	aim_resume();
 }
 
 //------------------------------------------------------------------------------------------------------------------
