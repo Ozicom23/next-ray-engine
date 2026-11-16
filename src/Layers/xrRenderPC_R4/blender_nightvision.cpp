@@ -34,6 +34,15 @@ void CBlender_nightvision::Compile(CBlender_Compile& C)
 		C.r_dx10Sampler("smp_rtlinear");
 		C.r_End();
 		break;
+	case 4: // the position buffer copied, stretched to the output's size (phase_screen_overlays_upscaled)
+		C.r_Pass("stub_screen_space", "copy_nomsaa", FALSE, FALSE, FALSE);
+		C.r_dx10Texture("s_generic", r2_RT_P);
+
+		C.r_dx10Sampler("smp_base");
+		C.r_dx10Sampler("smp_nofilter");
+		C.r_dx10Sampler("smp_rtlinear");
+		C.r_End();
+		break;
 	case 1:	
 		C.r_Pass("stub_screen_space", "nightvision_gen_1", FALSE, FALSE, FALSE);
 		C.r_dx10Texture("s_position", r2_RT_P);	

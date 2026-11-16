@@ -1051,8 +1051,43 @@ void CRenderTarget::phase_screen_overlays_upscaled()
 	// resolution: the quads stay in render pixels (screen_res) and the output-sized viewport scales them, so the blur
 	// covers the same part of the screen as before, from a sharper image (r4_upscaler_nvg_blur)
 	extern int ps_r4_upscaler_nvg_blur;
+	extern int ps_r4_upscaler_nvg_res;
 	const bool nvg_blur = ps_r2_nightvision > 0 && ps_r4_upscaler_nvg_blur && !Device.m_SecondViewport.IsSVPFrame() &&
 		upscale_blur_targets();
+
+	// Night vision sized as without an upscaler (r4_upscaler_nvg_res): its shaders size their grain, scan lines and
+	// blur in pixels of screen_res, and the blur buffers' kernels are in theirs; at render resolution those came out
+	// larger by the upscale ratio (twice in performance mode: coarse grain and a far blurrier image, plain on a small
+	// screen). So these passes run with the render size set to the output's, and the position buffer the shaders
+	// read by pixel (screen_res) is one stretched to the output's size
+	const u32 render_w = Device.dwRenderWidth, render_h = Device.dwRenderHeight;
+	const bool out_res = nvg_blur && ps_r4_upscaler_nvg_res && !RImplementation.o.dx10_msaa &&
+		(m_upscale_output_w != render_w || m_upscale_output_h != render_h) && upscale_position_target();
+	if (out_res)
+	{
+		PIX_EVENT(position_upscaled);
+		u32 Offset = 0;
+		const float w = float(render_w), h = float(render_h);
+		u_setrt(m_position_out, nullptr, nullptr, nullptr);
+		set_viewport_size(HW.pContext, float(m_upscale_output_w), float(m_upscale_output_h));
+		RCache.set_CullMode(CULL_NONE);
+		RCache.set_Stencil(FALSE);
+		FVF::TL* pv = (FVF::TL*)RCache.Vertex.Lock(4, g_combine->vb_stride, Offset);
+		pv->set(0, h, EPS_S, 1.f, 0, 0.f, 1.f); pv++;
+		pv->set(0, 0, EPS_S, 1.f, 0, 0.f, 0.f); pv++;
+		pv->set(w, h, EPS_S, 1.f, 0, 1.f, 1.f); pv++;
+		pv->set(w, 0, EPS_S, 1.f, 0, 1.f, 0.f); pv++;
+		RCache.Vertex.Unlock(4, g_combine->vb_stride);
+		RCache.set_Element(s_nightvision->E[4]);
+		RCache.set_Geometry(g_combine);
+		RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+
+		swap_position_target();
+		Device.dwRenderWidth = m_upscale_output_w;
+		Device.dwRenderHeight = m_upscale_output_h;
+		RCache.constants_epoch++; // per-frame constants (screen_res...) again, at the output's size
+	}
+
 	if (nvg_blur)
 	{
 		swap_blur_targets();
@@ -1064,6 +1099,14 @@ void CRenderTarget::phase_screen_overlays_upscaled()
 
 	if (nvg_blur)
 		swap_blur_targets();
+
+	if (out_res)
+	{
+		swap_position_target();
+		Device.dwRenderWidth = render_w;
+		Device.dwRenderHeight = render_h;
+		RCache.constants_epoch++;
+	}
 
 	m_overlay_target = nullptr;
 	rt_Generic_0->pTexture->surface_set(own);

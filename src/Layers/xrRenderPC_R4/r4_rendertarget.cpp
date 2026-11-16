@@ -1464,6 +1464,22 @@ bool CRenderTarget::upscale_blur_targets()
 	return true;
 }
 
+int ps_r4_upscaler_nvg_res = 1;
+
+bool CRenderTarget::upscale_position_target()
+{
+	const u32 w = m_upscale_output_w, h = m_upscale_output_h;
+	if (w < 16 || h < 16)
+		return false;
+	if (m_position_out && m_position_out->dwWidth == w && m_position_out->dwHeight == h)
+		return true;
+	m_position_out.destroy();
+	m_position_out.create("$user$position_out", w, h, D3DFMT_A16B16G16R16F);
+	return !!m_position_out;
+}
+
+void CRenderTarget::swap_position_target() { swap_rt_resources(&*rt_Position, &*m_position_out); }
+
 void CRenderTarget::swap_blur_targets()
 {
 	ref_rt* blur[6] = { &rt_blur_h_2, &rt_blur_2, &rt_blur_h_4, &rt_blur_4, &rt_blur_h_8, &rt_blur_8 };

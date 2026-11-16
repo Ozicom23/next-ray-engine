@@ -46,6 +46,10 @@ private:
 	// output resolution, in these targets exchanged with rt_blur_h_2..rt_blur_8 for the overlay passes
 	ref_rt m_blur_out[6];
 	u32 m_blur_out_w = 0, m_blur_out_h = 0;
+	// The position buffer stretched to the output's size (phase_screen_overlays_upscaled, r4_upscaler_nvg_res)
+	ref_rt m_position_out;
+	bool upscale_position_target();
+	void swap_position_target();
 	bool upscale_blur_targets();
 	void swap_blur_targets();
 public:

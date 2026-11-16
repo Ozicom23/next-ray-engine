@@ -789,6 +789,7 @@ extern int ps_r4_frame_latency;
 extern int ps_r4_frame_jit;
 extern int ps_r4_post_pingpong;
 extern int ps_r4_upscaler_nvg_blur;
+extern int ps_r4_upscaler_nvg_res;
 extern int ps_r4_tree_bender_cull;
 extern int ps_r4_shader_warmup;
 extern int ps_r4_shader_progress;
@@ -1727,6 +1728,7 @@ void xrRender_initconsole()
 	CMD4(CCC_Float, "r4_frame_jit_margin", &ps_r4_frame_jit_margin, 0.f, 10.f);
 	CMD4(CCC_Integer, "r4_post_pingpong", &ps_r4_post_pingpong, 0, 1); // post passes exchange targets instead of copying
 	CMD4(CCC_Integer, "r4_upscaler_nvg_blur", &ps_r4_upscaler_nvg_blur, 0, 1); // night vision blur at output resolution
+	CMD4(CCC_Integer, "r4_upscaler_nvg_res", &ps_r4_upscaler_nvg_res, 0, 1); // night vision's grain and blur sized by the output resolution
 	CMD4(CCC_Integer, "r4_tree_bender_cull", &ps_r4_tree_bender_cull, 0, 1); // benders out of a tree's reach go last
 	CMD4(CCC_Integer, "r4_shader_warmup", &ps_r4_shader_warmup, 0, 1); // cached shaders created at the game start
 	CMD4(CCC_Integer, "r4_shader_progress", &ps_r4_shader_progress, 0, 1); // shader compilation progress window at the game start
