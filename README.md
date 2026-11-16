@@ -24,7 +24,8 @@ of GAMMA 0.9.5 (branch `all-in-one-vs2022-wpo-mt`, commit
 
 ### DirectX 12
 <!-- screenshot -->
-A new DX12 renderer with HDR. DX11 still gets updates too, for older PCs.
+A new DX12 renderer with HDR. It is the main renderer: new features are made for it first. DX11 is still included
+for older PCs and gets some of the updates, but not all of them (no frame generation or XeSS, for example).
 
 ### Upscaling
 <!-- screenshot -->
