@@ -20,6 +20,28 @@ of GAMMA 0.9.5 (branch `all-in-one-vs2022-wpo-mt`, commit
 - **Mods that ship their own exes** (for example xrRazom co-op): these won't work. They need their own engine, and
   installing them would replace neXt-Ray.
 
+## Install
+
+neXt-Ray needs GAMMA 0.9.5 as the GAMMA launcher installs it.
+
+1. Download the latest zip from [Releases](../../releases).
+2. Back up two things from your `Anomaly` folder (copy them somewhere outside it): `bin\AnomalyDX11AVX.exe` and
+   `db\mods\00_modded_exes_gamedata.db0`.
+3. Extract the zip into your `Anomaly` folder and overwrite the files. It adds `bin\AnomalyDX12AVX.exe`, replaces
+   `bin\AnomalyDX11AVX.exe` and the engine's gamedata, and adds the DLSS and XeSS DLLs.
+4. Add the DX12 exe to Mod Organizer: the executables list (the gears icon) > Add > Title `Anomaly (DX12-AVX)`,
+   Binary `Anomaly\bin\AnomalyDX12AVX.exe`.
+5. Start `Anomaly (DX12-AVX)` from Mod Organizer. DX11 is `Anomaly (DX11-AVX)`, as before.
+
+Your saves, settings and modlist stay as they are. Only AVX exes are included.
+
+**After a GAMMA update:** it can put GAMMA's own engine back and remove the DX12 entry from Mod Organizer. Do steps 3
+and 4 again.
+
+**Uninstall:** put the two backed-up files back and delete `bin\AnomalyDX12AVX.exe`.
+
+neXt-Ray is not part of GAMMA: please don't report its problems to GAMMA's support, open an issue here instead.
+
 ## Features
 
 ### DirectX 12
@@ -62,21 +84,36 @@ GPU occlusion culling, tree batching, cached shadows, multithreaded culling, bac
 faster LuaJIT and A-Life work spread over several frames. The heaviest scripts and shaders of GAMMA's mods run
 cheaper versions, without touching the mods' files. The image stays the same.
 
-### Faster level transitions
+### Faster level transitions and loading
 <p align="center"><a href="docs/img/transition_comparison.mp4"><img src="docs/img/transition_comparison.gif" width="720" alt="The same level transition on GAMMA's engine (28.7 s) and on neXt-Ray (12.8 s)"></a></p>
 
 Up to ~2.5x faster loading on level transitions, with no loading screen. Above: the same transition on GAMMA's
 engine (28.7 s) and on neXt-Ray (12.8 s), from the fade to black to the new level on screen.
 
+Starting the game is about 2x faster too: from launch to a loaded save takes ~150 s on GAMMA's engine and ~76 s on
+neXt-Ray on the same machine (launch to the main menu 107 s against 56 s, loading the save 42 s against 20 s).
+
+### Performance overlay
+<p align="center"><img src="docs/img/performance_overlay.png" width="720" alt="The detailed performance overlay on a Steam Deck: FPS, frame times, CPU, GPU and memory on the left with the GPU passes below, the Lua time of each mod and script loading times on the right"></p>
+
+A built-in overlay with FPS, frame times, CPU and GPU time and video memory (`perf_overlay compact`, `graph` or
+`detailed` in the console). `perf_overlay_mods` adds the Lua time of each mod per frame and how long each took to load.
+
 ### Steam Deck preset
-<!-- screenshot -->
+<p align="center"><a href="https://www.youtube.com/watch?v=iWOeuRe3ifY"><img src="docs/img/steam_deck_video.jpg" width="720" alt="Video: STALKER GAMMA with neXt-Ray on a Steam Deck (opens on YouTube)"></a></p>
+
+<p align="center"><sub>Actual performance and quality are higher: Steam's recording takes a hit on both.</sub></p>
+
 One switch for the Steam Deck (Options > Video > Advanced) that lowers the settings whose loss is hard to see on its
 800p screen: smaller shadow maps, ambient occlusion and reflections at half resolution, fewer shadow and indirect
 light samples, 8x anisotropic filtering. Turning it off puts your previous values back.
 
 ### Gamepad (in progress)
-<!-- screenshot -->
-Play with a controller: Xbox pads, DualSense and DualShock 4, with gyro aiming. Still being worked on.
+Every button can be rebound in Options > Modded Exes > Controls > Gamepad.
+
+<p align="center"><img src="docs/img/gamepad_wheel.png" width="720" alt="The radial wheel in game: weapon and device slots around the ring, mod actions on the buttons listed beside it"></p>
+
+<p align="center"><img src="docs/img/gamepad_controls.png" width="900" alt="The default gamepad layout: what each button does pressed, held, tapped twice and with LT held, and the controls in menus"></p>
 
 ## More
 - [Features](docs/FEATURES.md): the full list, with console commands and defaults
