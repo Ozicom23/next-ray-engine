@@ -68,6 +68,12 @@ cheaper versions, without touching the mods' files. The image stays the same.
 Up to ~2.5x faster loading on level transitions, with no loading screen. Above: the same transition on GAMMA's
 engine (28.7 s) and on neXt-Ray (12.8 s), from the fade to black to the new level on screen.
 
+### Steam Deck preset
+<!-- screenshot -->
+One switch for the Steam Deck (Options > Video > Advanced) that lowers the settings whose loss is hard to see on its
+800p screen: smaller shadow maps, ambient occlusion and reflections at half resolution, fewer shadow and indirect
+light samples, 8x anisotropic filtering. Turning it off puts your previous values back.
+
 ### Gamepad (in progress)
 <!-- screenshot -->
 Play with a controller: Xbox pads, DualSense and DualShock 4, with gyro aiming. Still being worked on.

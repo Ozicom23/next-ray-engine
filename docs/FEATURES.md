@@ -98,8 +98,9 @@ Also: faster LuaJIT (fewer failed traces), faster calls between scripts and the 
 Also: collision and script caches, a faster file index, faster ini and script loading.
 
 ## Steam Deck preset
-Options > Modded Exes: one switch that lowers the settings whose loss is hard to see on the Deck's screen. Turning it
-off restores your previous values.
+Options > Video > Advanced: one switch that lowers the settings whose loss is hard to see on the Deck's 800p screen
+(smaller shadow maps, ambient occlusion and reflections at half resolution, fewer shadow and indirect light samples,
+8x anisotropic filtering). Turning it off restores your previous values.
 
 ## Gamepad (in progress)
 XInput pads, DualSense and DualShock 4: a STALKER 2-like layout, radial menus, button prompts, gyro aiming, rumble and
