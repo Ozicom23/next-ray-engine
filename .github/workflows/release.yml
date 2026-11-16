@@ -1,0 +1,139 @@
+# Player release: both AVX exes (DX11 and DX12) with their crash report symbols, the DLSS and XeSS DLLs and the engine's
+# gamedata, as one zip laid out like the Anomaly folder (README, Install). Push a tag named v<version> (e.g. v0.2.0) to
+# start it. It creates a DRAFT GitHub Release with neXt-Ray-<version>.zip and neXt-Ray-<version>-pdb.zip (debug symbols,
+# not needed to play): check the files and the notes on the Releases page, then press "Publish release".
+# The build steps are dev-build.yml's.
+
+name: Release
+
+on:
+  push:
+    tags: [ "v*" ]
+
+env:
+  SOLUTION_FILE_PATH: src/engine-vs2022.sln
+  BUILD_CONF: DX11-AVX
+  PACK_GAMEDATA_NAME: 00_modded_exes_gamedata.db0
+  DLSS_SDK_TAG: v310.9.16
+  XESS_SDK_TAG: v3.0.2
+
+jobs:
+  release:
+    name: release
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Configure Pagefile
+      uses: al-cheb/configure-pagefile-action@v1.3
+      with:
+        minimum-size: 8GB
+        maximum-size: 8GB
+        disk-root: "C:"
+
+    - name: Checkout repo
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Fetch NVIDIA DLSS SDK
+      run: |
+        $dst = "src/3rd party/NVIDIA-DLSS"
+        git -c advice.detachedHead=false clone -q --depth 1 --branch ${{ env.DLSS_SDK_TAG }} --filter=blob:none --sparse https://github.com/NVIDIA/DLSS.git "$dst"
+        git -C "$dst" sparse-checkout set --no-cone /include/ /LICENSE.txt /lib/Windows_x86_64/x64/nvsdk_ngx_d.lib /lib/Windows_x86_64/rel/nvngx_dlss.dll /lib/Windows_x86_64/dev/nvngx_dlss.dll
+        if (!(Test-Path "$dst/lib/Windows_x86_64/x64/nvsdk_ngx_d.lib")) { throw "DLSS SDK fetch failed" }
+
+    - name: Fetch Intel XeSS SDK (DX12 exe)
+      run: |
+        $dst = "src/3rd party/Intel-XeSS"
+        git -c advice.detachedHead=false clone -q --depth 1 --branch ${{ env.XESS_SDK_TAG }} --filter=blob:none --sparse https://github.com/intel/xess.git "$dst"
+        git -C "$dst" sparse-checkout set --no-cone /inc/ /lib/ /LICENSE.txt /bin/libxess.dll /bin/libxess_fg.dll /bin/libxell.dll
+        if (!(Test-Path "$dst/lib/libxess.lib")) { throw "XeSS SDK fetch failed" }
+
+    - name: Compile FSR shaders
+      run: powershell -ExecutionPolicy Bypass -File "src/3rd party/FidelityFX-FSR3/compile_shaders.ps1"
+
+    - name: Compile FSR frame generation shaders (DX12 exe)
+      # AMD's shader compiler (FidelityFX_SC.exe with DXC) from the FidelityFX SDK v1.1.4 binary store
+      run: |
+        $sdk = "$env:RUNNER_TEMP/ffx-sdk"
+        git -c advice.detachedHead=false clone -q --depth 1 --branch v1.1.4 --filter=blob:none --sparse https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK.git "$sdk"
+        git -C "$sdk" sparse-checkout set --no-cone /sdk/tools/binary_store/
+        if (!(Test-Path "$sdk/sdk/tools/binary_store/FidelityFX_SC.exe")) { throw "FidelityFX shader compiler fetch failed" }
+        powershell -ExecutionPolicy Bypass -File "src/3rd party/FidelityFX-FSR3/compile_shaders_dx12.ps1" -Compiler "$sdk/sdk/tools/binary_store/FidelityFX_SC.exe"
+
+    - name: setup-msbuild
+      uses: microsoft/setup-msbuild@v1.3.1
+      with:
+        msbuild-architecture: "x64"
+
+    - name: Build ${{ env.BUILD_CONF }}
+      # /m: independent projects build at the same time (files within a project already compile in parallel)
+      run: msbuild /m /p:Configuration=${{ env.BUILD_CONF }} ${{ env.SOLUTION_FILE_PATH }}
+
+    - name: Crash report symbols
+      # Each exe writes its function names from its PDB next to itself (<exe>.sym, read by the crash reports)
+      run: |
+        $env:PATH = "$pwd\sdk\binaries;$pwd\src\3rd party\Intel-XeSS\bin;$env:PATH"
+        get-childitem "./_build/_game/bin_dbg/*.exe" | foreach-object {
+          $sym = [IO.Path]::ChangeExtension($_.FullName, ".sym")
+          $p = start-process -filepath $_.FullName -argumentlist "-dump_symbols `"$sym`"" -wait -passthru -nonewwindow
+          if ($p.ExitCode -ne 0) { write-host "no symbols for $($_.Name)" }
+        }
+
+    - name: Pack gamedata
+      run: |
+        new-item -path "./compressor/gamedata" -itemtype directory -force
+        copy-item -path "./gamedata/*" -destination "./compressor/gamedata" -recurse -force
+        cd ./compressor
+        start-process -filepath "./! compress_gamedata.cmd" -Wait
+        rename-item -path gamedata.db0 -newname ${{ env.PACK_GAMEDATA_NAME }}
+
+    - name: Package
+      run: |
+        $v = "${{ github.ref_name }}".TrimStart("v")
+        new-item -path "./package/bin" -itemtype directory -force
+        new-item -path "./package/db/mods" -itemtype directory -force
+        copy-item -path "./_build/_game/bin_dbg/*.exe" -destination "./package/bin"
+        copy-item -path "./_build/_game/bin_dbg/*.sym" -destination "./package/bin" -erroraction silentlycontinue
+        copy-item -path "./compressor/${{ env.PACK_GAMEDATA_NAME }}" -destination "./package/db/mods"
+        $sdk = "./src/3rd party/NVIDIA-DLSS"
+        copy-item -path "$sdk/lib/Windows_x86_64/rel/nvngx_dlss.dll" -destination "./package/bin"
+        copy-item -path "$sdk/LICENSE.txt" -destination "./package/bin/nvngx_dlss_LICENSE.txt"
+        $xess = "./src/3rd party/Intel-XeSS"
+        copy-item -path "$xess/bin/libxess.dll", "$xess/bin/libxess_fg.dll", "$xess/bin/libxell.dll" -destination "./package/bin"
+        copy-item -path "$xess/LICENSE.txt" -destination "./package/bin/libxess_LICENSE.txt"
+        new-item -path "./package_pdb/bin" -itemtype directory -force
+        copy-item -path "./_build/_game/bin_dbg/*.pdb" -destination "./package_pdb/bin"
+        foreach ($f in "AnomalyDX11AVX.exe", "AnomalyDX12AVX.exe") {
+          if (!(Test-Path "./package/bin/$f")) { throw "missing $f" }
+        }
+        foreach ($f in "AnomalyDX11AVX.sym", "AnomalyDX12AVX.sym") {
+          if (!(Test-Path "./package/bin/$f")) { write-host "::warning::$f is missing: crash reports of this release will have no function names" }
+        }
+        get-childitem -recurse ./package | select-object FullName, Length
+        7z a -tzip -mx=7 "neXt-Ray-$v.zip" ./package/*
+        7z a -tzip -mx=7 "neXt-Ray-$v-pdb.zip" ./package_pdb/*
+
+    - name: Create draft release
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        $v = "${{ github.ref_name }}".TrimStart("v")
+        $notes = @"
+        A new engine for S.T.A.L.K.E.R. Anomaly and G.A.M.M.A. 0.9.5: a DX12 renderer, DLSS / FSR / XeSS with frame generation, texture streaming, faster loading and a gamepad layout. See the [README](https://github.com/${{ github.repository }}#readme) for what it does.
+
+        **Install:** extract ``neXt-Ray-$v.zip`` into your ``Anomaly`` folder after backing up ``bin\AnomalyDX11AVX.exe`` and ``db\mods\00_modded_exes_gamedata.db0``, then add ``Anomaly (DX12-AVX)`` to Mod Organizer. The steps, updating and uninstalling: [Install](https://github.com/${{ github.repository }}#install).
+
+        **Requirements:** GAMMA 0.9.5 as its launcher installs it, a CPU with AVX. DLSS needs an NVIDIA RTX GPU (on Linux with Proton: ``PROTON_ENABLE_NVAPI=1``).
+
+        ``neXt-Ray-$v-pdb.zip`` has the debug symbols for crash analysis and is not needed to play.
+
+        neXt-Ray is not part of GAMMA: please don't report its problems to GAMMA's support, open an issue here instead.
+
+        Credits: themrdemonized's Modded Exes (xray-monolith). NVIDIA DLSS SDK (c) NVIDIA Corporation. AMD FidelityFX Super Resolution 3 (c) Advanced Micro Devices, MIT license. Intel XeSS (c) Intel Corporation.
+        "@
+        $notes = ($notes -split "`n" | foreach-object { $_ -replace "^        ", "" }) -join "`n"
+        set-content -path notes.md -value $notes -encoding utf8
+        gh release create "${{ github.ref_name }}" --draft --verify-tag --title "neXt-Ray $v" --notes-file notes.md "neXt-Ray-$v.zip" "neXt-Ray-$v-pdb.zip"
