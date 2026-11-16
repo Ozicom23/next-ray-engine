@@ -97,6 +97,11 @@ enum EStance
 	stProne,
 };
 EStance s_stance = stStand;
+// A mod's night vision by scripts (gamepad_nv_script, zzzz_nextray_gamepad): the night vision button held switches it
+// on at once, off when released; D-pad up and down meanwhile change its brightness instead (then it stays on)
+bool s_nv_script = false;
+int s_nv_key = 0; // the night vision key held, 0 none
+bool s_nv_used = false; // the brightness was changed while it's held
 EGameActions s_unjam_action = kNOTBINDED; // a mod's unjam action (gamepad_unjam_action): the reload key's on a jammed weapon
 bool s_mouse_down[2] = {false, false};
 int s_keys_down[GP_BUTTON_COUNT]; // cursor mode: the key pressed for each button, 0 none
@@ -266,6 +271,18 @@ bool radial_button(int b)
 	return false;
 }
 
+// D-pad up or down pressed while the night vision key is held: the brightness (the button ignored till released)
+bool nv_button(int b)
+{
+	const int code = GP_A + b;
+	if (code != GP_DPAD_UP && code != GP_DPAD_DOWN)
+		return false;
+	s_buttons[b].ignore = true;
+	s_nv_used = true;
+	call_script("zzzz_nextray_gamepad.nv_brightness", code == GP_DPAD_UP ? 1 : -1);
+	return true;
+}
+
 void radial_update(const gamepad_state& pad)
 {
 	const Fvector2 rs = {pad.rx, pad.ry};
@@ -373,6 +390,15 @@ void key_press(int code)
 		if (actor && reload_action() != kWPN_RELOAD)
 			gamepad_resolve(code, reload_action());
 		break;
+	case kNIGHT_VISION:
+		if (s_nv_script && actor)
+		{
+			s_nv_key = code;
+			s_nv_used = false;
+			call_script("zzzz_nextray_gamepad.nv_press");
+			return;
+		}
+		break;
 	case kCROUCH:
 		// With the game's own crouch toggle (AF_CROUCH_TOGGLE) the key toggles it there
 		if (g_gp_crouch_toggle && !psActorFlags.test(AF_CROUCH_TOGGLE))
@@ -416,6 +442,12 @@ void key_release(int code)
 	}
 	if (code == s_sprint_key)
 		return;
+	if (code == s_nv_key)
+	{
+		s_nv_key = 0;
+		call_script("zzzz_nextray_gamepad.nv_release", s_nv_used);
+		return;
+	}
 	if (const int dik = gamepad_key_binding(code))
 	{
 		pInput->inject_key(dik, false);
@@ -454,6 +486,8 @@ void update_game(const gamepad_state& pad, float dt)
 			continue;
 		}
 		if (down && !t.down && s_radial_key && radial_button(b))
+			continue;
+		if (down && !t.down && s_nv_key && nv_button(b))
 			continue;
 		if (down && !t.down)
 		{
@@ -1039,6 +1073,7 @@ bool cursor_mode()
 // Everything the gamepad holds is released; buttons still down do nothing until released
 void release_all(const gamepad_state& pad)
 {
+	s_nv_key = 0; // a menu opened while it's held: night vision stays as it is
 	for (int b = 0; b < GP_BUTTON_COUNT; ++b)
 	{
 		pad_button& t = s_buttons[b];
@@ -1256,6 +1291,8 @@ u32 gamepad_stance()
 		s_stance = stStand;
 	return s_stance == stProne ? (mcCrouch | mcAccel) : (s_stance == stCrouch ? mcCrouch : 0);
 }
+
+void gamepad_nv_script(bool on) { s_nv_script = on; }
 
 void gamepad_unjam_action(int action)
 {

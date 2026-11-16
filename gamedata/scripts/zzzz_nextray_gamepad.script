@@ -16,6 +16,10 @@
 --    arti_jamming's unjam one), the jump button holds Ledge Grabbing's key (it reads its own key, not the jump action),
 --    the laser action (key_bindings.kWPN_LASER, RB tapped twice) switches the weapon's laser as the torch key held does
 --    (zzz_bas_laser_control).
+-- 5. Beef's NVG by the night vision button held (RB): off, it switches on at once; on, it switches off when the button
+--    is released, unless D-pad up or down was pressed meanwhile: those step its brightness up and down. (The mod's
+--    own key steps the brightness when tapped and switches when held 0.25 s; a button's held key comes after the
+--    hold time already, so its tap couldn't be done.)
 
 local function msg(fmt, ...)
 	log(string.format("[neXt-Ray gamepad] " .. fmt, ...))
@@ -188,12 +192,64 @@ local function on_key_release(dik)
 end
 
 ---------------------------------------------------------------------------------------------------------------------
+-- 5. Night vision (item_device, z_beefs_nvgs)
+
+local nv_switched = false -- the press switched it on: the release leaves it
+
+local function nv_mod()
+	return item_device and item_device.set_nightvision and z_beefs_nvgs and z_beefs_nvgs.brightness_adjust
+end
+
+-- As item_device's key held does
+local function nv_toggle()
+	if not (nv_mod() and db.actor) then return end
+	local torch = db.actor:item_in_slot(10)
+	z_beefs_nvgs.play_animation = true
+	item_device.set_nightvision(torch and torch:section(), not item_device.nv_state)
+end
+
+function nv_press()
+	nv_switched = false
+	if nv_mod() and not item_device.nv_state then
+		nv_toggle()
+		nv_switched = true
+	end
+end
+
+function nv_release(used)
+	if not nv_switched and not used then
+		nv_toggle()
+	end
+end
+
+-- The mod's brightness_adjust steps the way its gain_directionality says (up to the maximum, then down): set here to
+-- the D-pad's direction before each step
+function nv_brightness(dir)
+	if not (nv_mod() and item_device.nv_state and debug and debug.getupvalue) then return end
+	local f = z_beefs_nvgs.brightness_adjust
+	local i = 1
+	while true do
+		local name = debug.getupvalue(f, i)
+		if not name then break end
+		if name == "gain_directionality" then
+			debug.setupvalue(f, i, dir > 0)
+			break
+		end
+		i = i + 1
+	end
+	f()
+end
+
+---------------------------------------------------------------------------------------------------------------------
 
 function on_game_start()
 	local catspaw_on = catspaw_patch()
 	msg("Catspaw's key names by the gamepad %s", catspaw_on and "on" or "off")
 	if gamepad_unjam_action then
 		gamepad_unjam_action(has_script("arti_jamming") and key_bindings.kCUSTOM22 or 0)
+	end
+	if gamepad_nv_script then
+		gamepad_nv_script(has_script("z_beefs_nvgs") and has_script("item_device"))
 	end
 	if gamepad_key then
 		RegisterScriptCallback("on_key_press", on_key_press)

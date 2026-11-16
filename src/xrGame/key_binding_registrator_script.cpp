@@ -31,6 +31,7 @@ void key_binding_registrator::script_register(lua_State* L)
 		def("gamepad_press_key", &gamepad_press_key),
 		def("gamepad_send_action", &gamepad_send_action),
 		def("gamepad_unjam_action", &gamepad_unjam_action),
+		def("gamepad_nv_script", &gamepad_nv_script),
 		def("gamepad_key", &gamepad_key),
 		def("gamepad_menu_target", &gamepad_menu_target),
 

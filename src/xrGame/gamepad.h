@@ -33,6 +33,9 @@ void gamepad_press_key(int dik, int modifier, int taps, float hold);
 void gamepad_send_action(int action);
 // a mod's unjam action (key_bindings.kCUSTOM...): the reload key presses it on a jammed weapon; 0 none
 void gamepad_unjam_action(int action);
+// a mod's night vision switched by zzzz_nextray_gamepad's nv_press, nv_release(used) and nv_brightness(dir) instead of
+// the night vision key (the button held, D-pad up and down its brightness meanwhile)
+void gamepad_nv_script(bool on);
 // a keyboard key pressed or released as is (a mod's key kept down while a button is)
 void gamepad_key(int dik, bool down);
 class CUIWindow;
