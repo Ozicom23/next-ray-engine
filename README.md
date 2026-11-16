@@ -9,7 +9,9 @@ It replaces the game's exes and leaves your modlist as it is. You get more fps, 
 lower memory use.
 
 It is built on [Modded Exes](https://github.com/themrdemonized/xray-monolith) by themrdemonized, the engine GAMMA
-ships with, so everything Modded Exes has is still here.
+ships with, so everything Modded Exes has is still here. The fork point is Modded Exes MT-TEST 2026.5.15, the engine
+of GAMMA 0.9.5 (branch `all-in-one-vs2022-wpo-mt`, commit
+[`3d4dcca5`](https://github.com/themrdemonized/xray-monolith/commit/3d4dcca52f842c797099da3e6206e53dab7e7d79)).
 
 ## Compatibility
 
