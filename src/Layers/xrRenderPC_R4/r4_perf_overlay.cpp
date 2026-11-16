@@ -691,7 +691,8 @@ void CShaderProgressOverlay::Draw()
 	using namespace shader_progress;
 	static const u64 kShowDoneMs = 4000;
 
-	if (!ps_r4_shader_progress)
+	// Shown with the statistics overlay only (perf_overlay): a part of it
+	if (!ps_r4_shader_progress || !ps_perf_overlay)
 		return;
 
 	// Only inside an open ImGui frame (not before the engine's first ImGui::NewFrame)
