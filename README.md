@@ -119,7 +119,13 @@ Every button can be rebound in Options > Modded Exes > Controls > Gamepad.
 
 ## More
 - [Features](docs/FEATURES.md): the full list, with console commands and defaults
-- [Development](docs/DEVELOPMENT.md): building and testing
+
+## Remote console
+
+For scripted tests: start the game with `-dbg -remote_console`. It runs the commands written to
+`appdata/remote_cmd.txt` (one per line) and writes its state to `appdata/remote_status.txt`. Extra commands:
+`rc_wait <s>`, `rc_wait_level <s>`, `rc_clear`, `rc_silent_level_changers 1`. `tools/remote_console.sh` wraps it
+(launch, load a save, send commands, time a level transition).
 
 ## License
 

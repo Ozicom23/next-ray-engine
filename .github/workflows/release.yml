@@ -26,14 +26,14 @@ jobs:
 
     steps:
     - name: Configure Pagefile
-      uses: al-cheb/configure-pagefile-action@v1.3
+      uses: al-cheb/configure-pagefile-action@v1.5
       with:
         minimum-size: 8GB
         maximum-size: 8GB
         disk-root: "C:"
 
     - name: Checkout repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7.0.1
       with:
         submodules: recursive
 
@@ -64,7 +64,7 @@ jobs:
         powershell -ExecutionPolicy Bypass -File "src/3rd party/FidelityFX-FSR3/compile_shaders_dx12.ps1" -Compiler "$sdk/sdk/tools/binary_store/FidelityFX_SC.exe"
 
     - name: setup-msbuild
-      uses: microsoft/setup-msbuild@v1.3.1
+      uses: microsoft/setup-msbuild@v3
       with:
         msbuild-architecture: "x64"
 

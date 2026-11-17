@@ -38,7 +38,7 @@ jobs:
 
     steps:
     - name: Checkout repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7.0.1
 
     - name: Pack gamedata
       run: |
@@ -49,7 +49,7 @@ jobs:
         rename-item -path gamedata.db0 -newname ${{env.PACK_GAMEDATA_NAME}}
         
     - name: Upload gamedata
-      uses: actions/upload-artifact@v4.6.0
+      uses: actions/upload-artifact@v7.0.2
       with:
         # Artifact name
         name: ${{env.PACK_GAMEDATA_NAME}}
@@ -78,7 +78,7 @@ jobs:
     - name: Configure Pagefile
       # You may pin to the exact commit or the version.
       # uses: al-cheb/configure-pagefile-action@86589fd789a4de3e62ba628dda2cb10027b66d67
-      uses: al-cheb/configure-pagefile-action@v1.3
+      uses: al-cheb/configure-pagefile-action@v1.5
       with:
         # Set minimum size of Pagefile
         minimum-size: 8GB
@@ -88,7 +88,7 @@ jobs:
         disk-root: "C:"
         
     - name: Checkout repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7.0.1
       # with:
       #   ref: all-in-one-vs2022
       
@@ -107,7 +107,7 @@ jobs:
         if (Test-Path "src/3rd party/FidelityFX-FSR3/compile_shaders.ps1") { powershell -ExecutionPolicy Bypass -File "src/3rd party/FidelityFX-FSR3/compile_shaders.ps1" }
 
     - name: setup-msbuild
-      uses: microsoft/setup-msbuild@v1.3.1
+      uses: microsoft/setup-msbuild@v3
       with:
         # Version of Visual Studio to search; defaults to latest if not specified
         # vs-version: '[17.6, 17.7)'
@@ -145,7 +145,7 @@ jobs:
       run: msbuild /p:Configuration=${{matrix.buildconf}} ${{env.SOLUTION_FILE_PATH}}
 
     - name: Upload Exe
-      uses: actions/upload-artifact@v4.6.0
+      uses: actions/upload-artifact@v7.0.2
       with:
         # Artifact name
         name: ${{matrix.buildconf}}_exe
@@ -168,7 +168,7 @@ jobs:
         compress-archive -DestinationPath "STALKER-Anomaly-modded-exes_${{matrix.buildconf}}_pdb.zip" -Path "./*.pdb"
 
     - name: Upload PDB
-      uses: actions/upload-artifact@v4.6.0
+      uses: actions/upload-artifact@v7.0.2
       with:
         # Artifact name
         name: ${{matrix.buildconf}}_pdb
@@ -197,7 +197,7 @@ jobs:
     - name: Configure Pagefile
       # You may pin to the exact commit or the version.
       # uses: al-cheb/configure-pagefile-action@86589fd789a4de3e62ba628dda2cb10027b66d67
-      uses: al-cheb/configure-pagefile-action@v1.3
+      uses: al-cheb/configure-pagefile-action@v1.5
       with:
         # Set minimum size of Pagefile
         minimum-size: 8GB
@@ -207,7 +207,7 @@ jobs:
         disk-root: "C:"
 
     - name: Checkout repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7.0.1
       with:
         ref: all-in-one-vs2022-wpo-mt
 
@@ -226,7 +226,7 @@ jobs:
         if (Test-Path "src/3rd party/FidelityFX-FSR3/compile_shaders.ps1") { powershell -ExecutionPolicy Bypass -File "src/3rd party/FidelityFX-FSR3/compile_shaders.ps1" }
 
     - name: setup-msbuild
-      uses: microsoft/setup-msbuild@v1.3.1
+      uses: microsoft/setup-msbuild@v3
       with:
         # Version of Visual Studio to search; defaults to latest if not specified
         # vs-version: '[17.6, 17.7)'
@@ -264,7 +264,7 @@ jobs:
       run: msbuild /p:Configuration=${{matrix.buildconf}} ${{env.SOLUTION_FILE_PATH}}
 
     - name: Upload Exe
-      uses: actions/upload-artifact@v4.6.0
+      uses: actions/upload-artifact@v7.0.2
       with:
         # Artifact name
         name: ${{matrix.buildconf}}_mt_exe
@@ -287,7 +287,7 @@ jobs:
         compress-archive -DestinationPath "STALKER-Anomaly-modded-exes_${{matrix.buildconf}}_mt_pdb.zip" -Path "./*.pdb"
 
     - name: Upload PDB
-      uses: actions/upload-artifact@v4.6.0
+      uses: actions/upload-artifact@v7.0.2
       with:
         # Artifact name
         name: ${{matrix.buildconf}}_mt_pdb
@@ -309,7 +309,7 @@ jobs:
     name: Release
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7.0.1
       # with:
       #   ref: all-in-one-vs2022
     
@@ -324,7 +324,7 @@ jobs:
         VERSION: "${{steps.datetime.outputs.today}}"
 
     - name: Download artifacts
-      uses: actions/download-artifact@v4.1.8
+      uses: actions/download-artifact@v8.0.2
 
     - name: Zip Exe folder
       run: |
@@ -402,7 +402,7 @@ jobs:
         mv ${{env.DX8AVX}}_mt_pdb/*.zip pdb
 
     - name: Publish
-      uses: softprops/action-gh-release@v2.3.2
+      uses: softprops/action-gh-release@v3.0.4
       with:
         files: |
           *.zip
