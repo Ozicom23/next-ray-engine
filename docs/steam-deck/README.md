@@ -25,7 +25,8 @@ The install takes a few hours. If it stops partway, run `full-install --resume`.
 
 1. Steam > Games > Add a Non-Steam Game to My Library > Browse: `~/Games/gamma/gamma/ModOrganizer.exe` (set the
    file type to All Files).
-2. The new entry's Properties > Compatibility: force Proton Experimental.
+2. The new entry's Properties > Compatibility: force Proton Experimental. In Properties > Shortcut, rename it from
+   `ModOrganizer` to something you'll recognize in your library, e.g. `Stalker GAMMA`
 3. Start it once, so Steam creates its Proton prefix; Mod Organizer opens. Close it.
 
 ## 3. Protontricks
@@ -36,6 +37,8 @@ Find the entry's id, then install the libraries GAMMA needs into its prefix:
 flatpak run com.github.Matoking.protontricks -l
 flatpak run com.github.Matoking.protontricks <id> d3dcompiler_43 d3dcompiler_47 d3dx10 d3dx11_43 d3dx9 vcrun2022
 ```
+
+Installers pop up along the way: accept each license and click through them until Protontricks finishes.
 
 ## 4. Install neXt-Ray
 
@@ -53,11 +56,21 @@ and loose files take priority over neXt-Ray's.
 
 ## 5. Start the DX12 exe from Steam
 
-1. Start the Steam entry: Mod Organizer opens. The executables list (the gears icon) > Add > Title
-   `Anomaly (DX12-AVX)`, Binary `anomaly/bin/AnomalyDX12AVX.exe`. Close Mod Organizer.
-2. The Steam entry's Properties > Launch Options:
+1. Start the Steam entry: Mod Organizer opens. Open the executables list (the gears icon) and select
+   `Anomaly (DX11-AVX)`: copy its Binary and Start in. Then Add, and fill in:
+   - Title: `Anomaly (DX12-AVX)`
+   - Binary: the copied path with `AnomalyDX11AVX.exe` changed to `AnomalyDX12AVX.exe`
+   - Start in: the copied path, as it is (the `anomaly/bin` folder)
+   - check **Force load libraries** and **Use application's icon for desktop shortcuts**
+
+   Apply, then close Mod Organizer.
+2. The Steam entry's Properties > Launch Options. Steam Deck LCD:
    ```
-   %command% "moshortcut://:Anomaly (DX12-AVX)"
+   "moshortcut://:Anomaly (DX12-AVX)"
+   ```
+   Steam Deck OLED (with HDR):
+   ```
+   DXVK_HDR=1 %command% "moshortcut://:Anomaly (DX12-AVX)"
    ```
    It now starts the game directly, also in Game Mode. Without the launch options it opens Mod Organizer again.
 
@@ -84,4 +97,4 @@ mv backup-before-nextray/bin/AnomalyDX11AVX.exe anomaly/bin/
 mv backup-before-nextray/gamedata anomaly/
 ```
 
-Then set the launch options to `%command% "moshortcut://:Anomaly (DX11-AVX)"`.
+Then set the launch options to `DXVK_HDR=1 %command% "moshortcut://:Anomaly (DX11-AVX)"`.
