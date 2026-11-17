@@ -22,7 +22,8 @@ of GAMMA 0.9.5 (branch `all-in-one-vs2022-wpo-mt`, commit
 
 ## Install
 
-neXt-Ray needs GAMMA 0.9.5 as the GAMMA launcher installs it.
+neXt-Ray needs GAMMA 0.9.5 as the GAMMA launcher installs it. On the Steam Deck, follow the
+[Steam Deck guide](docs/steam-deck/README.md) instead (GAMMA and neXt-Ray from scratch).
 
 1. Download the latest zip from [Releases](../../releases).
 2. Move two things out of your `Anomaly` folder into a backup folder outside it: `bin\AnomalyDX11AVX.exe` and the
