@@ -131,11 +131,7 @@ jobs:
       run: |
         $v = "${{ github.ref_name }}".TrimStart("v")
         $notes = @"
-        A new engine for S.T.A.L.K.E.R. Anomaly and G.A.M.M.A. 0.9.5: a DX12 renderer, DLSS / FSR / XeSS with frame generation, texture streaming, faster loading and a gamepad layout. See the [README](https://github.com/${{ github.repository }}#readme) for what it does.
-
         **Install:** extract ``neXt-Ray-$v.zip`` into your ``Anomaly`` folder after moving ``bin\AnomalyDX11AVX.exe`` and the ``gamedata`` folder into a backup, then add ``Anomaly (DX12-AVX)`` to Mod Organizer. The steps, updating and uninstalling: [Install](https://github.com/${{ github.repository }}#install).
-
-        **Requirements:** GAMMA 0.9.5 as its launcher installs it (GAMMA's main branch; not GAMMA dev2, which ships a newer engine), a CPU with AVX. DLSS needs an NVIDIA RTX GPU (on Linux with Proton: ``PROTON_ENABLE_NVAPI=1``).
 
         ``neXt-Ray-$v-pdb.zip`` has the debug symbols for crash analysis and is not needed to play.
 
