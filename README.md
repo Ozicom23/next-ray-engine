@@ -56,6 +56,9 @@ for older PCs and gets some of the updates, but not all of them (no frame genera
 <!-- screenshot -->
 NVIDIA DLSS 4, AMD FSR 3.1 and Intel XeSS.
 
+**DLSS on Linux (Proton):** add `PROTON_ENABLE_NVAPI=1` to the game's Steam launch options
+(`PROTON_ENABLE_NVAPI=1 %command%`). Without it DLSS option isn't offered in game.
+
 ### Frame generation
 <!-- screenshot -->
 FSR and XeSS frame generation.
