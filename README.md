@@ -25,20 +25,22 @@ of GAMMA 0.9.5 (branch `all-in-one-vs2022-wpo-mt`, commit
 neXt-Ray needs GAMMA 0.9.5 as the GAMMA launcher installs it.
 
 1. Download the latest zip from [Releases](../../releases).
-2. Back up two things from your `Anomaly` folder (copy them somewhere outside it): `bin\AnomalyDX11AVX.exe` and
-   `db\mods\00_modded_exes_gamedata.db0`.
-3. Extract the zip into your `Anomaly` folder and overwrite the files. It adds `bin\AnomalyDX12AVX.exe`, replaces
-   `bin\AnomalyDX11AVX.exe` and the engine's gamedata, and adds the DLSS and XeSS DLLs.
+2. Move two things out of your `Anomaly` folder into a backup folder outside it: `bin\AnomalyDX11AVX.exe` and the
+   `gamedata` folder. GAMMA keeps its engine's scripts and shaders loose in `gamedata`, and loose files override
+   neXt-Ray's.
+3. Extract the zip into your `Anomaly` folder. It adds `bin\AnomalyDX11AVX.exe`, `bin\AnomalyDX12AVX.exe`, the DLSS
+   and XeSS DLLs and the engine's gamedata (`db\mods\00_modded_exes_gamedata.db0`).
 4. Add the DX12 exe to Mod Organizer: the executables list (the gears icon) > Add > Title `Anomaly (DX12-AVX)`,
    Binary `Anomaly\bin\AnomalyDX12AVX.exe`.
 5. Start `Anomaly (DX12-AVX)` from Mod Organizer. DX11 is `Anomaly (DX11-AVX)`, as before.
 
 Your saves, settings and modlist stay as they are. Only AVX exes are included.
 
-**After a GAMMA update:** it can put GAMMA's own engine back and remove the DX12 entry from Mod Organizer. Do steps 3
-and 4 again.
+**After a GAMMA update:** it can put GAMMA's own engine and its `gamedata` folder back and remove the DX12 entry from
+Mod Organizer. Delete the new `gamedata` folder and do steps 3 and 4 again.
 
-**Uninstall:** put the two backed-up files back and delete `bin\AnomalyDX12AVX.exe`.
+**Uninstall:** delete `bin\AnomalyDX12AVX.exe` and `db\mods\00_modded_exes_gamedata.db0`, then put the backed-up
+exe and `gamedata` folder back.
 
 neXt-Ray is not part of GAMMA: please don't report its problems to GAMMA's support, open an issue here instead.
 
