@@ -1293,8 +1293,8 @@
 	<string id="st_gp_radial_knife">
 		<text>Knife</text>
 	</string>
-	<string id="st_gp_radial_night_vision">
-		<text>Night Vision</text>
+	<string id="st_gp_radial_pda">
+		<text>PDA</text>
 	</string>
 
 	<string id="st_gp_wheel_lower_weapon">

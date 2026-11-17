@@ -173,7 +173,7 @@ const radial_item s_radial_items[] = {
 	{kDETECTOR, DETECTOR_SLOT, "st_gp_radial_detector"},
 	{kWPN_5, BINOCULAR_SLOT, "st_gp_radial_binoculars"},
 	{kWPN_1, KNIFE_SLOT, "st_gp_radial_knife"},
-	{kNIGHT_VISION, NO_ACTIVE_SLOT, "st_gp_radial_night_vision"},
+	{kACTIVE_JOBS, PDA_SLOT, "st_gp_radial_pda"}, // takes the PDA out, as the View button
 };
 const int RADIAL_COUNT = sizeof(s_radial_items) / sizeof(s_radial_items[0]);
 

@@ -47,8 +47,8 @@ cd ~/Games/gamma
 mkdir -p backup-before-nextray/bin
 mv anomaly/bin/AnomalyDX11AVX.exe backup-before-nextray/bin/
 mv anomaly/gamedata backup-before-nextray/
-wget https://github.com/Ozicom23/next-ray-engine/releases/download/v0.2.0/neXt-Ray-0.2.0.zip
-unzip -o neXt-Ray-0.2.0.zip -d anomaly
+wget https://github.com/Ozicom23/next-ray-engine/releases/download/v0.2.1/neXt-Ray-0.2.1.zip
+unzip -o neXt-Ray-0.2.1.zip -d anomaly
 ```
 
 The `gamedata` folder is moved into the backup because it holds GAMMA's engine scripts and shaders as loose files,
@@ -82,7 +82,7 @@ In the game, turn on the Steam Deck preset: Options > Video > Advanced.
 cd ~/Games/gamma
 ./stalker-gamma+linux.x64.AppImage update apply --preserve-user-settings --preserve-mcm-settings
 rm -rf anomaly/gamedata
-unzip -o neXt-Ray-0.2.0.zip -d anomaly
+unzip -o neXt-Ray-0.2.1.zip -d anomaly
 ```
 
 An update can put GAMMA's engine and its `gamedata` folder back. Check that `Anomaly (DX12-AVX)` is still in Mod
