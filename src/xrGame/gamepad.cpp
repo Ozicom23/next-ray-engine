@@ -17,6 +17,7 @@
 #include "UIGameCustom.h"
 #include "UI/UIDialogWnd.h"
 #include "UI/UIGameTutorial.h"
+#include "UI/UIMainIngameWnd.h"
 #include "UICursor.h"
 #include "MainMenu.h"
 #include "UI/UIStatic.h"
@@ -61,6 +62,9 @@ float g_gp_gyro_sens = 1.5f; // the camera's turn per the controller's
 int g_gp_gyro_invert_y = 0;
 int g_gp_adaptive_triggers = 1; // the DualSense's right trigger resists like a firearm's while one is in hands
 float g_gp_aim_slowdown = 0.f; // the turn slower by this share while the crosshair is on a living enemy (0 off)
+
+extern CUISequencer* g_tutorial;
+extern CUISequencer* g_tutorial2;
 
 namespace
 {
@@ -369,6 +373,25 @@ void aim_resume()
 	weapon->Action(kWPN_ZOOM, CMD_START);
 }
 
+// Use-or-reload uses when there is something to use: the object under the crosshair (its action text on screen),
+// the item the pickup marker shows (found around the crosshair, not under it), or a tutorial waiting for the use key
+// (GAMMA lights campfires that way)
+static bool something_to_use(CActor* actor)
+{
+	if (actor->GetDefaultActionForObject())
+		return true;
+	if (CurrentGameUI() && CurrentGameUI()->UIMainIngameWnd && CurrentGameUI()->UIMainIngameWnd->PickUpItem())
+		return true;
+	if ((g_tutorial && g_tutorial->WantsAction(kUSE)) || (g_tutorial2 && g_tutorial2->WantsAction(kUSE)))
+		return true;
+	luabind::functor<bool> dotmarks;
+	return ai().script_engine().functor("zzzz_nextray_gamepad.use_target", dotmarks) && dotmarks();
+}
+
+// The keyboard key a use-or-reload button sends while it uses: Interaction Dot Marks picks items up on the use key's
+// release, matched by the key's code, so it sees only the keyboard's
+int s_use_dik[GP_KEY_COUNT] = {};
+
 void key_press(int code)
 {
 	if (const int dik = gamepad_key_binding(code))
@@ -383,8 +406,20 @@ void key_press(int code)
 		radial_open(code);
 		return;
 	case kUSE_OR_RELOAD:
-		if (actor)
-			gamepad_resolve(code, actor->GetDefaultActionForObject() ? kUSE : reload_action());
+		if (!actor)
+			break;
+		if (!something_to_use(actor))
+		{
+			gamepad_resolve(code, reload_action());
+			break;
+		}
+		if (const int dik = get_action_dik(kUSE))
+		{
+			s_use_dik[code - GP_FIRST] = dik;
+			pInput->inject_key(dik, true);
+			return;
+		}
+		gamepad_resolve(code, kUSE);
 		break;
 	case kWPN_RELOAD:
 		if (actor && reload_action() != kWPN_RELOAD)
@@ -451,6 +486,12 @@ void key_release(int code)
 	if (const int dik = gamepad_key_binding(code))
 	{
 		pInput->inject_key(dik, false);
+		return;
+	}
+	if (is_gamepad_key(code) && s_use_dik[code - GP_FIRST])
+	{
+		pInput->inject_key(s_use_dik[code - GP_FIRST], false);
+		s_use_dik[code - GP_FIRST] = 0;
 		return;
 	}
 	pInput->inject_key(code, false);

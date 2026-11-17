@@ -263,6 +263,12 @@ function nv_release(used)
 	end
 end
 
+-- Use-or-reload: something Interaction Dot Marks shows a mark for (its own targets, as items around the crosshair)
+function use_target()
+	return ui_hud_dotmarks and ui_hud_dotmarks.get_current_target and ui_hud_dotmarks.get_current_target() ~= nil
+		or false
+end
+
 -- The mod's brightness_adjust steps the way its gain_directionality says (up to the maximum, then down): set here to
 -- the D-pad's direction before each step
 function nv_brightness(dir)

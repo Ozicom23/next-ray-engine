@@ -154,5 +154,6 @@ protected:
 
 public:
 	void SetPickUpItem(CInventoryItem* PickUpItem);
+	CInventoryItem* PickUpItem() const { return m_pPickUpItem; }
 DECLARE_SCRIPT_REGISTER_FUNCTION
 };

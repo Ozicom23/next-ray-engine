@@ -409,6 +409,11 @@ void CUISequencer::IR_OnMouseWheel(int direction)
 		m_pStoredInputReceiver->IR_OnMouseWheel(direction);
 }
 
+bool CUISequencer::WantsAction(EGameActions action)
+{
+	return IsActive() && !m_sequencer_items.empty() && m_sequencer_items.front()->HasAction(action);
+}
+
 void CUISequencer::IR_OnKeyboardPress(int dik)
 {
 	if (m_sequencer_items.size())

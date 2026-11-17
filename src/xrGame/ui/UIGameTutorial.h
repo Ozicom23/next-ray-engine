@@ -33,6 +33,7 @@ public:
 	virtual void OnRender();
 	CUIWindow* MainWnd() { return m_UIWindow; }
 	bool IsActive() { return !!m_flags.test(etsActive); }
+	bool WantsAction(EGameActions action);
 
 
 	LPCSTR m_name;
@@ -112,6 +113,8 @@ public:
 
 	bool AllowKey(int dik);
 	bool GrabInput() { return !!m_flags.test(etiGrabInput); }
+	// The item runs a script on this action's key (as the campfire's "use"); the gamepad's use-or-reload asks it
+	virtual bool HasAction(EGameActions action) { return false; }
 
 	shared_str m_check_lua_function;
 	shared_str m_onframe_lua_function;
@@ -158,6 +161,13 @@ public:
 
 	virtual ~CUISequenceSimpleItem();
 	virtual void Load(CUIXml* xml, int idx);
+	virtual bool HasAction(EGameActions action)
+	{
+		for (const SActionItem& itm : m_actions)
+			if (itm.m_action == action)
+				return true;
+		return false;
+	}
 
 	virtual void Start();
 	virtual bool Stop(bool bForce = false);
