@@ -10,6 +10,7 @@
 #include "script_ini_file.h"
 
 #include "string_table.h"
+#include "../xrCore/nextray_version.h"
 #include "script_engine.h"
 #include "ai_space.h"
 
@@ -169,6 +170,8 @@ LPCSTR get_modded_exes_name() {
 	return result.c_str();
 }
 
+LPCSTR get_nextray_version() { return NEXTRAY_VERSION; }
+
 // demonized: get modded exes version
 xr_string get_modded_exes_version_string() {
 	std::string s = std::to_string(get_modded_exes_version());
@@ -263,6 +266,7 @@ void CScriptIniFile::script_register(lua_State* L)
 		// demonized: get modded exes version
 		def("get_modded_exes_version", &get_modded_exes_version),
 		def("get_modded_exes_name", &get_modded_exes_name),
+		def("get_nextray_version", &get_nextray_version),
 
 		// demonized: get translation strings table
 		def("get_string_table", &get_string_table)

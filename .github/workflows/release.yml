@@ -68,6 +68,15 @@ jobs:
       with:
         msbuild-architecture: "x64"
 
+    - name: Version
+      # The tag's version into the exes (src/xrCore/nextray_version.h): main menu, log, crash reports
+      run: |
+        $v = "${{ github.ref_name }}".TrimStart("v")
+        if ($v -notmatch '^[0-9A-Za-z.+-]+$') { throw "unexpected version '$v'" }
+        $h = "src/xrCore/nextray_version.h"
+        (get-content $h) -replace '^#define NEXTRAY_VERSION ".*"$', "#define NEXTRAY_VERSION ""$v""" | set-content $h
+        if (!(select-string -path $h -pattern "NEXTRAY_VERSION ""$v""" -simplematch -quiet)) { throw "version not set" }
+
     - name: Build ${{ env.BUILD_CONF }}
       # /m: independent projects build at the same time (files within a project already compile in parallel)
       run: msbuild /m /p:Configuration=${{ env.BUILD_CONF }} ${{ env.SOLUTION_FILE_PATH }}
@@ -126,7 +135,7 @@ jobs:
 
         **Install:** extract ``neXt-Ray-$v.zip`` into your ``Anomaly`` folder after moving ``bin\AnomalyDX11AVX.exe`` and the ``gamedata`` folder into a backup, then add ``Anomaly (DX12-AVX)`` to Mod Organizer. The steps, updating and uninstalling: [Install](https://github.com/${{ github.repository }}#install).
 
-        **Requirements:** GAMMA 0.9.5 as its launcher installs it, a CPU with AVX. DLSS needs an NVIDIA RTX GPU (on Linux with Proton: ``PROTON_ENABLE_NVAPI=1``).
+        **Requirements:** GAMMA 0.9.5 as its launcher installs it (GAMMA's main branch; not GAMMA dev2, which ships a newer engine), a CPU with AVX. DLSS needs an NVIDIA RTX GPU (on Linux with Proton: ``PROTON_ENABLE_NVAPI=1``).
 
         ``neXt-Ray-$v-pdb.zip`` has the debug symbols for crash analysis and is not needed to play.
 

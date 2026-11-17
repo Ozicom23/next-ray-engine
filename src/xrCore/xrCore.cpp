@@ -33,6 +33,7 @@ static u32 init_counter = 0;
 //. extern xr_vector<shared_str>* LogFile;
 
 // demonized: print modded exes version
+#include "nextray_version.h"
 extern int get_modded_exes_version();
 extern xr_string get_modded_exes_version_string();
 extern LPCSTR get_modded_exes_name();
@@ -148,6 +149,7 @@ void xrCore::_initialize(LPCSTR _ApplicationName, xrLogger::LogCallback cb, BOOL
 
 		// demonized: Print modded exes version
 		Msg("%s version %s\n", get_modded_exes_name(), get_modded_exes_version_string().c_str());
+		Msg("neXt-Ray %s\n", NEXTRAY_VERSION);
 		Msg("Game started: %s\n", timeInDMYHMSMMM().c_str());
 		EFS._initialize();
 #ifdef DEBUG

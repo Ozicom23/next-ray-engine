@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "crash_report.h"
+#include "nextray_version.h"
 #include "mod_origin.h"
 #include <dbghelp.h>
 #include <algorithm>
@@ -392,8 +393,8 @@ LPCSTR write(LPCSTR what, const void* exception_context, void* thread)
 		if (!gmtime_s(&tmv, &tt))
 			strftime(built, sizeof(built), "%Y-%m-%d %H:%M UTC", &tmv);
 	}
-	fprintf(f, "neXt-Ray crash report, %04d-%02d-%02d %02d:%02d:%02d\r\n", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute,
-		t.wSecond);
+	fprintf(f, "neXt-Ray %s crash report, %04d-%02d-%02d %02d:%02d:%02d\r\n", NEXTRAY_VERSION, t.wYear, t.wMonth,
+		t.wDay, t.wHour, t.wMinute, t.wSecond);
 	fprintf(f, "%s (built %s)%s, MO2 profile: %s\r\n", exe_name, built, wine_version().c_str(),
 		mod_origin::profile()[0] ? mod_origin::profile() : "-");
 	char context[1024] = "";
