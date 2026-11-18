@@ -266,7 +266,8 @@ local function tdss_flush()
 	tdss_loading = false
 	local pending = tdss_pending
 	tdss_pending = {}
-	local normalize = z_3dss_shader_switcher.nextray_normalize
+	local normalize = tdss_on and z_3dss_shader_switcher.nextray_normalize
+	if not normalize then return end
 	for id in pairs(pending) do
 		local obj = level.object_by_id(id)
 		if obj and not tdss_held_by_other(obj) then
@@ -395,7 +396,7 @@ local reported = false
 local reported_after = 0
 
 local function actor_on_update()
-	if tdss_loading and tdss_deadline and time_global() > tdss_deadline then tdss_flush() end
+	if tdss_on and tdss_loading and tdss_deadline and time_global() > tdss_deadline then tdss_flush() end
 	if da_on then da_update() end
 	if surge_on then surge_update() end
 	if not reported and time_global() > reported_after then
